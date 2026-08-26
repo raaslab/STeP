@@ -1,0 +1,55 @@
+{
+  "platform": {
+    "backend": "libero",
+    "workspace_bounds": {
+      "x": [-0.45, 0.55],
+      "y": [-0.20, 0.60],
+      "z": [0.78, 1.30]
+    },
+    "libero": {
+      "suite": "libero_spatial",
+      "task_id": 0,
+      "init_state_id": 0,
+      "camera_name": "agentview",
+      "camera_height": 256,
+      "camera_width": 256,
+      "horizon": 600
+    },
+    "libero_experiment": {
+      "notes": "Optional STL stress modifiers. Set timing_window, avoid_region, or spatial_offset here."
+    }
+  },
+  "entities": [],
+  "geometry": {},
+  "coordinate_convention": {
+    "frame": "LIBERO/robosuite world xy",
+    "left": "-x",
+    "right": "+x",
+    "front": "+y",
+    "back": "-y",
+    "offset_units": "meters"
+  },
+  "placement_defaults": {
+    "retreat_height_above_table": 0.28
+  },
+  "execution_proxy": {
+    "default_grasp_mode": "top",
+    "max_subtask_steps": 600,
+    "top_grasp_hover_z": 0.14,
+    "top_grasp_close_xy_tol": 0.055,
+    "top_grasp_close_z_tol": 0.025,
+    "env_horizon": 800,
+    "post_success_steps": 80,
+    "system2_recall_enabled": false,
+    "recall_on_subtask_success": true,
+    "recall_on_final_success": true,
+    "recall_failure_threshold": -0.02,
+    "recall_max_replans_per_run": 8,
+    "recall_scene_update": "relocalize",
+    "mpc_timing_enabled": true,
+    "mpc_timing_early_weight": 220.0,
+    "mpc_timing_deadline_weight": 55.0,
+    "mpc_timing_window_weight": 10.0,
+    "mpc_timing_early_hold_weight": 260.0
+  }
+}

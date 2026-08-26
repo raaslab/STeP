@@ -1,0 +1,35 @@
+{
+  "system2_plan": {
+    "type": "skill_graph",
+    "task_name": "Pick object",
+    "scene_summary": "Minimal direct STL pick example.",
+    "subtasks": [
+      {
+        "subtask_id": 0,
+        "skill": "pick",
+        "description": "Pick up the black bowl using a rim grasp.",
+        "params": {
+          "object": "akita_black_bowl_2",
+          "grasp_mode": "top",
+          "grasp_target": "rim",
+          "grasp_offset_xyz": [0.0, 0.045, 0.05]
+        },
+        "formula": {
+          "type": "and",
+          "children": [
+            {
+              "type": "eventually",
+              "interval": [0, 40],
+              "child": { "type": "predicate", "name": "PreGrasp", "args": ["akita_black_bowl_2", "top"] }
+            },
+            {
+              "type": "eventually",
+              "interval": [0, 90],
+              "child": { "type": "predicate", "name": "Grasped", "args": ["akita_black_bowl_2"] }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
