@@ -91,8 +91,8 @@ class PrivilegedTopDownGraspGenerator(GraspGenerator):
     by half its Z half-extent so the TCP lands at the object's mid-height
     rather than its base -- see the ``Grasped(object, height)`` mid-height
     convention already used by System 2's prompt, `step/system_two/prompts.py`
-    rule 7b), and build a pregrasp pose offset ``config.pregrasp_offset_m``
-    back along the approach direction.
+    rule 7b). ``PickSkill`` plans directly to this grasp pose -- there is no
+    separate pregrasp waypoint (see ``GraspCandidate``'s docstring).
     """
 
     def __init__(
@@ -139,7 +139,6 @@ class PrivilegedTopDownGraspGenerator(GraspGenerator):
         out: list[GraspCandidate] = []
         for i, yaw in enumerate(yaws):
             grasp_quat = quat_mul_wxyz(yaw_quat_wxyz(float(yaw)), _TOP_DOWN_QUAT_WXYZ)
-            pregrasp_center = grasp_center - self.config.pregrasp_offset_m * approach_dir_world
 
             width = self._estimate_width(extent, float(yaw)) if extent is not None else None
             score = self._score(width)
@@ -148,7 +147,6 @@ class PrivilegedTopDownGraspGenerator(GraspGenerator):
                 GraspCandidate(
                     object_name=object_name,
                     grasp_pose_world=np.concatenate([grasp_center, grasp_quat]),
-                    pregrasp_pose_world=np.concatenate([pregrasp_center, grasp_quat]),
                     approach_direction_world=approach_dir_world,
                     gripper_width=width,
                     generator_score=score,
@@ -187,13 +185,11 @@ class PrivilegedTopDownGraspGenerator(GraspGenerator):
             # straddle the rim wall) instead of tangent to it.
             yaw = theta - np.pi / 2.0
             grasp_quat = quat_mul_wxyz(yaw_quat_wxyz(float(yaw)), _TOP_DOWN_QUAT_WXYZ)
-            pregrasp_center = point_center - self.config.pregrasp_offset_m * approach_dir_world
 
             out.append(
                 GraspCandidate(
                     object_name=object_name,
                     grasp_pose_world=np.concatenate([point_center, grasp_quat]),
-                    pregrasp_pose_world=np.concatenate([pregrasp_center, grasp_quat]),
                     approach_direction_world=approach_dir_world,
                     gripper_width=width,
                     generator_score=score,

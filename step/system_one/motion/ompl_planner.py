@@ -162,10 +162,26 @@ class MotionPlanner:
                 failure_reason=PlannerFailureReason.TIMEOUT,
                 planning_time_sec=planning_time,
             )
-        if str(solved) not in ("Exact solution", "Approximate solution"):
+        if str(solved) != "Exact solution":
+            # OMPL's "Approximate solution" means RRTConnect's tree never
+            # actually connected start and goal within its budget -- it just
+            # hands back the path to whichever tree node ended up closest to
+            # the goal. Treating that as success (as an earlier version of
+            # this function did) silently executes a trajectory that doesn't
+            # reach the intended target: invisible while every plan call was
+            # a short hop (e.g. hovering a few cm above a container that
+            # `transport` had already carried the object next to), but a real
+            # failure once a single plan call has to cover a much longer
+            # distance (e.g. skipping `transport` entirely) and the default
+            # range/timeout aren't generous enough to fully connect.
+            reason = (
+                PlannerFailureReason.APPROXIMATE_SOLUTION_ONLY
+                if str(solved) == "Approximate solution"
+                else PlannerFailureReason.NO_PATH_FOUND
+            )
             return MotionPlan(
                 success=False,
-                failure_reason=PlannerFailureReason.NO_PATH_FOUND,
+                failure_reason=reason,
                 planning_time_sec=planning_time,
                 metadata={"status": str(solved)},
             )

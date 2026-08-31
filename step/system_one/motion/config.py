@@ -14,8 +14,16 @@ from typing import Any
 class GraspSampleConfig:
     num_yaw_samples: int = 8
     yaw_range: tuple[float, float] = (0.0, 3.141592653589793)  # [0, pi)
-    pregrasp_offset_m: float = 0.10
     lift_check_m: float = 0.05
+    # Standoff distance for the final approach segment (see PickSkill's
+    # module docstring): the long-range approach plans under strict
+    # FREE_SPACE to a point this far from the grasp pose along the approach
+    # direction, then a short final descent from there to the grasp pose is
+    # explicitly collision-validated (never blindly executed) under
+    # TERMINAL_APPROACH. Not a separate caller-visible stage -- PickSkill
+    # is still one atomic plan call -- just where the "no contact yet" ->
+    # "contact with the target is now expected" transition happens.
+    approach_standoff_m: float = 0.08
     # Rim/edge grasp strategy (bowls, mugs, cups: objects whose full
     # cross-section doesn't fit the gripper at any yaw). See
     # grasp_generator.PrivilegedTopDownGraspGenerator's module docstring.
@@ -27,8 +35,14 @@ class GraspSampleConfig:
 @dataclass
 class PlannerConfig:
     backend: str = "rrtconnect"
-    range: float = 0.05
-    timeout_sec: float = 5.0
+    range: float = 0.08
+    # Generous enough to cover a full pick-to-container move in one plan
+    # call (e.g. when `transport` is skipped and `place` has to connect
+    # wherever `pick` left the arm all the way to the goal container,
+    # rather than just a short final hover adjustment): RRTConnect only
+    # takes this long when it actually needs to, since it returns as soon
+    # as it finds an exact solution.
+    timeout_sec: float = 20.0
     seed: int = 0
     interpolation_density: int = 200
     validity_resolution: float = 0.01  # fraction of state-space extent per OMPL convention

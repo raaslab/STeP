@@ -25,15 +25,31 @@ class GraspCandidate:
     for LIBERO). Convert to XYZW only at the boundary of a library that requires it
     (e.g. ``scipy.spatial.transform.Rotation`` uses XYZW).
 
-    ``grasp_pose_world``/``pregrasp_pose_world`` are the **panda_hand / TCP frame**
-    target (i.e. what ``robot0_eef_pos``/the ``gripper0_right_grip_site`` reports),
-    already converted from any fingertip-frame grasp-net-style output -- see
+    ``grasp_pose_world`` is the **panda_hand / TCP frame** target (i.e. what
+    ``robot0_eef_pos``/the ``gripper0_right_grip_site`` reports), already
+    converted from any fingertip-frame grasp-net-style output -- see
     ``grasp_generator.hand_from_fingertip_pose``.
+
+    There is no separate pregrasp pose stored here -- ``PickSkill`` derives an
+    internal standoff point (this grasp pose offset back along
+    ``approach_direction_world``) itself, plans the long-range approach to it
+    under strict ``CollisionPhase.FREE_SPACE`` (no target contact permitted),
+    and then *validates* -- via ``CollisionChecker.check_edge``, never blind
+    execution -- a short final descent from there to this grasp pose under
+    ``TERMINAL_APPROACH``. An earlier version executed that final segment as
+    raw, unvalidated joint-space linear interpolation; a later attempt
+    replaced the whole two-leg structure with a single OMPL plan directly to
+    the grasp pose under ``TERMINAL_APPROACH`` for its entire length, which
+    fixed the missing validation but introduced a worse bug -- permitting
+    gripper<->target contact for the *entire* approach let RRTConnect bump or
+    shove the object anywhere along a long path, confirmed by a real run
+    where a bowl ended up ~5cm from its recorded position after a
+    "successful" plan. See ``PickSkill``'s module docstring for the full
+    history.
     """
 
     object_name: str
     grasp_pose_world: np.ndarray  # (7,) [x, y, z, qw, qx, qy, qz]
-    pregrasp_pose_world: np.ndarray  # (7,) same layout, offset along -approach_direction
     approach_direction_world: np.ndarray  # (3,) unit vector, gripper -> object at contact
     gripper_width: float | None
     generator_score: float
@@ -41,7 +57,6 @@ class GraspCandidate:
 
     def __post_init__(self) -> None:
         self.grasp_pose_world = np.asarray(self.grasp_pose_world, dtype=np.float64).reshape(7)
-        self.pregrasp_pose_world = np.asarray(self.pregrasp_pose_world, dtype=np.float64).reshape(7)
         self.approach_direction_world = np.asarray(
             self.approach_direction_world, dtype=np.float64
         ).reshape(3)
@@ -53,14 +68,6 @@ class GraspCandidate:
     @property
     def grasp_quat_wxyz(self) -> np.ndarray:
         return self.grasp_pose_world[3:7]
-
-    @property
-    def pregrasp_position(self) -> np.ndarray:
-        return self.pregrasp_pose_world[:3]
-
-    @property
-    def pregrasp_quat_wxyz(self) -> np.ndarray:
-        return self.pregrasp_pose_world[3:7]
 
 
 # --------------------------------------------------------------------------- IK
@@ -114,6 +121,7 @@ class PlannerFailureReason(str, Enum):
     GOAL_IN_COLLISION = "goal_in_collision"
     NO_PATH_FOUND = "no_path_found"
     TIMEOUT = "timeout"
+    APPROXIMATE_SOLUTION_ONLY = "approximate_solution_only"
     PLANNER_UNAVAILABLE = "planner_unavailable"
 
 

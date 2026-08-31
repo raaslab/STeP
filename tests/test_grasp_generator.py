@@ -102,15 +102,6 @@ def test_grasp_quaternion_is_top_down_wxyz(libero_scene):
 
 
 @requires_libero
-def test_pregrasp_is_offset_along_approach_direction(libero_scene):
-    gen = PrivilegedTopDownGraspGenerator(GraspSampleConfig(num_yaw_samples=1, pregrasp_offset_m=0.12))
-    cand = gen.generate(libero_scene, ["alphabet_soup_1_main"])[0]
-    offset = cand.grasp_position - cand.pregrasp_position
-    assert np.isclose(np.linalg.norm(offset), 0.12)
-    assert np.allclose(offset / np.linalg.norm(offset), cand.approach_direction_world, atol=1e-9)
-
-
-@requires_libero
 def test_grasp_height_is_object_aabb_center_not_body_origin(libero_scene):
     """Grasp height should be the object's actual AABB center (origin +
     center_offset), not just its body-frame origin -- a body's collision

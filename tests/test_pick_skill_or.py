@@ -72,12 +72,11 @@ def test_scene_state_untouched_after_full_pick_evaluation(libero_scene):
 def test_no_feasible_candidate_reports_structured_failure(libero_scene):
     skill = _build_skill(libero_scene, num_yaw_samples=1, timeout_sec=0.05)
     start_q = libero_scene.get_qpos(JOINT_NAMES)
-    # An absurdly far, nonexistent-in-reach target forces every candidate to
-    # fail IK -- exercised via a target far outside the workspace by asking
-    # for an object name that still resolves geometrically but pushing the
-    # generator's pregrasp far away is out of scope here; instead verify the
-    # *shape* of a no-candidates failure using an empty object set, which is
-    # the simplest deterministic way to hit NO_FEASIBLE_CANDIDATE.
+    # Forcing every candidate to fail IK would need an unreachable target
+    # constructed from real scene geometry, which is out of scope here;
+    # instead verify the *shape* of a no-candidates failure using an empty
+    # object set, which is the simplest deterministic way to hit
+    # NO_FEASIBLE_CANDIDATE.
     result = skill.execute(libero_scene, [], start_q)
     assert not result.success
     assert result.failure_reason == SkillFailureReason.NO_FEASIBLE_CANDIDATE

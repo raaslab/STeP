@@ -191,17 +191,11 @@ class LiberoPickAdapter:
         object_body_name = plan_result.selected_grasp.object_name  # real MuJoCo body name
         object_canonical_name = canonical_by_body.get(object_body_name, object_body_name)
 
-        # Append a short final-approach segment from pregrasp -> grasp, under
-        # TERMINAL_APPROACH collision semantics (gripper<->target contact is
-        # expected here), interpolated at the same control rate.
-        pregrasp_q = traj.positions[-1]
-        scratch = scene.clone()
-        grasp_ik = IKSolver(joint_names=self.joint_names, site_name=self.ee_site).solve(
-            scratch, cand.grasp_position, cand.grasp_quat_wxyz, seed_q=pregrasp_q
-        )
-        approach_positions = (
-            np.linspace(pregrasp_q, grasp_ik.q, 15) if grasp_ik.success else traj.positions[-1:]
-        )
+        # PickSkill already validated (via check_edge, not blind execution --
+        # see its module docstring) a short final descent from the standoff
+        # point to the grasp pose; append it here, same as the OMPL-planned
+        # standoff leg, at the same control rate.
+        approach_positions = np.asarray(plan_result.planned_trajectory.metadata["approach_positions"])
         full_reference = np.concatenate([traj.positions, approach_positions[1:]], axis=0)
         approach_start_idx = len(traj.positions)
 
