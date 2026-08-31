@@ -133,6 +133,7 @@ class BaseManipulationEnv:
         self.close_counter = 0
         self.grasp_retry_counter = 0
         self.grasp_offset_override: np.ndarray | None = None
+        self.active_object_height: float | None = None
         self.step_idx = 0
         self.last_raw_obs: Dict[str, Any] | None = None
         self.last_target_xyz = np.zeros(3, dtype=np.float32)
@@ -458,6 +459,29 @@ class BaseManipulationEnv:
         except Exception:
             return None, None
 
+    def _grow_workspace_bounds_to_include(
+        self, points: np.ndarray, margin: float = 0.05
+    ) -> None:
+        """Widen (never shrink) the workspace box so it covers known object
+        positions, plus a margin.
+
+        `configs/libero_template.json`'s workspace_bounds is a single static
+        box tuned for one scene layout (the kitchen-tabletop demo). Other
+        scenes/suites place objects outside that box on some axis, which
+        silently clips the pick/place target to the box edge and the arm can
+        never actually reach the object (see the table_z fix in
+        LiberoManipulationEnv for the same class of bug on the z axis).
+        """
+        if self.workspace_min_xyz is None or self.workspace_max_xyz is None:
+            return
+        pts = np.asarray(points, dtype=np.float32).reshape(-1, 3)
+        if pts.size == 0:
+            return
+        lo = pts.min(axis=0) - float(margin)
+        hi = pts.max(axis=0) + float(margin)
+        self.workspace_min_xyz = np.minimum(self.workspace_min_xyz, lo).astype(np.float32)
+        self.workspace_max_xyz = np.maximum(self.workspace_max_xyz, hi).astype(np.float32)
+
     def _clip_xyz_to_workspace(self, xyz: np.ndarray) -> np.ndarray:
         arr = np.asarray(xyz, dtype=np.float32).copy()
         if self.workspace_min_xyz is None or self.workspace_max_xyz is None:
@@ -630,6 +654,14 @@ class BaseManipulationEnv:
             raise ValueError(f"grasp offset must have 3 values, got {offset_xyz!r}")
         self.grasp_offset_override = arr[:3].astype(np.float32)
 
+    def set_active_object_height(self, height: float | None) -> None:
+        """Set the active object's known height (m), e.g. from the Grasped
+        predicate's height arg. Used by :meth:`_effective_grasp_rim_offset` to
+        grasp at roughly mid-height instead of the object's base pose, for
+        non-rim objects (cans, bottles, boxes) whose base is at table level.
+        """
+        self.active_object_height = None if height is None else float(height)
+
     def update_scene_object(self, name: str, xyz: np.ndarray) -> None:
         """Record the world XYZ of a named scene entity."""
         self.scene_objects[str(name)] = np.asarray(xyz, dtype=np.float32).copy()
@@ -729,6 +761,13 @@ class BaseManipulationEnv:
             return self.grasp_offset_override.astype(np.float32)
         if self._is_rim_object():
             return self.mode.grasp_rim_offset
+        if self.active_object_height is not None:
+            # cube_pos is the object's base pose (table level), not its
+            # centroid, so a zero offset drives the gripper down into tall
+            # objects (cans, bottles, boxes) before it ever closes. Grasp at
+            # roughly mid-height instead, using the known object height.
+            half_height = float(np.clip(self.active_object_height * 0.5, 0.0, 0.15))
+            return np.array([0.0, 0.0, half_height], dtype=np.float32)
         return np.zeros(3, dtype=np.float32)
 
     def _effective_top_close_xy_tol(self) -> float:

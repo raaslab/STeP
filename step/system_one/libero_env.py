@@ -125,13 +125,29 @@ class LiberoManipulationEnv(BaseManipulationEnv):
             low = -np.ones(7, dtype=np.float32)
             high = np.ones(7, dtype=np.float32)
 
-        table_z = float(self.platform_cfg.get("table_z", 0.8))
+        # Tabletop domains (e.g. libero_spatial) expose table_offset on the arena;
+        # floor domains (e.g. libero_object's EmptyArena) don't have a table at
+        # all, so fall back to floor level (z=0) rather than the tabletop height.
+        table_z = float(self.platform_cfg.get("table_z", 0.0))
         try:
             table_z = float(self.env.env.model.mujoco_arena.table_offset[2])
         except Exception:
             pass
 
         exec_proxy = self.scene_context.get("execution_proxy", {}) or {}
+
+        # configs/libero_template.json's workspace_bounds.z is tuned for the
+        # kitchen-tabletop domain (table_z ~0.8). Floor domains (libero_object,
+        # etc.) have table_z ~0.0, so that absolute z-band would clip every
+        # pick/place target up to ~0.78 and the arm would never descend to the
+        # object. Re-anchor the z band to the detected table height whenever
+        # the configured band doesn't actually bracket it.
+        workspace_bounds = self.platform_cfg.get("workspace_bounds")
+        if workspace_bounds:
+            z_range = workspace_bounds.get("z")
+            if z_range and not (float(z_range[0]) <= table_z <= float(z_range[1])):
+                workspace_bounds = dict(workspace_bounds)
+                workspace_bounds["z"] = [table_z - 0.05, table_z + 0.55]
 
         super().__init__(
             mode=mode,
@@ -145,7 +161,7 @@ class LiberoManipulationEnv(BaseManipulationEnv):
             keepout_radius=keepout_radius,
             carry_height_above_table=carry_height_above_table,
             retreat_height_above_table=retreat_height_above_table,
-            workspace_bounds=self.platform_cfg.get("workspace_bounds"),
+            workspace_bounds=workspace_bounds,
             sdf_constraints=parse_sdf_constraints(self.scene_context),
             mpc_timing_enabled=mpc_timing_enabled,
             mpc_timing_early_weight=mpc_timing_early_weight,
@@ -202,6 +218,8 @@ class LiberoManipulationEnv(BaseManipulationEnv):
         self._grasped_latch = False
         self._active_obj_at_grasp = None
         self._refresh_scene_objects(obs)
+        if self.scene_objects:
+            self._grow_workspace_bounds_to_include(np.stack(list(self.scene_objects.values())))
         return obs
 
     def _step_backend(self, full_action: np.ndarray):
@@ -334,6 +352,22 @@ class LiberoManipulationEnv(BaseManipulationEnv):
             return False
         return False
 
+    def _is_success(self) -> bool:
+        # Trust the benchmark's own ground-truth goal check over the generic
+        # base-class heuristic. LIBERO's bddl domains force
+        # done = self._check_success() on every step (see
+        # Libero_Floor_Manipulation.step()), so an episode can end the instant
+        # the task's real goal is met -- e.g. the object lands in its target
+        # container -- even while it's still grasped, before the base class's
+        # own (stricter, "not grasped") _is_success() would agree. Without
+        # this, a genuinely successful place gets reported as a failure
+        # because System 1's release/retreat state machine never gets to run
+        # another step.
+        try:
+            return bool(self.env.env._check_success())
+        except Exception:
+            return super()._is_success()
+
     # --------------------------------------------------------- rendering
 
     def render_rgb_frame(
@@ -345,19 +379,24 @@ class LiberoManipulationEnv(BaseManipulationEnv):
         cam = camera_name or self.camera_name
         # Most LIBERO obs dicts expose '<camera>_image'.  If possible, use a
         # fresh observation image; otherwise call the underlying renderer.
+        # All three sources ultimately come from MuJoCo's raw sim.render(),
+        # whose OpenGL row order is bottom-to-top; without robosuite's private
+        # macro file (IMAGE_CONVENTION="opencv") flipping it, images come out
+        # upside down when saved/displayed top-to-bottom, so flip explicitly
+        # here rather than depending on that optional macro setup.
         if self.last_raw_obs is not None:
             for key in (f"{cam}_image", f"{self.camera_name}_image", "agentview_image", "robot0_eye_in_hand_image"):
                 if key in self.last_raw_obs:
                     frame = np.asarray(self.last_raw_obs[key], dtype=np.uint8)
                     if frame.ndim == 3:
-                        return frame.copy()
+                        return frame[::-1].copy()
         try:
             frame = self.env.render(height=int(height), width=int(width), camera_name=cam)
-            return np.asarray(frame, dtype=np.uint8).copy()
+            return np.asarray(frame, dtype=np.uint8)[::-1].copy()
         except Exception:
             try:
                 frame = self.env.env.sim.render(camera_name=cam, height=int(height), width=int(width))
-                return np.asarray(frame, dtype=np.uint8).copy()
+                return np.asarray(frame, dtype=np.uint8)[::-1].copy()
             except Exception:
                 return np.zeros((int(height), int(width), 3), dtype=np.uint8)
 

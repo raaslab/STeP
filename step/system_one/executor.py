@@ -53,7 +53,6 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         video_flip_vertical: bool = False,
         video_flip_horizontal: bool = False,
         env_factory: "callable | None" = None,
-        mock_robot: bool = False,
         step_callback: Optional[StepCallback] = None,
         step_callback_every_n: int = 1,
         original_prompt: str | None = None,
@@ -100,19 +99,15 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         self._video_current_robustness = ""
         self._video_current_subtask: dict[str, Any] | None = None
         self.env_factory = env_factory
-        self.mock_robot = bool(mock_robot)
         self.step_callback: Optional[StepCallback] = step_callback
         self.step_callback_every_n: int = max(1, int(step_callback_every_n))
         self._step_callback_counter: int = 0
 
-        backend = scene_context.get("platform", {}).get("backend", "sim")
-        # Reflection is enabled by default for real. For sim, enable explicitly
+        # LIBERO-only build: reflection is off by default, enable explicitly
         # with execution_proxy.reflection_enabled=true.
-        self.reflection_enabled: bool = bool(
-            exec_proxy.get("reflection_enabled", backend == "real")
-        )
+        self.reflection_enabled: bool = bool(exec_proxy.get("reflection_enabled", False))
         self.reflection_scene_update: str = str(
-            exec_proxy.get("reflection_scene_update", "discover" if backend == "real" else "none")
+            exec_proxy.get("reflection_scene_update", "none")
         ).lower()
         self.reflection_model: str | None = (
             exec_proxy.get("reflection_model")
@@ -456,6 +451,111 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         env.close_counter = 0
         self._refresh_subtask_bookkeeping(env)
 
+    def _motion_backend(self, env: BaseManipulationEnv) -> str:
+        """``platform.libero.motion_backend`` from scene_context: "legacy"
+        (default -- the stage machine/STLCartesianMPC this whole file
+        otherwise implements) or "ompl_mpc" (the new grasp-gen/IK/RRTConnect/
+        MPC pipeline in ``step/system_one/motion/``, wired for ``pick`` and
+        ``place``; ``transport`` still runs on the legacy path even in this
+        mode -- getting the carried object from "just picked" to "roughly
+        above the goal" doesn't need collision-aware planning as urgently as
+        the final insertion into a container does, and this keeps the
+        integration's scope bounded)."""
+        if str(self.scene_context.get("platform", {}).get("backend")) != "libero":
+            return "legacy"
+        return str(
+            self.scene_context.get("platform", {}).get("libero", {}).get("motion_backend", "legacy")
+        )
+
+    def _run_pick_with_motion_pipeline(
+        self, env: BaseManipulationEnv, sub: dict[str, Any]
+    ) -> tuple[bool, int, dict[str, Any]]:
+        from .motion.config import MotionConfig
+        from .motion.libero_pick_adapter import LiberoPickAdapter
+
+        params = sub.get("params", {}) or {}
+        object_set = params.get("object_candidates")
+        if not object_set:
+            single = self.resolver.canonical(params.get("object"))
+            object_set = [single] if single is not None else []
+
+        motion_config = MotionConfig.from_scene_context(self.scene_context)
+        adapter = LiberoPickAdapter(env, motion_config)
+        max_steps = int(self.max_subtask_steps) if self.max_subtask_steps is not None else 600
+        result, steps, attached_state = adapter.run(
+            object_set,
+            constraints={},
+            max_steps=max_steps,
+            step_callback=lambda: self._capture_video_frame(env),
+        )
+        # Persisted across subtasks so a later `place` on the new pipeline
+        # knows the grasp-relative transform/collision spheres of whatever
+        # this pick actually grabbed -- the attachment lives for the life of
+        # the executor, not just this one adapter call.
+        self._motion_attached_state = attached_state
+
+        status: dict[str, Any] = {
+            "success": bool(result.success),
+            "selected_object": result.selected_object,
+            "failure_reason": str(result.failure_reason),
+            "cost_breakdown": result.cost_breakdown,
+            "diagnostics": result.diagnostics,
+        }
+        if result.success and result.selected_object is not None:
+            # NOTE: this only sets the *env's* active object for anything read
+            # before the next subtask's own dispatch runs. A later transport/
+            # place subtask's `params.object` still wins if it names a
+            # concrete (possibly different) entity -- true "OR-set commitment
+            # propagates to later subtasks" would need the plan itself to
+            # reference "whatever pick just selected" (e.g. a resolver-level
+            # placeholder), which isn't wired up in this pass.
+            env.set_active_object(result.selected_object)
+        return bool(result.success), steps, status
+
+    def _run_place_with_motion_pipeline(
+        self, env: BaseManipulationEnv, sub: dict[str, Any]
+    ) -> tuple[bool, int, dict[str, Any]]:
+        from .motion.config import MotionConfig
+        from .motion.libero_place_adapter import LiberoPlaceAdapter
+
+        attached_state = getattr(self, "_motion_attached_state", None)
+        if attached_state is None:
+            return False, 0, {
+                "success": False,
+                "failure_reason": "no_attached_object",
+                "detail": (
+                    "place (ompl_mpc backend) requires a prior pick on the same backend to have "
+                    "attached an object -- none is recorded (either pick used motion_backend=legacy, "
+                    "or pick failed before attaching)."
+                ),
+            }
+
+        params = sub.get("params", {}) or {}
+        goal_name = self.resolver.canonical(params.get("goal_region") or params.get("goal"))
+        if goal_name is None:
+            return False, 0, {"success": False, "failure_reason": "no_goal_region", "detail": "place subtask has no params.goal_region"}
+
+        motion_config = MotionConfig.from_scene_context(self.scene_context)
+        adapter = LiberoPlaceAdapter(env, motion_config)
+        max_steps = int(self.max_subtask_steps) if self.max_subtask_steps is not None else 400
+        result, steps = adapter.run(
+            goal_name,
+            attached_state,
+            max_steps=max_steps,
+            step_callback=lambda: self._capture_video_frame(env),
+        )
+        if result.success:
+            self._motion_attached_state = None  # detached -- next pick must re-attach
+
+        status: dict[str, Any] = {
+            "success": bool(result.success),
+            "selected_object": result.selected_object,
+            "failure_reason": str(result.failure_reason),
+            "cost_breakdown": result.cost_breakdown,
+            "diagnostics": result.diagnostics,
+        }
+        return bool(result.success), steps, status
+
     @staticmethod
     def _grasp_offset_from_params(params: dict[str, Any]) -> list[float] | None:
         raw = params.get("grasp_offset_xyz") or params.get("grasp_offset")
@@ -466,6 +566,23 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         if not isinstance(raw, (list, tuple)) or len(raw) < 3:
             raise ValueError(f"grasp_offset_xyz must be a 3-element list, got {raw!r}")
         return [float(raw[0]), float(raw[1]), float(raw[2])]
+
+    @staticmethod
+    def _object_height_from_subtask(sub: dict[str, Any]) -> float | None:
+        """Read an optional object-height hint (m) off the subtask's Grasped
+        predicate, e.g. {"type": "predicate", "name": "Grasped",
+        "args": ["alphabet_soup_1", 0.09]}. Lets System 2 tell System 1 how
+        deep to descend for non-rim objects instead of grasping at their base.
+        """
+        formula = sub.get("formula")
+        if not isinstance(formula, dict):
+            return None
+        from ..system_two.stl_plan import find_predicate_args
+
+        args = find_predicate_args(formula, "Grasped")
+        if not args or len(args) < 2 or not isinstance(args[1], (int, float)):
+            return None
+        return float(args[1])
 
     def _dynamic_goal_reference_for_subtask(
         self, env: BaseManipulationEnv, sub: dict[str, Any]
@@ -479,7 +596,7 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         a hallucinated point.
         """
         params = sub.get("params", {}) if isinstance(sub, dict) else {}
-        goal_name = self.resolver.canonical(params.get("goal_region"))
+        goal_name = self.resolver.canonical(params.get("goal_region") or params.get("goal"))
         if goal_name is None:
             return None
         if goal_name not in self.resolver.dynamic_goal_reference_names():
@@ -534,7 +651,7 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                 env.goal_radius = float(goal_radius)
             return {"mode": "explicit_point", "goal_xy": env.goal_xy.copy()}
 
-        goal_name = self.resolver.canonical(params.get("goal_region"))
+        goal_name = self.resolver.canonical(params.get("goal_region") or params.get("goal"))
         if goal_name is not None:
             env.goal_reference_name = None
             env.goal_z_override = None if goal_z is None else float(goal_z)
@@ -846,7 +963,6 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
             runtime=runtime,
             render=self.render,
             env_horizon=runtime.get("_computed_env_horizon", self.env_horizon),
-            mock_robot=self.mock_robot,
             debug_dir=debug_dir,
         )
 
@@ -909,72 +1025,6 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
             outdir=outdir,
             capture_initial_video=capture_initial_video,
         )
-
-    def _is_real_simple_env(self, env: BaseManipulationEnv) -> bool:
-        return (
-            self.scene_context.get("platform", {}).get("backend") == "real"
-            and hasattr(env, "simple_mpc_move_to")
-            and hasattr(env, "simple_pick")
-        )
-
-    def _resolve_goal_xyz_for_subtask(
-        self,
-        env: BaseManipulationEnv,
-        sub: dict[str, Any],
-    ) -> np.ndarray:
-        params = sub.get("params", {})
-
-        # Prefer live dynamic goal references over explicit point coordinates.
-        # This mirrors _configure_goal_for_subtask(...) and is especially
-        # important for the real-simple executor, whose blocking primitives take
-        # a concrete target_xyz.
-        live_ref = self._dynamic_goal_reference_for_subtask(env, sub)
-        if live_ref is not None:
-            ref = env._object_pos_by_name(live_ref)
-            if ref is not None:
-                anchor_xy = np.asarray(ref[:2], dtype=np.float32)
-                if sub.get("skill") == "place":
-                    active_name = self.resolver.canonical(params.get("object"))
-                    exclude = {str(active_name)} if active_name else set()
-                    support_top = None
-                    if hasattr(env, "_support_top_z_near_xy"):
-                        try:
-                            support_top = env._support_top_z_near_xy(
-                                anchor_xy,
-                                exclude_names=exclude,
-                                include_pos=ref,
-                            )
-                        except Exception:
-                            support_top = None
-                    clearance = float(getattr(env, "object_place_clearance_z", 0.044))
-                    z = float((support_top if support_top is not None else ref[2]) + clearance)
-                else:
-                    z = float(getattr(env, "carry_z", ref[2]))
-                return np.asarray([float(anchor_xy[0]), float(anchor_xy[1]), z], dtype=np.float32)
-
-        goal_x = params.get("goal_x")
-        goal_y = params.get("goal_y")
-        goal_z = params.get("goal_z")
-        if goal_x is not None and goal_y is not None:
-            z = float(goal_z) if goal_z is not None else float(getattr(env, "carry_z", 0.20))
-            return np.asarray([float(goal_x), float(goal_y), z], dtype=np.float32)
-
-        goal_name = self.resolver.canonical(params.get("goal_region"))
-        if goal_name is not None:
-            ref = env._object_pos_by_name(goal_name)
-            if ref is not None:
-                z = float(goal_z) if goal_z is not None else float(ref[2])
-                return np.asarray([float(ref[0]), float(ref[1]), z], dtype=np.float32)
-            _, goal_xy, _, _ = self.resolver.resolve_goal(goal_name)
-            z = float(goal_z) if goal_z is not None else float(
-                self.scene_context.get("placement_defaults", {}).get("table_goal_z", 0.03)
-            )
-            return np.asarray([float(goal_xy[0]), float(goal_xy[1]), z], dtype=np.float32)
-
-        # No explicit goal: stay over the active object at carry height.
-        active = env._cube_pos(env.last_raw_obs) if env.last_raw_obs is not None else np.zeros(3, dtype=np.float32)
-        z = float(goal_z) if goal_z is not None else float(getattr(env, "carry_z", active[2]))
-        return np.asarray([float(active[0]), float(active[1]), z], dtype=np.float32)
 
     # ------------------------------------------------------ System-2 recall / replanning
 
@@ -1061,226 +1111,6 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         return original[executed:]
 
 
-    def _run_real_simple_subtasks(
-        self,
-        env: BaseManipulationEnv,
-        subtasks: list[dict[str, Any]],
-        *,
-        runtime: dict[str, Any],
-        outdir: str | Path | None,
-        capture_initial_video: bool,
-    ) -> dict[str, Any]:
-        """Run real robot subtasks and reflect after each high-level subtask."""
-        records: list[SkillExecutionRecord] = []
-        active_object: str | None = runtime.get("active_object_name")
-        active_subtasks = list(subtasks)
-        self._original_subtasks_for_reflection = list(subtasks)
-        success = True
-        aborted = False
-
-        if capture_initial_video:
-            self._capture_video_frame(env, force=True)
-
-        idx = 0
-        while idx < len(active_subtasks):
-            sub = active_subtasks[idx]
-            self._set_video_subtask_overlay(sub)
-            skill = sub["skill"]
-            params = sub.get("params", {})
-            obj = self.resolver.canonical(params.get("object"))
-            if obj is not None:
-                active_object = obj
-                env.set_active_object(obj)
-
-            task_steps_so_far = sum(int(getattr(r, "steps", 0) or 0) for r in records)
-            if hasattr(env, "configure_timing_windows"):
-                env.configure_timing_windows(
-                    self._timing_windows_for_subtask(sub),
-                    control_hz=self._control_hz_for_timing(env, runtime),
-                    task_elapsed_steps=task_steps_so_far,
-                )
-
-            def capture_callback(env_instance, info_dict):
-                self._capture_video_frame(env_instance)
-
-            try:
-                if skill == "pick":
-                    if active_object is None:
-                        raise RuntimeError("pick skill has no resolved object")
-                    grasp_mode = params.get("grasp_mode") or runtime.get("mode", "top")
-                    try:
-                        env.switch_mode(grasp_mode if grasp_mode in {"top", "left", "right"} else "top")
-                    except Exception:
-                        pass
-                    rec = env.simple_pick(active_object, step_callback=capture_callback)
-                    done = bool(rec.get("pick_success", rec.get("motion_success", rec.get("grasped", False))))
-                    if rec.get("motion_success", False) and not rec.get("grasped", False):
-                        print(
-                            "[executor] pick motion succeeded but gripper feedback did not report grasp; "
-                            f"continuing because require_grasp_feedback={rec.get('require_grasp_feedback', False)}"
-                        )
-                    steps = int(sum(r.get("steps", 0) for r in rec.get("records", [])))
-                    info = rec
-                elif skill == "transport":
-                    target = self._resolve_goal_xyz_for_subtask(env, sub)
-                    if params.get("goal_z") is None:
-                        target[2] = float(getattr(env, "carry_z", target[2]))
-                    rec = env.simple_transport(target, label=f"transport:{active_object or 'object'}", step_callback=capture_callback)
-                    done = all(bool(r.get("reached", False)) for r in rec.get("records", []))
-                    steps = int(sum(r.get("steps", 0) for r in rec.get("records", [])))
-                    info = rec
-                elif skill == "place":
-                    target = self._resolve_goal_xyz_for_subtask(env, sub)
-                    rec = env.simple_place(target, step_callback=capture_callback)
-                    # Place success is evaluated by the reflection pass too; the
-                    # low-level routine is considered complete once its motion
-                    # sequence executes.
-                    done = True
-                    steps = int(sum(r.get("steps", 0) for r in rec.get("records", [])))
-                    info = rec
-                else:
-                    raise NotImplementedError(f"Real simple executor does not implement skill {skill!r}")
-
-                timing_violation = self._timing_window_violation_for_subtask(
-                    env,
-                    sub,
-                    steps=steps,
-                    status=info if isinstance(info, dict) else {},
-                    runtime=runtime,
-                    task_steps=sum(int(getattr(r, "steps", 0) or 0) for r in records) + steps,
-                )
-                if timing_violation is not None:
-                    info = dict(info or {})
-                    info.update(timing_violation)
-                    done = False
-
-                record = SkillExecutionRecord(skill=skill, params=params, steps=steps, done=done, info=info)
-                records.append(record)
-
-                replacement_remaining, should_abort, reflection_result = self._maybe_reflect_after_subtask(
-                    env,
-                    active_subtasks=active_subtasks,
-                    subtask_index=idx,
-                    record=record,
-                    records=records,
-                    outdir=outdir,
-                )
-                if reflection_result is not None:
-                    record.info = dict(record.info or {})
-                    record.info["reflection"] = reflection_result
-                    self._set_video_reflection_overlay(reflection_result)
-                    self._capture_video_frame(env, force=True)
-
-                if should_abort:
-                    aborted = True
-                    success = False
-                    break
-
-                if replacement_remaining is not None:
-                    active_subtasks = self._merge_reflection_replacement(
-                        active_subtasks=active_subtasks,
-                        subtask_index=idx,
-                        replacement_remaining=replacement_remaining,
-                        reflection_result=reflection_result,
-                    )
-
-                if not done and replacement_remaining is None:
-                    success = False
-                    break
-
-                idx += 1
-            except Exception as exc:
-                record = SkillExecutionRecord(skill=skill, params=params, steps=0, done=False, info={"error": str(exc)})
-                records.append(record)
-                replacement_remaining, should_abort, reflection_result = self._maybe_reflect_after_subtask(
-                    env,
-                    active_subtasks=active_subtasks,
-                    subtask_index=idx,
-                    record=record,
-                    records=records,
-                    outdir=outdir,
-                )
-                if reflection_result is not None:
-                    record.info["reflection"] = reflection_result
-                    self._set_video_reflection_overlay(reflection_result)
-                    self._capture_video_frame(env, force=True)
-                if replacement_remaining is not None and not should_abort:
-                    active_subtasks = self._merge_reflection_replacement(
-                        active_subtasks=active_subtasks,
-                        subtask_index=idx,
-                        replacement_remaining=replacement_remaining,
-                        reflection_result=reflection_result,
-                    )
-                    idx += 1
-                    continue
-                success = False
-                aborted = bool(should_abort)
-                break
-
-        final_repair_batches_used = 0
-        final_checked = False
-        # End-of-task verifier. If it returns a final repair plan, execute it
-        # once through the same real-simple loop by extending active_subtasks.
-        while (
-            not aborted
-            and self.reflection_enabled
-            and self.final_reflection_enabled
-            and not final_checked
-        ):
-            success_so_far = bool(
-                success
-                and records
-                and (records[-1].done or self._reflection_repairs_used > 0)
-                and not self._unexecuted_original_subtasks(records)
-            )
-            final_remaining, final_abort, final_result = self._maybe_reflect_at_end(
-                env,
-                active_subtasks=active_subtasks,
-                records=records,
-                outdir=outdir,
-                success_so_far=success_so_far,
-                final_repair_batches_used=final_repair_batches_used,
-            )
-            if final_abort:
-                aborted = True
-                success = False
-                break
-            if final_remaining is not None:
-                active_subtasks = active_subtasks + final_remaining
-                final_repair_batches_used += 1
-                # Execute the final repair subtasks inline.
-                while idx < len(active_subtasks):
-                    # Re-enter the outer loop by breaking out to the existing
-                    # body is awkward here, so stop after requesting final repairs.
-                    # The generic executor path below fully executes final repairs;
-                    # real-simple final repairs are reported for the next prompt.
-                    break
-            final_checked = True
-
-        summary = {
-            "success": bool(success and records and not aborted and (records[-1].done or self._reflection_repairs_used > 0)),
-            "final_reflection_enabled": bool(self.final_reflection_enabled),
-            "runtime_config": runtime,
-            "real_simple_executor": True,
-            "reflection_enabled": bool(self.reflection_enabled),
-            "reflection_history": self.reflection_history,
-            "records": [r.__dict__ for r in records],
-            "post_success_steps_requested": 0,
-            "post_success_steps_run": 0,
-            "post_success_final_status": {},
-            "video_path": None if self.video_path is None else str(self.video_path),
-            "video_frames": int(self._video_frame_count),
-            "final_status": env.status(),
-        }
-        if outdir is not None:
-            outdir = Path(outdir)
-            outdir.mkdir(parents=True, exist_ok=True)
-            (outdir / "execution_summary.json").write_text(
-                json.dumps(summary, indent=2, default=lambda x: x.tolist() if hasattr(x, "tolist") else x)
-            )
-        return summary
-
-
     def _run_subtasks_on_env(
         self,
         env: BaseManipulationEnv,
@@ -1292,15 +1122,6 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
     ) -> dict[str, Any]:
         if self.system2_recall_enabled:
             return self._run_subtasks_on_env_with_system2_recall(
-                env,
-                subtasks,
-                runtime=runtime,
-                outdir=outdir,
-                capture_initial_video=capture_initial_video,
-            )
-
-        if self._is_real_simple_env(env):
-            return self._run_real_simple_subtasks(
                 env,
                 subtasks,
                 runtime=runtime,
@@ -1412,6 +1233,8 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                         env.set_grasp_offset_override(
                             self._grasp_offset_from_params(sub.get("params", {}))
                         )
+                    if hasattr(env, "set_active_object_height"):
+                        env.set_active_object_height(self._object_height_from_subtask(sub))
                     grasp_mode = (
                         sub.get("params", {}).get("grasp_mode") or runtime["mode"]
                     )
@@ -1422,58 +1245,66 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                 else:
                     if hasattr(env, "set_grasp_offset_override"):
                         env.set_grasp_offset_override(None)
+                    if hasattr(env, "set_active_object_height"):
+                        env.set_active_object_height(None)
                     self._refresh_subtask_bookkeeping(env)
-                steps = 0
-                done = False
-                last_status: dict[str, Any] = {}
-                while self.max_subtask_steps is None or steps < int(self.max_subtask_steps):
-                    try:
-                        _, _, terminated, info = env.step_nominal()
-                    except ValueError as exc:
-                        # Robosuite raises "executing action in terminated episode"
-                        # if we step once past its horizon. Convert that into a
-                        # clean task failure summary instead of crashing.
-                        last_status = env.status()
-                        last_status["terminated_reason"] = f"backend_step_error: {exc}"
-                        last_status["backend_episode_terminated"] = True
-                        terminated = True
-                        done = False
-                        break
+                motion_backend = self._motion_backend(env)
+                if skill == "pick" and motion_backend == "ompl_mpc":
+                    done, steps, last_status = self._run_pick_with_motion_pipeline(env, sub)
+                elif skill == "place" and motion_backend == "ompl_mpc":
+                    done, steps, last_status = self._run_place_with_motion_pipeline(env, sub)
+                else:
+                    steps = 0
+                    done = False
+                    last_status: dict[str, Any] = {}
+                    while self.max_subtask_steps is None or steps < int(self.max_subtask_steps):
+                        try:
+                            _, _, terminated, info = env.step_nominal()
+                        except ValueError as exc:
+                            # Robosuite raises "executing action in terminated episode"
+                            # if we step once past its horizon. Convert that into a
+                            # clean task failure summary instead of crashing.
+                            last_status = env.status()
+                            last_status["terminated_reason"] = f"backend_step_error: {exc}"
+                            last_status["backend_episode_terminated"] = True
+                            terminated = True
+                            done = False
+                            break
 
-                    steps += 1
-                    self._capture_video_frame(env)
-                    self._fire_step_callback(env, info)
-                    if self.sleep > 0.0:
-                        time.sleep(self.sleep)
-                    done, last_status = self._skill_done(env, skill, dwell_counts)
+                        steps += 1
+                        self._capture_video_frame(env)
+                        self._fire_step_callback(env, info)
+                        if self.sleep > 0.0:
+                            time.sleep(self.sleep)
+                        done, last_status = self._skill_done(env, skill, dwell_counts)
 
-                    # If the active object gets knocked below the table during
-                    # a pick / transport / place, stop immediately instead of
-                    # continuing to chase an impossible target until timeout.
-                    pose_ok, pose_status = self._object_pose_valid_for_motion(env)
-                    if not pose_ok:
-                        last_status = pose_status
-                        terminated = True
-                        done = False
+                        # If the active object gets knocked below the table during
+                        # a pick / transport / place, stop immediately instead of
+                        # continuing to chase an impossible target until timeout.
+                        pose_ok, pose_status = self._object_pose_valid_for_motion(env)
+                        if not pose_ok:
+                            last_status = pose_status
+                            terminated = True
+                            done = False
 
-                    timing_violation = self._timing_window_violation_for_subtask(
-                        env,
-                        sub,
-                        steps=steps,
-                        status=last_status,
-                        runtime=runtime,
-                        task_steps=sum(int(getattr(r, "steps", 0) or 0) for r in records) + steps,
-                    )
-                    if timing_violation is not None:
-                        last_status = dict(last_status or env.status())
-                        last_status.update(timing_violation)
-                        terminated = True
-                        done = False
+                        timing_violation = self._timing_window_violation_for_subtask(
+                            env,
+                            sub,
+                            steps=steps,
+                            status=last_status,
+                            runtime=runtime,
+                            task_steps=sum(int(getattr(r, "steps", 0) or 0) for r in records) + steps,
+                        )
+                        if timing_violation is not None:
+                            last_status = dict(last_status or env.status())
+                            last_status.update(timing_violation)
+                            terminated = True
+                            done = False
 
-                    if terminated and bool(last_status.get("success", False)):
-                        done = True
-                    if done or terminated:
-                        break
+                        if terminated and bool(last_status.get("success", False)):
+                            done = True
+                        if done or terminated:
+                            break
 
                 if not done and not last_status:
                     last_status = env.status()

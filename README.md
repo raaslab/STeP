@@ -54,6 +54,13 @@ Each subtask only needs `subtask_id`, `skill`, `description`, `params`, and
 `formula`. Supported formula nodes are `true`, `predicate`, `not`, `and`,
 `implies`, `always`, `eventually`, and `until`.
 
+`Grasped` takes an optional second argument: the object's height in meters,
+e.g. `Grasped(object, 0.09)`. System 1 uses it to grasp at roughly the
+object's mid-height instead of its base pose (table level), which matters for
+tall non-rim objects like cans and bottles. Rim-grasp objects (bowls, mugs,
+...) should keep using `params.grasp_offset_xyz` (see the developer prompt's
+rule 7a) instead.
+
 ## Run A Local Smoke Test
 
 This validates and prints a prebuilt direct STL plan without calling the model:

@@ -102,6 +102,130 @@ def _validate_interval(interval: Any, path: str) -> list[str]:
     return []
 
 
+_LEGACY_PREGRASP_SKILLS = {"pregrasp", "pre_grasp", "pre-grasp"}
+_LEGACY_GRASP_SKILLS = {"grasp"}
+
+
+def normalize_legacy_pregrasp_grasp(subtasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge any adjacent (pregrasp, grasp)-shaped subtask pair into one
+    unified ``pick`` subtask.
+
+    Compatibility boundary for the unified ``Pick(object_or_object_set,
+    constraints)`` skill (``step/system_one/motion/pick_skill.py``): externally,
+    System 1 now expects exactly one ``pick`` subtask per grasp, with
+    PreGrasp/Grasped expressed as two predicate nodes *inside* that one
+    subtask's formula -- which is already the only shape today's schema/
+    prompt (`schemas/stl_plan_schema.json`, `step/system_two/prompts.py` rule 7)
+    ever produces. This function exists for any *external or legacy* plan data
+    that might still emit them as two separate subtasks (e.g. an older
+    task-spec compiler, a hand-authored eval plan, or a different System 2
+    version) -- it is a no-op on any plan already shaped like today's.
+
+    Detects a subtask pair shaped like separate pregrasp/grasp steps by either
+    (a) an explicit legacy ``skill`` value (``"pregrasp"``/``"grasp"``, not in
+    the current schema's enum) or (b) a ``pick``-skill subtask whose formula
+    contains only a ``PreGrasp`` predicate immediately followed by another
+    subtask for the same object whose formula contains only a ``Grasped``
+    predicate. Merges the pair into one ``pick`` subtask combining both
+    formulas under ``and`` and re-numbers ``subtask_id`` sequentially.
+    """
+    merged: list[dict[str, Any]] = []
+    i = 0
+    while i < len(subtasks):
+        cur = subtasks[i]
+        nxt = subtasks[i + 1] if i + 1 < len(subtasks) else None
+        if nxt is not None and _is_legacy_pregrasp_grasp_pair(cur, nxt):
+            merged.append(_merge_pregrasp_grasp(cur, nxt))
+            i += 2
+        else:
+            merged.append(dict(cur))
+            i += 1
+    for idx, sub in enumerate(merged):
+        sub["subtask_id"] = idx
+    return merged
+
+
+def _is_legacy_pregrasp_grasp_pair(cur: dict[str, Any], nxt: dict[str, Any]) -> bool:
+    cur_skill = str(cur.get("skill", "")).lower()
+    nxt_skill = str(nxt.get("skill", "")).lower()
+    cur_obj = (cur.get("params") or {}).get("object")
+    nxt_obj = (nxt.get("params") or {}).get("object")
+    same_object = cur_obj is None or nxt_obj is None or cur_obj == nxt_obj
+    if not same_object:
+        return False
+    if cur_skill in _LEGACY_PREGRASP_SKILLS and nxt_skill in _LEGACY_GRASP_SKILLS:
+        return True
+    if cur_skill == "pick" and nxt_skill in _LEGACY_GRASP_SKILLS | {"pick"}:
+        cur_only_pregrasp = _formula_only_contains(cur.get("formula"), {"PreGrasp"})
+        nxt_only_grasped = _formula_only_contains(nxt.get("formula"), {"Grasped"})
+        return cur_only_pregrasp and nxt_only_grasped
+    return False
+
+
+def _formula_only_contains(formula: Formula | None, allowed_names: set[str]) -> bool:
+    if not isinstance(formula, dict):
+        return False
+    names = _collect_predicate_names(formula)
+    return bool(names) and names.issubset(allowed_names)
+
+
+def _collect_predicate_names(formula: Formula) -> set[str]:
+    if not isinstance(formula, dict):
+        return set()
+    ftype = formula.get("type")
+    if ftype == "predicate":
+        name = formula.get("name")
+        return {name} if name else set()
+    names: set[str] = set()
+    for key in ("child", "left", "right"):
+        if key in formula:
+            names |= _collect_predicate_names(formula[key])
+    for child in formula.get("children", []) or []:
+        names |= _collect_predicate_names(child)
+    return names
+
+
+def _merge_pregrasp_grasp(cur: dict[str, Any], nxt: dict[str, Any]) -> dict[str, Any]:
+    params = dict(nxt.get("params") or {})
+    for k, v in (cur.get("params") or {}).items():
+        params.setdefault(k, v)
+    formula = {"type": "and", "children": [cur.get("formula", {"type": "true"}), nxt.get("formula", {"type": "true"})]}
+    description = cur.get("description") or nxt.get("description") or "Pick (normalized from legacy pregrasp+grasp)"
+    return {
+        "subtask_id": cur.get("subtask_id", 0),
+        "skill": "pick",
+        "description": description,
+        "params": params,
+        "formula": formula,
+    }
+
+
+def find_predicate_args(formula: Formula, name: str) -> list[Any] | None:
+    """Recursively find the first predicate node named `name` and return its args.
+
+    Used to pull execution hints (e.g. an object-height arg on Grasped) out of
+    a subtask's formula tree without needing a full STL interpreter.
+    """
+    if not isinstance(formula, dict):
+        return None
+    ftype = formula.get("type")
+    if ftype == "predicate":
+        return formula.get("args") if formula.get("name") == name else None
+    if ftype in {"not", "always", "eventually"}:
+        return find_predicate_args(formula.get("child", {}), name)
+    if ftype == "and":
+        for child in formula.get("children", []) or []:
+            found = find_predicate_args(child, name)
+            if found is not None:
+                return found
+        return None
+    if ftype in {"implies", "until"}:
+        return find_predicate_args(formula.get("left", {}), name) or find_predicate_args(
+            formula.get("right", {}), name
+        )
+    return None
+
+
 def formula_to_string(formula: Formula) -> str:
     ftype = formula.get("type")
     if ftype == "true":

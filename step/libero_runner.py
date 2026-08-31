@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .io import load_json, save_json
-from .system_two.stl_plan import print_formulas, validate_stl_plan
+from .system_two.stl_plan import normalize_legacy_pregrasp_grasp, print_formulas, validate_stl_plan
 
 
 def parse_args() -> argparse.Namespace:
@@ -159,6 +159,8 @@ def main() -> int:
     print(f"[step] prompt file: {prompt_path}")
 
     plan = _load_or_create_plan(args, scene_context=scene_context, prompt=prompt, outdir=outdir)
+    if isinstance(plan.get("system2_plan"), dict) and isinstance(plan["system2_plan"].get("subtasks"), list):
+        plan["system2_plan"]["subtasks"] = normalize_legacy_pregrasp_grasp(plan["system2_plan"]["subtasks"])
     result = validate_stl_plan(plan)
     if not result.ok:
         (outdir / "validation_errors.txt").write_text("\n".join(result.errors))

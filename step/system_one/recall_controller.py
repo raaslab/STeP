@@ -142,6 +142,7 @@ class RecallControllerMixin:
         obj = params.get("object") or params.get("source_object") or "object"
         goal = (
             params.get("goal_region")
+            or params.get("goal")
             or params.get("goal_reference")
             or params.get("goal_name")
         )

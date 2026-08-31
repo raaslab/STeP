@@ -13,7 +13,23 @@
       "camera_name": "agentview",
       "camera_height": 256,
       "camera_width": 256,
-      "horizon": 600
+      "horizon": 600,
+      "motion_backend": "ompl_mpc",
+      "motion": {
+        "grasp": {"num_yaw_samples": 8, "pregrasp_offset_m": 0.10, "lift_check_m": 0.05,
+                  "rim_num_angle_samples": 8, "rim_offset_fraction": 0.6, "rim_grasp_width_m": 0.02},
+        "planner": {"backend": "rrtconnect", "range": 0.05, "timeout_sec": 5.0,
+                    "seed": 0, "interpolation_density": 200, "validity_resolution": 0.01},
+        "collision": {"self_margin_m": 0.005, "env_margin_m": 0.01, "attached_margin_m": 0.003},
+        "time_param": {"joint_vel_limits": null, "joint_accel_limits": null},
+        "place": {"interior_shrink_fraction": 0.35, "num_ring_samples": 4,
+                  "hover_clearance_m": 0.06, "drop_clearance_m": 0.02},
+        "mpc": {"horizon": 16, "dt_sec": 0.05, "tracking_weight": 1.0, "terminal_weight": 4.0,
+                "control_weight": 0.05, "smoothness_weight": 0.1, "clearance_weight": 2.0,
+                "joint_limit_weight": 2.0, "stl_weight": 1.0, "timing_weight": 1.0},
+        "replan": {"tracking_error_m": 0.03, "collision_margin_m": 0.01},
+        "execution": {"settle_position_tol_m": 0.004, "settle_orientation_tol_rad": 0.05, "max_settle_steps": 150}
+      }
     },
     "libero_experiment": {
       "notes": "Optional STL stress modifiers. Set timing_window, avoid_region, or spatial_offset here."
