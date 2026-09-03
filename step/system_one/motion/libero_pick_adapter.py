@@ -26,22 +26,22 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..orientation_utils import orientation_error_rotvec
 from .attached_object import AttachedObjectManager
 from .collision import CollisionChecker, CollisionPhase
 from .config import MotionConfig
-from .grasp_generator import PrivilegedTopDownGraspGenerator
+from .grasp_generator import CompositeGraspGenerator, GraspGenerator, PrivilegedTopDownGraspGenerator
 from .kinematics import IKSolver
 from .mpc import JointSpaceMPC, MPCContext
 from .ompl_planner import MotionPlanner
 from .panda import EE_SITE, GRIPPER_BODIES, HAND_SITE, JOINT_NAMES, ROBOT_BODIES
 from .pick_skill import PickSkill
 from .scene_query import SceneQuery, quat_to_rotmat_wxyz, resolve_body_name
+from .servo import _ServoMixin, is_settle_stalled
 from .time_parameterize import TimeParameterizer
 from .types import AttachedObjectState, MPCCostConfig, SkillFailureReason, SkillResult
 
 
-class LiberoPickAdapter:
+class LiberoPickAdapter(_ServoMixin):
     def __init__(self, env, motion_config: MotionConfig | None = None) -> None:
         self.env = env
         self.config = motion_config or MotionConfig()
@@ -59,87 +59,21 @@ class LiberoPickAdapter:
             scene, self.joint_names, self.ee_site, ROBOT_BODIES, GRIPPER_BODIES, self.config.collision
         )
         lo, hi = scene.joint_qpos_range(self.joint_names)
-        gen = PrivilegedTopDownGraspGenerator(self.config.grasp)
+        gen: GraspGenerator = PrivilegedTopDownGraspGenerator(self.config.grasp)
+        if self.config.contact_graspnet.enabled:
+            # Lazily imported: this module (and the contact_graspnet_pytorch/
+            # CUDA it needs) is only ever touched when explicitly enabled --
+            # see contact_graspnet_generator.py's module docstring.
+            from .contact_graspnet_generator import ContactGraspNetGenerator
+
+            gen = CompositeGraspGenerator([gen, ContactGraspNetGenerator(self.config.contact_graspnet)])
         ik = IKSolver(joint_names=self.joint_names, site_name=self.ee_site)
         planner = MotionPlanner(self.joint_names, lo, hi, checker, self.config.planner)
         return PickSkill(gen, ik, planner, checker, self.config)
 
     # ------------------------------------------------------------ low-level stepping
-
-    def _servo_toward_joint_target(
-        self, scene: SceneQuery, target_q: np.ndarray, pos_scale_m: float = 0.03, ori_gain: float = 2.0
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """Convert a joint-space target into the (cart_pos, cart_ori) delta
-        pair the legacy stage machine's action layout expects, via FK on a
-        scratch scene (never the live sim)."""
-        scratch = scene.clone()
-        scratch.set_qpos(self.joint_names, target_q)
-        target_pos, target_quat = scratch.site_pose(self.ee_site)
-        target_R = quat_to_rotmat_wxyz(target_quat)
-
-        ee_pos = self.env._eef_pos(self.env.last_raw_obs)
-        ee_R = self.env._eef_rotmat(self.env.last_raw_obs)
-        cart_pos = np.clip((target_pos - ee_pos) / pos_scale_m, -1.0, 1.0).astype(np.float32)
-        ori_err = orientation_error_rotvec(ee_R, target_R)
-        cart_ori = np.clip(ori_gain * ori_err, -1.0, 1.0).astype(np.float32)
-        return cart_pos, cart_ori
-
-    def _servo_toward_cartesian_pose(
-        self,
-        target_pos: np.ndarray,
-        target_quat_wxyz: np.ndarray,
-        pos_scale_m: float = 0.03,
-        ori_gain: float = 2.0,
-    ) -> tuple[np.ndarray, np.ndarray, float, float]:
-        """Same servo law as ``_servo_toward_joint_target``, but against a
-        fixed Cartesian target directly (no FK needed) -- used by the settle
-        phase, which tracks one fixed grasp pose rather than a moving
-        receding-horizon reference. Also returns the current (position_error,
-        orientation_error) so the caller can check convergence."""
-        target_R = quat_to_rotmat_wxyz(target_quat_wxyz)
-        ee_pos = self.env._eef_pos(self.env.last_raw_obs)
-        ee_R = self.env._eef_rotmat(self.env.last_raw_obs)
-        pos_err = target_pos - ee_pos
-        cart_pos = np.clip(pos_err / pos_scale_m, -1.0, 1.0).astype(np.float32)
-        ori_err_vec = orientation_error_rotvec(ee_R, target_R)
-        cart_ori = np.clip(ori_gain * ori_err_vec, -1.0, 1.0).astype(np.float32)
-        return cart_pos, cart_ori, float(np.linalg.norm(pos_err)), float(np.linalg.norm(ori_err_vec))
-
-    def _settle_toward_grasp_pose(
-        self,
-        target_pos: np.ndarray,
-        target_quat_wxyz: np.ndarray,
-        gripper_cmd: float,
-        step_callback=None,
-    ) -> tuple[int, bool, float, float]:
-        """Keep servoing toward the grasp pose (gripper unchanged, typically
-        still open) until the end effector actually arrives within tolerance
-        or ``max_settle_steps`` is exhausted -- addresses the MPC's nonzero
-        steady-state tracking lag (see mpc.py's module docstring) closing the
-        gripper before the arm has actually reached the grasp pose, which
-        can miss the object or catch it off-center instead of centered
-        between the fingers. Returns (steps_taken, converged, final_pos_err,
-        final_ori_err)."""
-        cfg = self.config.execution
-        steps = 0
-        pos_err = ori_err = float("inf")
-        for _ in range(cfg.max_settle_steps):
-            cart_pos, cart_ori, pos_err, ori_err = self._servo_toward_cartesian_pose(
-                target_pos, target_quat_wxyz
-            )
-            if pos_err <= cfg.settle_position_tol_m and ori_err <= cfg.settle_orientation_tol_rad:
-                return steps, True, pos_err, ori_err
-            self._step_env(cart_pos, cart_ori, gripper_cmd)
-            steps += 1
-            if step_callback is not None:
-                step_callback()
-        return steps, (pos_err <= cfg.settle_position_tol_m and ori_err <= cfg.settle_orientation_tol_rad), pos_err, ori_err
-
-    def _step_env(self, cart_pos: np.ndarray, cart_ori: np.ndarray, gripper_cmd: float) -> dict:
-        full_action = self.env._compose_full_action(cart_pos, cart_ori, gripper_cmd)
-        obs, _reward, _terminated, info = self.env._step_backend(full_action)
-        self.env.last_raw_obs = obs
-        return info
+    # (_servo_toward_joint_target / _servo_toward_cartesian_pose / _step_env are
+    # provided by _ServoMixin -- shared verbatim with LiberoOpenDrawerAdapter.)
 
     def _current_q(self, scene: SceneQuery) -> np.ndarray:
         # Re-sync from the live sim every read -- the scene passed in at
@@ -200,6 +134,19 @@ class LiberoPickAdapter:
         approach_start_idx = len(traj.positions)
 
         checker = skill.collision_checker
+        # NOTE: real obstacle spheres (build_static_obstacle_spheres in
+        # mpc.py) were tried here, feeding the MPC's existing (previously
+        # always-inert) clearance cost so it could actively steer FREE_SPACE
+        # tracking around real clutter. Reverted after an A/B on the
+        # sibling `open` skill's identical wiring measured a clear
+        # regression (0/10 grip success with obstacles active vs. 3/8 at
+        # baseline without) -- even scoped to FREE_SPACE only, the avoidance
+        # maneuver changes where the arm ends up at the free_space/
+        # terminal_approach handoff, and a marginal final grasp doesn't
+        # tolerate that perturbation. Not re-validated here for pick
+        # specifically, but the mechanism and risk are identical, so this
+        # stays off until the handoff itself is made robust to it (e.g. an
+        # explicit settle-to-standoff checkpoint before the final descent).
         mpc = JointSpaceMPC(
             self.joint_names,
             self.ee_site,
@@ -209,9 +156,38 @@ class LiberoPickAdapter:
         ctx = MPCContext(reference=full_reference)
         mpc.reset()
 
+        # Track the planned reference, then -- still under the *same*
+        # collision-aware MPC, not a separate blind servo -- keep holding at
+        # its final waypoint (mpc.py clamps t0_step past the reference's end,
+        # see JointSpaceMPC._cost_and_grad's `ridx`) until the arm actually
+        # converges on the true grasp pose.
+        #
+        # An earlier version stopped calling the MPC the moment the nominal
+        # reference was exhausted and handed the rest of the job to a
+        # separate `_settle_toward_grasp_pose` helper: a plain Cartesian
+        # P-servo with *no collision awareness at all*. That was fine as long
+        # as the reference's time-parameterized duration closely matched how
+        # fast the real Cartesian-delta controller could actually track it --
+        # but measured on a real run, the arm was still 4.7cm / 16 degrees
+        # from the grasp pose the moment the reference ran out (the
+        # time-parameterizer's velocity-limit-based duration estimate doesn't
+        # account for the real controller's tracking dynamics). Handing a gap
+        # that large to a collision-blind servo is exactly what let the
+        # gripper collide with the object while still mid-rotation instead of
+        # cleanly finishing its approach. Continuing the same MPC loop keeps
+        # every remaining step collision-checked.
+        cfg = self.config.execution
+        max_hold_steps = max_steps if max_steps is not None else len(full_reference) + cfg.max_settle_steps
+        tracking_budget = min(max_hold_steps, len(full_reference) + cfg.max_settle_steps)
+
         steps = 0
         gripper_cmd = self.env.open_gripper_cmd
-        for t0 in range(len(full_reference)):
+        pos_err = ori_err = float("inf")
+        converged = False
+        stalled = False
+        recent_pos_errs: list[float] = []
+        t0 = 0
+        while t0 < tracking_budget:
             phase = CollisionPhase.FREE_SPACE if t0 < approach_start_idx else CollisionPhase.TERMINAL_APPROACH
             live_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
             q_current = live_scene.get_qpos(self.joint_names)
@@ -228,27 +204,35 @@ class LiberoPickAdapter:
             cart_pos, cart_ori = self._servo_toward_joint_target(live_scene, mpc_result.joint_command)
             self._step_env(cart_pos, cart_ori, gripper_cmd)
             steps += 1
+            t0 += 1
             if step_callback is not None:
                 step_callback()
             if steps >= max_steps:
                 break
 
-        # Settle: the MPC has nonzero steady-state tracking lag, so the arm
-        # may not have actually *arrived* at the grasp pose when the
-        # reference trajectory runs out -- closing immediately at that point
-        # can miss the object or catch it off-center. Keep the gripper open
-        # and keep servoing directly toward the true grasp pose (not the
-        # trajectory's last waypoint, which is itself only an IK solution for
-        # it) until it actually converges.
-        settle_steps, converged, settle_pos_err, settle_ori_err = self._settle_toward_grasp_pose(
-            cand.grasp_position, cand.grasp_quat_wxyz, gripper_cmd, step_callback=step_callback
-        )
-        steps += settle_steps
+            if t0 >= len(full_reference):
+                _, _, pos_err, ori_err = self._servo_toward_cartesian_pose(cand.grasp_position, cand.grasp_quat_wxyz)
+                if pos_err <= cfg.settle_position_tol_m and ori_err <= cfg.settle_orientation_tol_rad:
+                    converged = True
+                    break
+                recent_pos_errs.append(pos_err)
+                if is_settle_stalled(recent_pos_errs, cfg.stall_window_steps, cfg.stall_position_tol_m):
+                    # Not getting any closer -- see LiberoOpenDrawerAdapter's
+                    # identical check for why continuing to hunt at full
+                    # reactive gain against a target it can't reach any
+                    # closer to (almost always a real contact boundary) is
+                    # pointless and visibly looks like the gripper
+                    # repeatedly bumping and retrying.
+                    stalled = True
+                    break
+
+        settle_steps = max(0, t0 - len(full_reference))
         plan_result.diagnostics["settle"] = {
             "steps": settle_steps,
+            "stalled": stalled,
             "converged": converged,
-            "position_error_m": settle_pos_err,
-            "orientation_error_rad": settle_ori_err,
+            "position_error_m": pos_err,
+            "orientation_error_rad": ori_err,
         }
 
         # Close the gripper and dwell, continuing to servo toward the grasp
@@ -266,18 +250,22 @@ class LiberoPickAdapter:
                 step_callback()
 
         grasped = bool(self.env._is_grasped())
+        # Cheap and always worth recording: how far the object moved during
+        # the approach (contact/pushing shows up here directly) and the
+        # final gap between the gripper and the intended grasp point --
+        # this is what actually exposed the collision-model bugs this file's
+        # history refers to above, not print statements gated behind a debug
+        # flag that nobody remembers to set.
+        final_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
+        ee_pos_final, _ = final_scene.site_pose(self.ee_site)
+        obj_pos_after, _ = final_scene.body_pose(object_body_name)
+        obj_pos_before, _ = scene.body_pose(object_body_name)
+        plan_result.diagnostics["grasp_verification"] = {
+            "grasped": grasped,
+            "object_displacement_m": float(np.linalg.norm(obj_pos_after - obj_pos_before)),
+            "gripper_to_target_error_m": float(np.linalg.norm(ee_pos_final - cand.grasp_position)),
+        }
         if not grasped:
-            import os
-
-            if os.environ.get("STEP_DEBUG_PICK_ADAPTER"):
-                dbg_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
-                ee_pos, _ = dbg_scene.site_pose(self.ee_site)
-                obj_pos, _ = dbg_scene.body_pose(object_body_name)
-                print(
-                    f"[pick_adapter debug] ee_pos={ee_pos} obj_pos={obj_pos} "
-                    f"grasp_target={cand.grasp_position} ee-target_err={np.linalg.norm(ee_pos - cand.grasp_position)} "
-                    f"gripper_qpos={dbg_scene.get_qpos(['gripper0_right_finger_joint1', 'gripper0_right_finger_joint2'])}"
-                )
             plan_result.success = False
             plan_result.failure_reason = SkillFailureReason.GRASP_VERIFICATION_FAILED
             plan_result.diagnostics["detail"] = "gripper closed but _is_grasped() reported False"

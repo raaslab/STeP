@@ -38,6 +38,7 @@ from .config import MotionConfig
 from .grasp_generator import GraspGenerator
 from .kinematics import IKSolver
 from .ompl_planner import MotionPlanner
+from .panda import FINGER_CLOSED_QPOS, FINGER_JOINT_NAMES
 from .scene_query import SceneQuery
 from .types import (
     CandidateScore,
@@ -45,6 +46,55 @@ from .types import (
     SkillFailureReason,
     SkillResult,
 )
+
+
+def _standoff_candidates(
+    grasp_position: np.ndarray,
+    approach_direction_world: np.ndarray,
+    standoff_m: float,
+    standoff_distance_multipliers: tuple[float, ...],
+    lateral_offsets_m: tuple[float, ...],
+    n_directions: int,
+) -> list[np.ndarray]:
+    """Candidate standoff positions to try, in order: the plain straight-line
+    standoff first (directly opposite the approach direction, e.g. straight
+    up for a top-down grasp, at the nominal distance), then increasingly
+    wide rings of positions offset sideways in the plane perpendicular to
+    the approach, *and* at increasingly larger standoff distances -- see
+    ``GraspSampleConfig.standoff_lateral_offsets_m``'s docstring for why a
+    single fixed vertical standoff isn't always enough (something else can
+    move into that airspace as a side effect of an earlier subtask).
+
+    Distance matters independently of lateral direction: an obstacle
+    hovering over the object can block every horizontal direction at the
+    *nominal* standoff height simply because reaching that height at all
+    requires sweeping an arm link (elbow/forearm, not just the gripper)
+    through the obstacle's footprint -- measured directly against a real
+    drawer-overhang scene, widening the lateral search alone left most
+    angles still blocked at the standoff stage. A taller standoff (further
+    back along the approach direction -- higher above the object, for a
+    top-down grasp) can clear the obstacle's own height entirely, letting
+    the final descent come down past it instead of trying to detour around
+    it at the same blocked altitude.
+    """
+    approach = approach_direction_world / np.linalg.norm(approach_direction_world)
+
+    # Any orthonormal basis for the plane perpendicular to `approach`.
+    ref = np.array([0.0, 0.0, 1.0]) if abs(approach[2]) < 0.9 else np.array([1.0, 0.0, 0.0])
+    lateral1 = np.cross(approach, ref)
+    lateral1 /= np.linalg.norm(lateral1)
+    lateral2 = np.cross(approach, lateral1)
+
+    angles = np.linspace(0.0, 2.0 * np.pi, max(1, n_directions), endpoint=False)
+    candidates: list[np.ndarray] = []
+    for multiplier in standoff_distance_multipliers:
+        straight = grasp_position - (standoff_m * multiplier) * approach
+        candidates.append(straight)
+        for radius in lateral_offsets_m:
+            for angle in angles:
+                offset = radius * (np.cos(angle) * lateral1 + np.sin(angle) * lateral2)
+                candidates.append(straight + offset)
+    return candidates
 
 
 class PickSkill:
@@ -93,6 +143,22 @@ class PickSkill:
                     "detail": "no candidate passed IK/collision/planning/downstream-feasibility filtering",
                     "n_candidates_tried": len(scored),
                     "rejection_reasons": [s.rejection_reason for s in scored],
+                    # Enough per-candidate context to diagnose *why* every
+                    # candidate failed straight from execution_summary.json,
+                    # without needing to re-run with ad hoc instrumentation:
+                    # which object/strategy/yaw was tried, how wide the
+                    # generator thought the grasp was, and where it aimed.
+                    "rejected_candidates": [
+                        {
+                            "object_name": s.object_name,
+                            "strategy": s.grasp.metadata.get("strategy"),
+                            "yaw_rad": s.grasp.metadata.get("yaw_rad"),
+                            "gripper_width_m": s.grasp.gripper_width,
+                            "grasp_position": s.grasp.grasp_position.tolist(),
+                            "rejection_reason": s.rejection_reason,
+                        }
+                        for s in scored
+                    ],
                 },
             )
 
@@ -159,52 +225,112 @@ class PickSkill:
         # segment is now explicitly collision-validated via check_edge before
         # ever being trusted for execution -- the actual bug this whole
         # function is fixing.
-        standoff_position = cand.grasp_position - self.config.grasp.approach_standoff_m * cand.approach_direction_world
-        scratch_standoff = scene.clone()
-        standoff_ik = self.ik_solver.solve(scratch_standoff, standoff_position, cand.grasp_quat_wxyz, seed_q=start_q)
-        if not standoff_ik.success:
-            return CandidateScore(
-                cand.object_name, cand, None, False, float("inf"), rejection_reason="approach_standoff_ik_failed"
+        # Try the plain straight-line standoff first (directly opposite the
+        # approach direction -- straight up, for a top-down grasp), then
+        # increasingly wide rings of sideways-offset alternatives if that one
+        # is unreachable or blocked. A single fixed vertical standoff assumes
+        # the airspace directly above the object is always clear, which
+        # isn't true once an earlier subtask has moved something else into
+        # it -- measured directly: after opening a drawer that ends up
+        # hovering above a bowl, every rim-edge candidate at every angle
+        # failed identically, because they all shared that same now-blocked
+        # straight-up standoff direction. See _standoff_candidates.
+        # Each finger travels symmetrically from center (qpos=[0,0] is *zero*
+        # gap, not "closed on an object" -- see check_gripper_closure's
+        # docstring), so the right closed-finger target is half the object's
+        # own real width at this grasp, not the joint's mechanical limit;
+        # falls back to that limit only if the generator couldn't estimate a
+        # width for this candidate.
+        if cand.gripper_width is not None:
+            half = float(np.clip(cand.gripper_width / 2.0, 0.0, 0.04))
+            finger_closed_qpos = np.array([half, -half])
+        else:
+            finger_closed_qpos = FINGER_CLOSED_QPOS
+        descent_resolution = self.config.planner.validity_resolution * float(
+            np.max(self.planner.joint_limits_hi - self.planner.joint_limits_lo)
+        )
+
+        # Every standoff candidate seeds a *different* grasp_ik solve (DLS IK
+        # is non-unique -- a different standoff direction can converge to a
+        # different elbow/wrist configuration even for the exact same
+        # Cartesian grasp target), so grasp/descent/closure validation is
+        # tried per-standoff-candidate too, not just once against whichever
+        # standoff happened to be found first. Measured directly: widening
+        # the standoff search alone (approaching a rim point from the side
+        # instead of straight down, to route around a drawer hovering
+        # overhead) got *past* the standoff check more often, but then
+        # revealed that *that* elbow configuration collided at the grasp
+        # pose itself -- a different standoff direction sweeps the forearm
+        # through a different part of a cluttered scene even when aiming at
+        # the identical final target.
+        standoff_ik = grasp_ik = None
+        last_rejection = "approach_standoff_ik_failed"
+        for standoff_position in _standoff_candidates(
+            cand.grasp_position,
+            cand.approach_direction_world,
+            self.config.grasp.approach_standoff_m,
+            self.config.grasp.standoff_distance_multipliers,
+            self.config.grasp.standoff_lateral_offsets_m,
+            self.config.grasp.standoff_lateral_directions,
+        ):
+            candidate_standoff_ik = self.ik_solver.solve(
+                scene.clone(), standoff_position, cand.grasp_quat_wxyz, seed_q=start_q
             )
-        scratch_grasp = scene.clone()
-        grasp_ik = self.ik_solver.solve(scratch_grasp, cand.grasp_position, cand.grasp_quat_wxyz, seed_q=standoff_ik.q)
-        if not grasp_ik.success:
+            if not candidate_standoff_ik.success:
+                continue
+            standoff_check = self.collision_checker.check(
+                candidate_standoff_ik.q, phase=CollisionPhase.FREE_SPACE, target_object_body=cand.object_name
+            )
+            if standoff_check.in_collision:
+                last_rejection = "approach_standoff_in_collision"
+                continue
+
+            candidate_grasp_ik = self.ik_solver.solve(
+                scene.clone(), cand.grasp_position, cand.grasp_quat_wxyz, seed_q=candidate_standoff_ik.q
+            )
+            if not candidate_grasp_ik.success:
+                last_rejection = "grasp_ik_failed"
+                continue
+
+            # Terminal grasp contact with the target object is expected/permitted.
+            grasp_check = self.collision_checker.check(
+                candidate_grasp_ik.q, phase=CollisionPhase.TERMINAL_APPROACH, target_object_body=cand.object_name
+            )
+            if grasp_check.in_collision:
+                last_rejection = "grasp_pose_in_collision"
+                continue
+
+            # --- final descent segment: explicitly validated, never blindly executed ---
+            descent_check = self.collision_checker.check_edge(
+                candidate_standoff_ik.q,
+                candidate_grasp_ik.q,
+                resolution=descent_resolution,
+                phase=CollisionPhase.TERMINAL_APPROACH,
+                target_object_body=cand.object_name,
+            )
+            if descent_check.in_collision:
+                last_rejection = "final_descent_in_collision"
+                continue
+
+            # --- gripper closure: never simulated by IK/OMPL/the MPC, which only ever move ---
+            # the 7 arm joints -- a pose whose *open*-finger geometry clears the object can
+            # still have its rigid finger segment (reaches further than the pad) catch
+            # something as the fingers close from there. See check_gripper_closure's docstring.
+            closure_check = self.collision_checker.check_gripper_closure(
+                candidate_grasp_ik.q, FINGER_JOINT_NAMES, finger_closed_qpos, cand.object_name
+            )
+            if closure_check.in_collision:
+                last_rejection = "gripper_closure_in_collision"
+                continue
+
+            standoff_ik, grasp_ik = candidate_standoff_ik, candidate_grasp_ik
+            break
+
+        if standoff_ik is None or grasp_ik is None:
             return CandidateScore(
-                cand.object_name, cand, None, False, float("inf"), rejection_reason="grasp_ik_failed"
+                cand.object_name, cand, None, False, float("inf"), rejection_reason=last_rejection
             )
         breakdown["joint_quality"] = float(np.linalg.norm(standoff_ik.q - start_q))
-
-        # --- standoff / long-range approach collision (no target contact permitted) ---------
-        standoff_check = self.collision_checker.check(
-            standoff_ik.q, phase=CollisionPhase.FREE_SPACE, target_object_body=cand.object_name
-        )
-        if standoff_check.in_collision:
-            return CandidateScore(
-                cand.object_name, cand, None, False, float("inf"), rejection_reason="approach_standoff_in_collision"
-            )
-
-        # Terminal grasp contact with the target object is expected/permitted.
-        grasp_check = self.collision_checker.check(
-            grasp_ik.q, phase=CollisionPhase.TERMINAL_APPROACH, target_object_body=cand.object_name
-        )
-        if grasp_check.in_collision:
-            return CandidateScore(
-                cand.object_name, cand, None, False, float("inf"), rejection_reason="grasp_pose_in_collision"
-            )
-
-        # --- final descent segment: explicitly validated, never blindly executed ------------
-        descent_check = self.collision_checker.check_edge(
-            standoff_ik.q,
-            grasp_ik.q,
-            resolution=self.config.planner.validity_resolution
-            * float(np.max(self.planner.joint_limits_hi - self.planner.joint_limits_lo)),
-            phase=CollisionPhase.TERMINAL_APPROACH,
-            target_object_body=cand.object_name,
-        )
-        if descent_check.in_collision:
-            return CandidateScore(
-                cand.object_name, cand, None, False, float("inf"), rejection_reason="final_descent_in_collision"
-            )
 
         # --- short post-grasp lift feasibility (still IK-reachable a bit higher) ------------
         lift_target = cand.grasp_position + np.array([0.0, 0.0, self.config.grasp.lift_check_m])

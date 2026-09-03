@@ -123,6 +123,31 @@ class CollisionChecker:
         self.gripper_geom_ids: set[int] = set()
         for b in gripper_body_names:
             self.gripper_geom_ids.update(scene.body_geom_ids(b, include_children=False))
+        # A grasp only ever needs the fingerPADS on the object -- this is the
+        # same definition robosuite's own _check_grasp uses (left_fingerpad/
+        # right_fingerpad geom groups). Everything else on the gripper (the
+        # palm/hand body, the non-pad finger segments) getting "permitted" to
+        # touch the target during TERMINAL_APPROACH -- what an earlier
+        # version of _permitted() did, treating every gripper_body_names geom
+        # as equally acceptable -- masks a real physical impossibility: if
+        # the intended grasp height requires the palm to descend below the
+        # object's top surface (e.g. the object is taller than the fingers
+        # are long), the palm hitting the object's top was never flagged as
+        # a collision, so a "validated" descent could still be one the real
+        # gripper physically can't complete. Derived from the existing
+        # `*_pad_collision` geom-naming convention rather than a new
+        # constructor parameter, so this applies without touching any of
+        # this class's call sites.
+        self.fingerpad_geom_ids: set[int] = {
+            g for g in self.gripper_geom_ids if scene.geom_name(g).endswith("_pad_collision")
+        }
+        # Broader than fingerpad_geom_ids: every geom belonging to a finger
+        # (both the pad and the rigid segment above it), but never the palm.
+        # Used only for the small compliance tolerance in
+        # ``_finger_overlap_within_tolerance`` below -- real fingers (and
+        # MuJoCo's own soft contact) have a little give; a rigid wrist/palm
+        # assembly doesn't, so the palm never gets any tolerance.
+        self.finger_geom_ids: set[int] = {g for g in self.gripper_geom_ids if "finger" in scene.geom_name(g)}
         self.robot_geom_ids |= self.gripper_geom_ids
         self.robot_body_ids: set[int] = {scene.body_id(b) for b in set(robot_body_names) | set(gripper_body_names)}
         # Every other body with real geometry -- candidate obstacles for the
@@ -153,6 +178,11 @@ class CollisionChecker:
         robot geoms only -- see ``_attached_sphere_violations`` for the
         sphere-approximated attached-object side).
 
+        Only fingerpad<->target contact is ever permitted, not just any
+        gripper-body geom -- see ``fingerpad_geom_ids``'s definition above
+        for why the palm/hand and the non-pad finger segments must stay
+        strictly excluded.
+
         Matches by actual geom-id membership in the gripper/target geom sets
         -- not by name substrings against the object's *body* name, which
         doesn't work: LIBERO object geoms are named like
@@ -162,13 +192,42 @@ class CollisionChecker:
         which failed with every grasp candidate rejected as
         "in collision" for touching the very object it was grasping).
         """
-        gripper_touch = g1 in self.gripper_geom_ids or g2 in self.gripper_geom_ids
-        if not gripper_touch:
+        fingerpad_touch = g1 in self.fingerpad_geom_ids or g2 in self.fingerpad_geom_ids
+        if not fingerpad_touch:
             return False
-        other = g2 if g1 in self.gripper_geom_ids else g1
+        other = g2 if g1 in self.fingerpad_geom_ids else g1
         if phase == CollisionPhase.TERMINAL_APPROACH and other in target_object_geom_ids:
             return True
         return False
+
+    def _finger_overlap_within_tolerance(
+        self,
+        g1: int,
+        g2: int,
+        phase: CollisionPhase,
+        target_object_geom_ids: set[int],
+        dist: float,
+    ) -> bool:
+        """A small, configurable amount of interpenetration between a FINGER
+        geom (pad or the rigid segment above it -- never the palm, see
+        ``finger_geom_ids``) and the grasp target is tolerated during
+        TERMINAL_APPROACH, mirroring real gripper compliance: a rigid
+        open-loop check requires the fully-open gripper to already be clear
+        of the object before ever closing, but a real (or MuJoCo's own
+        soft-contact) gripper can close through a few mm of an object
+        slightly wider than its rated opening. See
+        ``CollisionConfig.finger_overlap_tolerance_m``'s docstring for the
+        concrete case this fixes.
+        """
+        if phase != CollisionPhase.TERMINAL_APPROACH or self.config.finger_overlap_tolerance_m <= 0.0:
+            return False
+        finger_touch = g1 in self.finger_geom_ids or g2 in self.finger_geom_ids
+        if not finger_touch:
+            return False
+        other = g2 if g1 in self.finger_geom_ids else g1
+        if other not in target_object_geom_ids:
+            return False
+        return dist >= -self.config.finger_overlap_tolerance_m
 
     def _attached_sphere_violations(
         self,
@@ -273,6 +332,8 @@ class CollisionChecker:
                 continue
             if self._permitted(g1, g2, phase, target_object_geom_ids):
                 continue
+            if self._finger_overlap_within_tolerance(g1, g2, phase, target_object_geom_ids, dist):
+                continue
             violations.append(Contact(g1_name, g2_name, dist))
 
         if check_margin:
@@ -285,7 +346,9 @@ class CollisionChecker:
                         continue
                     d = mujoco.mj_geomDistance(scratch.model, scratch.data, g1, g2, margin, None)
                     min_clearance = min(min_clearance, d)
-                    if d < margin:
+                    if d < margin and not self._finger_overlap_within_tolerance(
+                        g1, g2, phase, target_object_geom_ids, d
+                    ):
                         violations.append(Contact(scratch.geom_name(g1), scratch.geom_name(g2), d))
 
         # 2. Sphere-approximated attached-object collision.
@@ -333,3 +396,56 @@ class CollisionChecker:
             if result.in_collision:
                 return result
         return CollisionResult(in_collision=False, contacts=[], min_clearance=math.inf)
+
+    def check_gripper_closure(
+        self,
+        arm_q: np.ndarray,
+        finger_joint_names: list[str],
+        finger_closed_qpos: np.ndarray,
+        target_object_body: str | None = None,
+    ) -> CollisionResult:
+        """Simulate fully closing the gripper at a candidate arm
+        configuration and check for real, non-permitted contact.
+
+        Neither ``IKSolver``, ``MotionPlanner``, nor ``JointSpaceMPC`` ever
+        include the finger joints in their planned state space -- ``check()``/
+        ``check_edge()`` only ever set ``self.joint_names`` (the 7 arm
+        joints) on the scratch clone, so the fingers sit at whatever qpos the
+        clone happened to inherit (the live gripper's actual position at
+        snapshot time -- roughly open, since closing only ever happens as a
+        final, separate, non-collision-aware action). A candidate grasp
+        configuration can therefore pass every existing check -- its *open*-
+        finger geometry clears the target fine -- and still be physically
+        unreachable: closing the fingers from there can catch the *rigid*
+        finger segment (which reaches further than the pad, see
+        ``scene_query.finger_reach_below_tcp_m``) on geometry the open
+        fingers swept past cleanly. This validates that specific, previously
+        unchecked transition, using the exact same permitted-contact rules
+        ``check()`` already applies (fingerpad<->target contact and small
+        finger-overlap tolerance still allowed; anything else counts).
+        """
+        scratch = self.base_scene.clone()
+        scratch.set_qpos(self.joint_names, arm_q)
+        scratch.set_qpos(finger_joint_names, np.asarray(finger_closed_qpos, dtype=np.float64))
+
+        target_object_geom_ids: set[int] = (
+            set(scratch.body_geom_ids(target_object_body)) if target_object_body else set()
+        )
+        violations: list[Contact] = []
+        min_clearance = math.inf
+        for g1_name, g2_name, dist in scratch.compute_contacts():
+            g1, g2 = scratch.geom_id(g1_name), scratch.geom_id(g2_name)
+            if g1 not in self.robot_geom_ids and g2 not in self.robot_geom_ids:
+                continue
+            min_clearance = min(min_clearance, dist)
+            if dist >= 0:
+                continue
+            if self._permitted(g1, g2, CollisionPhase.TERMINAL_APPROACH, target_object_geom_ids):
+                continue
+            if self._finger_overlap_within_tolerance(
+                g1, g2, CollisionPhase.TERMINAL_APPROACH, target_object_geom_ids, dist
+            ):
+                continue
+            violations.append(Contact(g1_name, g2_name, dist))
+
+        return CollisionResult(in_collision=len(violations) > 0, contacts=violations, min_clearance=min_clearance)

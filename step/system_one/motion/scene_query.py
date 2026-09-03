@@ -163,6 +163,34 @@ class SceneQuery:
         bid = self.body_id(name)
         return self.data.xpos[bid].copy(), self.data.xquat[bid].copy()
 
+    def nearby_body_names(
+        self, point_world: np.ndarray, radius_m: float, exclude: tuple[str, ...] = ()
+    ) -> list[str]:
+        """Names of free-jointed bodies (LIBERO's manipulable objects -- see
+        ``set_free_body_qpos``'s same free-joint check) within ``radius_m`` of
+        ``point_world``, excluding ``exclude``. Filtering to free-jointed
+        bodies is what excludes the fixed robot/table/world bodies without
+        needing any ``scene_context``/``SceneResolver`` plumbing -- this
+        module has neither wired in today (confirmed: ``LiberoPickAdapter``
+        only ever constructs a ``SceneQuery`` from the raw sim, never a
+        resolver) -- so a real MuJoCo joint-type check is the only geometry
+        this layer already has available to tell "a movable object" apart
+        from "part of the fixed scene." Used to assemble the wider
+        ``pc_full`` scene context a learned grasp detector needs, beyond just
+        the target object's own points."""
+        point_world = np.asarray(point_world, dtype=np.float64).reshape(3)
+        names = []
+        for bid in range(self.model.nbody):
+            jadr = self.model.body_jntadr[bid]
+            if jadr < 0 or self.model.jnt_type[jadr] != mujoco.mjtJoint.mjJNT_FREE:
+                continue
+            name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, bid)
+            if not name or name in exclude:
+                continue
+            if float(np.linalg.norm(self.data.xpos[bid] - point_world)) <= radius_m:
+                names.append(name)
+        return names
+
     def site_pose(self, name: str) -> tuple[np.ndarray, np.ndarray]:
         """World (position, quat_wxyz) of a site."""
         sid = self.site_id(name)
@@ -186,6 +214,80 @@ class SceneQuery:
         hand_R = quat_to_rotmat_wxyz(hand_quat)
         local_offset = hand_R.T @ (tcp_pos - hand_pos)
         return float(local_offset[2])
+
+    def palm_clearance_above_tcp_m(
+        self,
+        hand_site: str = "gripper0_right_ft_frame",
+        tcp_site: str = "gripper0_right_grip_site",
+        palm_geom_name: str = "gripper0_right_hand_collision",
+    ) -> float:
+        """How far *before* the TCP, along the hand frame's approach axis,
+        the palm/hand collision geometry's near face sits -- i.e. for a
+        top-down grasp, how far above the TCP the palm's own lowest point
+        already is, purely from the gripper's rigid geometry (independent of
+        the arm's current configuration, like ``hand_to_tcp_transform``).
+
+        Needed because the palm is not a point at the hand site: it's a
+        sizeable collision mesh (real half-extent ~10cm along one axis on
+        the stock Panda gripper) whose near face can sit well short of the
+        naive "hand-to-tcp distance", so treating that distance alone as
+        the gripper's reach silently assumes the palm can occupy space it
+        physically can't -- see ``grasp_generator.py``'s use of this for a
+        squat object where doing so put the palm ~2cm into the object's top
+        even though the TCP itself was several cm clear of it.
+        """
+        tcp_local_z = self.hand_to_tcp_transform(hand_site, tcp_site)
+        palm_near_local_z = self._geom_far_local_z(palm_geom_name, hand_site)
+        return tcp_local_z - palm_near_local_z
+
+    def _geom_far_local_z(self, geom_name: str, hand_site: str) -> float:
+        """A geom's own farthest extent along the hand frame's local +Z axis
+        (its own position/half-extent rotated into the hand's frame) --
+        shared by ``palm_clearance_above_tcp_m`` (the palm sits *before* the
+        TCP, so this is its near face) and ``finger_reach_below_tcp_m`` (the
+        fingers extend *past* the TCP, so this is their far reach); which
+        side of the TCP a geom ends up on falls out of the arithmetic, not
+        out of which of the two callers asks."""
+        hand_pos, hand_quat = self.site_pose(hand_site)
+        hand_R = quat_to_rotmat_wxyz(hand_quat)
+        gid = self.geom_id(geom_name)
+        gpos = self.data.geom_xpos[gid]
+        gmat = self.data.geom_xmat[gid].reshape(3, 3)
+        local_half = self._geom_local_half_extent(self.model.geom_type[gid], self.model.geom_size[gid])
+        rel_mat = hand_R.T @ gmat
+        rel_pos = hand_R.T @ (gpos - hand_pos)
+        return float(rel_pos[2] + (np.abs(rel_mat) @ local_half)[2])
+
+    def finger_reach_below_tcp_m(
+        self,
+        hand_site: str = "gripper0_right_ft_frame",
+        tcp_site: str = "gripper0_right_grip_site",
+        finger_geom_names: tuple[str, ...] = (
+            "gripper0_right_finger1_collision",
+            "gripper0_right_finger2_collision",
+            "gripper0_right_finger1_pad_collision",
+            "gripper0_right_finger2_pad_collision",
+        ),
+    ) -> float:
+        """How far *past* the TCP, along the hand frame's approach axis, the
+        farthest-reaching finger geom extends -- i.e. for a top-down grasp,
+        how far below the TCP the fingertips already reach, purely from the
+        gripper's rigid geometry (pose-independent, like
+        ``palm_clearance_above_tcp_m``, which this mirrors for the opposite
+        end of the approach: fingers extend *past* the TCP instead of
+        stopping short of it like the palm does).
+
+        Needed so a grasp height doesn't ask the fingertips to reach below
+        the surface a thin object rests on. Verified against cream_cheese_1
+        (2cm tall): targeting its exact geometric mid-height put the rigid
+        finger body ~1cm into the floor even though the TCP itself was still
+        comfortably above it.
+        """
+        tcp_local_z = self.hand_to_tcp_transform(hand_site, tcp_site)
+        farthest = tcp_local_z
+        for name in finger_geom_names:
+            farthest = max(farthest, self._geom_far_local_z(name, hand_site))
+        return farthest - tcp_local_z
 
     # ---------------------------------------------------------------- geometry extents
 
@@ -313,6 +415,139 @@ class SceneQuery:
         center = (mins + maxs) / 2.0
         half = (maxs - mins) / 2.0
         return BodyExtent(half_extents=half, center_offset=center)
+
+    def body_surface_points_local(self, body_name: str) -> np.ndarray:
+        """Sample points on/near the real surface of a body's collision
+        geometry (box corners, capsule/cylinder rings -- see
+        ``_geom_sample_points_local``), all in the body's own local
+        (pose-independent) frame. Shared by whatever needs the body's TRUE
+        shape rather than just its axis-aligned bounding box, which can't
+        represent orientation at all: fitting collision spheres to a
+        carried object (``attached_object.fit_spheres_from_geoms``) and
+        fitting an oriented bounding box for grasp candidates
+        (``grasp_generator``'s OBB-based center-grasp orientation)."""
+        gids = self.body_collision_geom_ids(body_name)
+        if not gids:
+            return np.zeros((0, 3))
+        bid = self.body_id(body_name)
+        body_pos = self.data.xpos[bid]
+        body_mat = self.data.xmat[bid].reshape(3, 3)
+        point_sets = [self._geom_sample_points_local(g, body_mat, body_pos) for g in gids]
+        non_empty = [p for p in point_sets if len(p)]
+        return np.concatenate(non_empty, axis=0) if non_empty else np.zeros((0, 3))
+
+    def _geom_sample_points_local(self, gid: int, body_mat: np.ndarray, body_pos: np.ndarray) -> np.ndarray:
+        """A handful of extreme surface points of one geom, expressed in the
+        body's local frame -- box corners for box/mesh geoms, a ring of
+        points for round primitives."""
+        gpos = self.data.geom_xpos[gid]
+        gmat = self.data.geom_xmat[gid].reshape(3, 3)
+        size = self.model.geom_size[gid]
+        gtype = self.model.geom_type[gid]
+        rel_mat = body_mat.T @ gmat
+        rel_pos = body_mat.T @ (gpos - body_pos)
+
+        if gtype == mujoco.mjtGeom.mjGEOM_PLANE:
+            return np.zeros((0, 3))
+        if gtype == mujoco.mjtGeom.mjGEOM_SPHERE:
+            r = float(size[0])
+            local_pts = np.array(
+                [[r, 0, 0], [-r, 0, 0], [0, r, 0], [0, -r, 0], [0, 0, r], [0, 0, -r], [0, 0, 0]]
+            )
+        elif gtype in (mujoco.mjtGeom.mjGEOM_CAPSULE, mujoco.mjtGeom.mjGEOM_CYLINDER):
+            r, half_len = float(size[0]), float(size[1])
+            n_ring = 16
+            angles = np.linspace(0.0, 2.0 * np.pi, n_ring, endpoint=False)
+            # Slightly inflate the sampled ring radius so a finite number of
+            # angular samples still safely bounds the true (continuous) round
+            # surface at any angle in between.
+            r_safe = r / np.cos(np.pi / n_ring)
+            local_pts = np.array(
+                [[r_safe * np.cos(a), r_safe * np.sin(a), z] for z in (-half_len, half_len) for a in angles]
+                + [[0, 0, 0]]
+            )
+        else:  # box, mesh: 8 corners of the local half-extent box
+            hx, hy, hz = self._geom_local_half_extent(gtype, size)
+            local_pts = np.array(
+                [[sx * hx, sy * hy, sz * hz] for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)]
+            )
+        return (rel_mat @ local_pts.T).T + rel_pos
+
+    def body_surface_points_dense_local(
+        self, body_name: str, points_per_edge: int = 4, n_ring: int = 24, n_bands: int = 3
+    ) -> np.ndarray:
+        """Like ``body_surface_points_local``, but dense enough for point-
+        cloud-based grasp inference (a learned detector like Contact-GraspNet
+        expects hundreds+ of points; the sparse version's 8 box corners/~33
+        capsule points/7 sphere points are only ever meant to bound a shape
+        for OBB-fitting, not represent its surface). Still pure ground-truth
+        mesh geometry -- grids box/mesh faces and adds more rings/latitude
+        bands for round primitives, no camera rendering involved."""
+        gids = self.body_collision_geom_ids(body_name)
+        if not gids:
+            return np.zeros((0, 3))
+        bid = self.body_id(body_name)
+        body_pos = self.data.xpos[bid]
+        body_mat = self.data.xmat[bid].reshape(3, 3)
+        point_sets = [
+            self._geom_sample_points_dense_local(g, body_mat, body_pos, points_per_edge, n_ring, n_bands)
+            for g in gids
+        ]
+        non_empty = [p for p in point_sets if len(p)]
+        return np.concatenate(non_empty, axis=0) if non_empty else np.zeros((0, 3))
+
+    def _geom_sample_points_dense_local(
+        self, gid: int, body_mat: np.ndarray, body_pos: np.ndarray, points_per_edge: int, n_ring: int, n_bands: int
+    ) -> np.ndarray:
+        """Dense counterpart to ``_geom_sample_points_local`` -- same
+        per-geom-type structure, denser sampling in each branch."""
+        gpos = self.data.geom_xpos[gid]
+        gmat = self.data.geom_xmat[gid].reshape(3, 3)
+        size = self.model.geom_size[gid]
+        gtype = self.model.geom_type[gid]
+        rel_mat = body_mat.T @ gmat
+        rel_pos = body_mat.T @ (gpos - body_pos)
+
+        if gtype == mujoco.mjtGeom.mjGEOM_PLANE:
+            return np.zeros((0, 3))
+        if gtype == mujoco.mjtGeom.mjGEOM_SPHERE:
+            r = float(size[0])
+            n_lat = max(3, n_ring // 3)
+            pts = []
+            for lat in np.linspace(-np.pi / 2.0, np.pi / 2.0, n_lat):
+                n_lon = max(1, int(round(n_ring * np.cos(lat))))
+                for lon in np.linspace(0.0, 2.0 * np.pi, n_lon, endpoint=False):
+                    pts.append(
+                        [r * np.cos(lat) * np.cos(lon), r * np.cos(lat) * np.sin(lon), r * np.sin(lat)]
+                    )
+            local_pts = np.array(pts) if pts else np.zeros((0, 3))
+        elif gtype in (mujoco.mjtGeom.mjGEOM_CAPSULE, mujoco.mjtGeom.mjGEOM_CYLINDER):
+            r, half_len = float(size[0]), float(size[1])
+            angles = np.linspace(0.0, 2.0 * np.pi, n_ring, endpoint=False)
+            r_safe = r / np.cos(np.pi / n_ring)
+            bands = np.linspace(-half_len, half_len, max(2, n_bands))
+            local_pts = np.array(
+                [[r_safe * np.cos(a), r_safe * np.sin(a), z] for z in bands for a in angles]
+            )
+        else:  # box, mesh: grid every face, not just the 8 corners
+            hx, hy, hz = self._geom_local_half_extent(gtype, size)
+            n = max(2, int(points_per_edge))
+            u = np.linspace(-1.0, 1.0, n)
+            pts = []
+            for sx in (-1.0, 1.0):
+                for vy in u:
+                    for vz in u:
+                        pts.append([sx * hx, vy * hy, vz * hz])
+            for sy in (-1.0, 1.0):
+                for vx in u:
+                    for vz in u:
+                        pts.append([vx * hx, sy * hy, vz * hz])
+            for sz in (-1.0, 1.0):
+                for vx in u:
+                    for vy in u:
+                        pts.append([vx * hx, vy * hy, sz * hz])
+            local_pts = np.array(pts)
+        return (rel_mat @ local_pts.T).T + rel_pos
 
     def geom_world_aabb(self, gid: int) -> tuple[np.ndarray, np.ndarray]:
         """World-aligned (center, half_extents) bounding box for a single geom

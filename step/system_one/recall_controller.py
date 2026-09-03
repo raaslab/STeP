@@ -982,7 +982,6 @@ class RecallControllerMixin:
             summary = {
                 "success": bool(records and not aborted and all(r.done for r in records) and final_recall_verified),
                 "final_recall_verified": bool(final_recall_verified),
-                "runtime_config": runtime,
                 "post_success_steps_requested": int(getattr(self, "post_success_steps", 0)),
                 "post_success_steps_run": int(post_success_steps_run),
                 "post_success_final_status": post_success_final_status,

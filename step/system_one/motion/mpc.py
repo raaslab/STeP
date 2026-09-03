@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .collision import CollisionChecker, CollisionPhase
-from .scene_query import SceneQuery
+from .scene_query import SceneQuery, quat_to_rotmat_wxyz
 from .types import MPCCostConfig, MPCStepResult
 
 
@@ -63,6 +63,60 @@ class TimingWindow:
 class ObstacleSphere:
     center: np.ndarray
     radius: float
+
+
+# Bodies whose collision extent exceeds this along any axis are treated as
+# structure (table, floor, cabinet carcass), never as an "obstacle sphere" --
+# sphere-fitting something table-sized would repel the arm from the entire
+# tabletop, not just an object sitting on it. This is well above any real
+# LIBERO tabletop object (groceries/bowls/bottles all measure a few cm to
+# ~10cm) and well below furniture-scale structure.
+_OBSTACLE_MAX_HALF_EXTENT_M = 0.15
+
+
+def build_static_obstacle_spheres(
+    scene: SceneQuery,
+    candidate_body_names: list[str],
+    exclude_bodies: set[str],
+    n_spheres: int = 1,
+) -> list["ObstacleSphere"]:
+    """Sphere-approximate every body in ``candidate_body_names`` except
+    ``exclude_bodies`` (the current pick/place/open target is always
+    excluded by the caller -- it's the intended destination, not something
+    to steer away from) so the MPC's own clearance cost (see
+    ``JointSpaceMPC._clearance_cost_and_grad``) can actively push the
+    tracked trajectory away from real, un-planned-for clutter while it
+    tracks a reference, rather than blindly re-executing a pre-planned path
+    on the assumption the real controller follows it closely enough that
+    whatever the plan avoided stays avoided. Bodies larger than
+    ``_OBSTACLE_MAX_HALF_EXTENT_M`` (table, floor, cabinet carcass) are
+    skipped -- see that constant's docstring.
+
+    Static by design: called once per skill invocation, not per step --
+    every candidate body is assumed not to move for the duration of the
+    tracked motion (true for every LIBERO object during a single pick/
+    place/open subtask; a grasped/carried object is handled separately via
+    ``AttachedObjectState``, not this obstacle list).
+    """
+    from .attached_object import fit_spheres_from_geoms
+
+    spheres: list[ObstacleSphere] = []
+    for name in candidate_body_names:
+        if name in exclude_bodies:
+            continue
+        try:
+            body_pos, body_quat = scene.body_pose(name)
+        except KeyError:
+            continue
+        if not scene.body_collision_geom_ids(name):
+            continue
+        extent = scene.body_collision_extent_world(name)
+        if extent is None or float(np.max(extent.half_extents)) > _OBSTACLE_MAX_HALF_EXTENT_M:
+            continue
+        R = quat_to_rotmat_wxyz(body_quat)
+        for local_offset, radius in fit_spheres_from_geoms(scene, name, n_spheres):
+            spheres.append(ObstacleSphere(center=body_pos + R @ np.asarray(local_offset), radius=float(radius)))
+    return spheres
 
 
 @dataclass

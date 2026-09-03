@@ -56,8 +56,9 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
+from ..modes import RIM_GRASP_KEYWORDS
 from .config import GraspSampleConfig
-from .scene_query import SceneQuery, quat_mul_wxyz
+from .scene_query import SceneQuery, quat_mul_wxyz, quat_to_rotmat_wxyz
 from .types import GraspCandidate
 
 # Top-down grasp orientation in the *world* frame, expressed as a quaternion
@@ -73,6 +74,106 @@ def yaw_quat_wxyz(yaw_rad: float) -> np.ndarray:
     return np.array([np.cos(half), 0.0, 0.0, np.sin(half)])
 
 
+def _is_rim_graspable_object_class(object_name: str) -> bool:
+    """Same object-class keyword match ``base_env.py``'s ``_is_rim_object``
+    already uses to decide the legacy stage machine's grasp mode -- reused
+    here rather than re-invented so both backends agree on which objects are
+    genuinely hollow/thin-walled enough for a rim grasp to mean anything."""
+    name = object_name.lower()
+    return any(kw in name for kw in RIM_GRASP_KEYWORDS)
+
+
+def _object_xy_obb_world(scene: SceneQuery, object_name: str, obj_quat_wxyz: np.ndarray) -> tuple[float, float, float] | None:
+    """PCA-based oriented bounding box of the object's real collision
+    geometry, restricted to the WORLD-horizontal (XY) plane a top-down
+    grasp's closing axis lives in. Returns ``(short_axis_world_angle_rad,
+    short_half_m, long_half_m)`` -- the angle is already a world-frame
+    direction a gripper should close along to need the least opening, no
+    further rotation needed. ``None`` if the body has no real collision
+    geometry to sample.
+
+    Matches Cap-X's own privileged (non-learned) fallback for "regular
+    objects like boxes, cylinders" -- ``get_oriented_bounding_box_from_3d_
+    points`` in their ``integrations/franka/libero.py``, backed by Open3D's
+    ``get_oriented_bounding_box``, which is itself PCA-based -- rather than
+    their Contact-GraspNet path, which needs a separately-deployed CUDA
+    inference server this environment doesn't have.
+
+    Fixes a real bug in an earlier version of this generator: sampling
+    wrist yaws in *world* frame and measuring width off a *world-axis-
+    aligned* AABB, neither of which has any relationship to the object's
+    real shape once it's rotated away from world-axis-aligned.
+
+    Rotates the object's local-frame surface points (see
+    ``SceneQuery.body_surface_points_local``) into the object's *current*
+    world orientation before dropping Z and projecting -- an earlier
+    version of this function projected onto the body's own local XY plane
+    directly, which is only the true horizontal footprint if the body's
+    local Z axis happens to already point world-up. Verified against
+    milk_1 (quaternion ``[0.5,0.5,0.5,0.5]``, a clean 90-degree rotation
+    that maps local *Y*, not Z, to world-vertical): projecting onto local
+    XY there measured a vertical slice through the carton, not its real
+    footprint, and picked a correspondingly wrong closing axis."""
+    points_local = scene.body_surface_points_local(object_name)
+    if len(points_local) < 3:
+        return None
+    R = quat_to_rotmat_wxyz(obj_quat_wxyz)
+    points_world_oriented = points_local @ R.T  # rotate (not translate) into the object's current world orientation
+    xy = points_world_oriented[:, :2]
+    centered = xy - xy.mean(axis=0)
+    cov = (centered.T @ centered) / len(xy)
+    eigvals, eigvecs = np.linalg.eigh(cov)  # eigvecs columns are the principal axes
+    proj = centered @ eigvecs
+    half_extents = np.abs(proj).max(axis=0)
+    short_idx = int(np.argmin(half_extents))
+    long_idx = 1 - short_idx
+    short_axis = eigvecs[:, short_idx]
+    angle = float(np.arctan2(short_axis[1], short_axis[0]))
+    return angle, float(half_extents[short_idx]), float(half_extents[long_idx])
+
+
+def _measure_local_wall_width_m(
+    scene: SceneQuery,
+    object_name: str,
+    obj_pos: np.ndarray,
+    obj_quat_wxyz: np.ndarray,
+    point_center_world: np.ndarray,
+    closing_axis_world: np.ndarray,
+    fallback_width_m: float,
+    search_radius_m: float = 0.02,
+) -> float:
+    """Real wall thickness at one specific rim-grasp point, measured from the
+    object's actual surface geometry near that point, instead of assuming a
+    single fixed width for the entire rim. A container's wall isn't
+    perfectly uniform (draft angle, a handle, a spout, an asymmetric mesh
+    decomposition) -- even a small mismatch between an assumed constant and
+    the real thickness *at this particular point* is exactly what
+    ``CollisionChecker.check_gripper_closure`` now correctly flags as the
+    fingers closing too far and catching the rigid segment on the wall
+    (verified directly: several rim angles around a real bowl started
+    failing gripper-closure validation specifically once that check existed,
+    for a bowl whose rim thickness plausibly does vary around its
+    circumference). Projects every real surface point within
+    ``search_radius_m`` of ``point_center_world`` onto the closing axis --
+    the same "project real geometry onto the closing axis" measurement
+    ``estimate_handle_closing_width_m`` (articulation.py) uses for the
+    drawer handle, just localized to one point on this object instead of a
+    whole small assembly. Falls back to ``fallback_width_m`` if too few real
+    points fall in that neighborhood to measure anything meaningful.
+    """
+    points_local = scene.body_surface_points_local(object_name)
+    if len(points_local) < 2:
+        return fallback_width_m
+    R = quat_to_rotmat_wxyz(obj_quat_wxyz)
+    points_world = points_local @ R.T + obj_pos
+    nearby = points_world[np.linalg.norm(points_world - point_center_world, axis=1) <= search_radius_m]
+    if len(nearby) < 2:
+        return fallback_width_m
+    axis = closing_axis_world / np.linalg.norm(closing_axis_world)
+    proj = nearby @ axis
+    return float(proj.max() - proj.min())
+
+
 class GraspGenerator(ABC):
     @abstractmethod
     def generate(self, scene: SceneQuery, object_names: list[str]) -> list[GraspCandidate]:
@@ -80,19 +181,58 @@ class GraspGenerator(ABC):
         not meaningful -- ``PickSkill`` scores and ranks candidates itself."""
 
 
+class CompositeGraspGenerator(GraspGenerator):
+    """Concatenates candidates from multiple generators into one OR-set.
+
+    ``PickSkill`` doesn't care which generator produced a candidate -- it
+    scores/filters the whole list via IK/collision/OMPL feasibility itself
+    (see this module's docstring). That makes adding a second, independent
+    candidate source (e.g. a learned grasp detector) purely additive: wrap it
+    with the existing heuristic generator here instead of replacing it, so a
+    learned detector's failure/unavailability never removes the heuristic
+    fallback's candidates.
+
+    ``PickSkill`` also reads ``grasp_generator.gripper_max_opening_m``
+    directly (a property of the physical gripper, not of any one generator's
+    algorithm) -- every wrapped generator must agree on it, or this raises at
+    construction rather than silently picking one.
+    """
+
+    def __init__(self, generators: list[GraspGenerator]) -> None:
+        if not generators:
+            raise ValueError("CompositeGraspGenerator needs at least one wrapped generator.")
+        openings = {round(float(g.gripper_max_opening_m), 6) for g in generators}
+        if len(openings) > 1:
+            raise ValueError(
+                f"Wrapped generators disagree on gripper_max_opening_m: {sorted(openings)!r}."
+            )
+        self.generators = generators
+        self.gripper_max_opening_m = generators[0].gripper_max_opening_m
+
+    def generate(self, scene: SceneQuery, object_names: list[str]) -> list[GraspCandidate]:
+        candidates: list[GraspCandidate] = []
+        for gen in self.generators:
+            candidates.extend(gen.generate(scene, object_names))
+        return candidates
+
+
 class PrivilegedTopDownGraspGenerator(GraspGenerator):
     """Oracle-pose, top-down, parallel-jaw grasp sampler.
 
-    For each object: read its privileged world pose from MuJoCo, sample
-    ``config.num_yaw_samples`` wrist yaws evenly over ``config.yaw_range``
-    (default ``[0, pi)`` -- a parallel-jaw gripper is symmetric under a pi
-    rotation about its approach axis, so sampling a full 2*pi would just
-    duplicate every candidate), grasp at the object's geometric center (offset
-    by half its Z half-extent so the TCP lands at the object's mid-height
-    rather than its base -- see the ``Grasped(object, height)`` mid-height
-    convention already used by System 2's prompt, `step/system_two/prompts.py`
-    rule 7b). ``PickSkill`` plans directly to this grasp pose -- there is no
-    separate pregrasp waypoint (see ``GraspCandidate``'s docstring).
+    For each object: read its privileged world pose from MuJoCo, fit an
+    oriented bounding box to its real collision geometry (see
+    ``_object_xy_obb_world``) to find the world-frame yaw that aligns the
+    gripper's closing axis with the object's own short axis, and sample
+    ``config.num_yaw_samples`` wrist yaws across
+    ``[best-half_range, best+half_range]`` around that (a parallel-jaw
+    gripper is symmetric under a pi rotation about its approach axis, so the
+    "best" yaw and "best + pi" are the same candidate). Grasp at the
+    object's geometric center (offset by half its Z half-extent so the TCP
+    lands at the object's mid-height rather than its base -- see the
+    ``Grasped(object, height)`` mid-height convention already used by
+    System 2's prompt, `step/system_two/prompts.py` rule 7b). ``PickSkill``
+    plans directly to this grasp pose -- there is no separate pregrasp
+    waypoint (see ``GraspCandidate``'s docstring).
     """
 
     def __init__(
@@ -112,7 +252,7 @@ class PrivilegedTopDownGraspGenerator(GraspGenerator):
         return candidates
 
     def _generate_for_object(self, scene: SceneQuery, object_name: str) -> list[GraspCandidate]:
-        obj_pos, _obj_quat = scene.body_pose(object_name)
+        obj_pos, obj_quat = scene.body_pose(object_name)
         extent = scene.body_extent_world(object_name)
         # Mid-height in the object's own AABB, not just the body origin + half
         # its Z extent -- a body's collision geoms aren't always centered on
@@ -120,27 +260,104 @@ class PrivilegedTopDownGraspGenerator(GraspGenerator):
         # body origin), and using center_offset fixes both strategies' grasp
         # height instead of just approximating it off the origin.
         height_offset = float(extent.center_offset[2]) if extent is not None else 0.0
-        grasp_center = obj_pos + np.array([0.0, 0.0, height_offset])
+        grasp_z = obj_pos[2] + height_offset
+        if extent is not None:
+            margin = self.config.grasp_height_margin_m
+            # The palm/hand is a real, sizeable collision mesh, not a point
+            # at the TCP -- for a short/squat object, aiming for the exact
+            # geometric mid-height can put the palm's own lowest point
+            # *into* the object's top even though the TCP itself clears it
+            # by several cm (verified against the real alphabet-soup-can
+            # asset: TCP cleared by 4.3cm, but the palm's near face was only
+            # 2.2cm above the TCP, so it ended up ~2cm inside the can).
+            # Raise the target height just enough to keep the palm's real
+            # geometry above the object's top, rather than assuming
+            # "hand-to-tcp distance" alone describes how deep the gripper
+            # can safely reach.
+            object_top_z = obj_pos[2] + extent.center_offset[2] + extent.half_extents[2]
+            min_safe_for_palm = object_top_z - scene.palm_clearance_above_tcp_m() + margin
+            # Mirror image of the palm case: the rigid fingers extend *past*
+            # the TCP, so for a thin/flat object, the same exact-mid-height
+            # target can put the fingertips *below* the surface it rests on
+            # (verified against cream_cheese_1, 2cm tall: the finger body
+            # ended up ~1cm into the floor even though the TCP itself was
+            # still comfortably above it). obj_pos[2] is the object's own
+            # resting-pose height, i.e. the floor/table surface it sits on.
+            min_safe_for_floor = obj_pos[2] + scene.finger_reach_below_tcp_m() + margin
+            grasp_z = max(grasp_z, min_safe_for_palm, min_safe_for_floor)
+        grasp_center = np.array([obj_pos[0], obj_pos[1], grasp_z])
         approach_dir_world = np.array([0.0, 0.0, -1.0])  # top-down: approach from above
 
         out: list[GraspCandidate] = []
-        out.extend(self._center_grasp_candidates(object_name, grasp_center, approach_dir_world, extent))
-        if extent is not None:
-            out.extend(self._rim_edge_candidates(object_name, grasp_center, approach_dir_world, extent))
+        out.extend(
+            self._center_grasp_candidates(scene, object_name, grasp_center, approach_dir_world, obj_quat, extent)
+        )
+        # Rim-edge only makes physical sense for a hollow, thin-walled
+        # container -- it deliberately straddles a *wall*, positioning the
+        # closing point at a fraction of the object's radius rather than at
+        # its true outer edge. For a solid object (a can, a box, most
+        # LIBERO groceries) there is no wall there to straddle: that point
+        # is just interior solid material, so the candidate is geometrically
+        # guaranteed to have the gripper collide no matter what height is
+        # tried. Verified directly against the alphabet-soup-can asset: its
+        # own decomposed collision geoms include one sitting almost exactly
+        # on the object's central axis (2.3mm off-center) -- solid, not
+        # hollow. Reuses the same object-class keyword list the legacy stage
+        # machine already uses for this exact distinction (modes.py's
+        # RIM_GRASP_KEYWORDS) rather than inventing a second classification.
+        if extent is not None and _is_rim_graspable_object_class(object_name):
+            out.extend(
+                self._rim_edge_candidates(scene, object_name, obj_pos, obj_quat, grasp_center, approach_dir_world, extent)
+            )
         return out
 
     def _center_grasp_candidates(
-        self, object_name: str, grasp_center: np.ndarray, approach_dir_world: np.ndarray, extent
+        self,
+        scene: SceneQuery,
+        object_name: str,
+        grasp_center: np.ndarray,
+        approach_dir_world: np.ndarray,
+        obj_quat_wxyz: np.ndarray,
+        extent,
     ) -> list[GraspCandidate]:
         n = max(1, int(self.config.num_yaw_samples))
-        yaw_lo, yaw_hi = self.config.yaw_range
-        yaws = np.linspace(yaw_lo, yaw_hi, n, endpoint=False)
+        half_range = self.config.yaw_search_half_range_rad
+        if n > 1:
+            offsets = np.linspace(-half_range, half_range, n)
+            # Guarantee the true optimum (offset 0, aligned with the
+            # object's own short axis) is always one of the candidates.
+            # np.linspace with an even n skips the midpoint entirely (e.g.
+            # n=2 returns only the two range endpoints), which would mean
+            # only the *worst*-explored angles in the range ever get tried.
+            offsets[np.argmin(np.abs(offsets))] = 0.0
+        else:
+            offsets = np.array([0.0])
+
+        obb = _object_xy_obb_world(scene, object_name, obj_quat_wxyz)
+        if obb is not None:
+            world_angle, short_half, long_half = obb
+            # close_axis(yaw) = [-sin(yaw), cos(yaw)] points at world angle
+            # (yaw + pi/2); solve for the yaw whose closing axis aligns with
+            # the object's own short axis -- offsets are then explored
+            # *around* that, not blindly across the whole [0, pi) range.
+            best_yaw = world_angle - np.pi / 2.0
+            yaws = best_yaw + offsets
+            # Exact for a true rectangle with these half-extents: at
+            # offset=0 (aligned with the short axis) this is exactly
+            # 2*short_half; at offset=+-pi/2 it's 2*long_half.
+            widths = [
+                float(2.0 * short_half * abs(np.cos(o)) + 2.0 * long_half * abs(np.sin(o))) for o in offsets
+            ]
+        else:
+            # Fallback for a body with no discrete collision geoms to sample
+            # (shouldn't happen for a real LIBERO object): the old
+            # world-frame AABB-projection estimate, uniformly sampled.
+            yaws = np.linspace(0.0, np.pi, n, endpoint=False)
+            widths = [self._estimate_width(extent, float(yaw)) if extent is not None else None for yaw in yaws]
 
         out: list[GraspCandidate] = []
-        for i, yaw in enumerate(yaws):
+        for i, (yaw, width) in enumerate(zip(yaws, widths)):
             grasp_quat = quat_mul_wxyz(yaw_quat_wxyz(float(yaw)), _TOP_DOWN_QUAT_WXYZ)
-
-            width = self._estimate_width(extent, float(yaw)) if extent is not None else None
             score = self._score(width)
 
             out.append(
@@ -161,7 +378,14 @@ class PrivilegedTopDownGraspGenerator(GraspGenerator):
         return out
 
     def _rim_edge_candidates(
-        self, object_name: str, grasp_center: np.ndarray, approach_dir_world: np.ndarray, extent
+        self,
+        scene: SceneQuery,
+        object_name: str,
+        obj_pos: np.ndarray,
+        obj_quat_wxyz: np.ndarray,
+        grasp_center: np.ndarray,
+        approach_dir_world: np.ndarray,
+        extent,
     ) -> list[GraspCandidate]:
         """Grasp a single point around the object's rim/perimeter, wrist
         yawed so the gripper closes radially (one finger just outside the
@@ -171,8 +395,7 @@ class PrivilegedTopDownGraspGenerator(GraspGenerator):
         if n == 0:
             return []
         radius = self.config.rim_offset_fraction * min(extent.half_extents[0], extent.half_extents[1])
-        width = float(self.config.rim_grasp_width_m)
-        score = self._score(width)
+        fallback_width = float(self.config.rim_grasp_width_m)
 
         out: list[GraspCandidate] = []
         for i in range(n):
@@ -185,6 +408,20 @@ class PrivilegedTopDownGraspGenerator(GraspGenerator):
             # straddle the rim wall) instead of tangent to it.
             yaw = theta - np.pi / 2.0
             grasp_quat = quat_mul_wxyz(yaw_quat_wxyz(float(yaw)), _TOP_DOWN_QUAT_WXYZ)
+
+            # The wall's real thickness at *this specific point*, not a
+            # single fixed constant for the whole rim -- a container's wall
+            # isn't perfectly uniform (draft angle, a handle, a spout), and
+            # even a small mismatch between the assumed and real thickness
+            # is exactly what CollisionChecker.check_gripper_closure now
+            # catches (correctly) as the fingers closing too far and
+            # catching the rigid segment on the wall. See
+            # _measure_local_wall_width_m's docstring.
+            width = _measure_local_wall_width_m(
+                scene, object_name, obj_pos, obj_quat_wxyz, point_center, np.array([radial_dir[0], radial_dir[1], 0.0]),
+                fallback_width,
+            )
+            score = self._score(width)
 
             out.append(
                 GraspCandidate(
@@ -207,20 +444,36 @@ class PrivilegedTopDownGraspGenerator(GraspGenerator):
     def _estimate_width(self, extent, yaw_rad: float) -> float:
         # Width the gripper must span across is the object's AABB extent
         # projected onto the axis the fingers close along (gripper local X
-        # after the yaw rotation). This is exact for a box-shaped object, but
-        # a rotated-square-AABB projection *overestimates* a round object's
-        # true (yaw-invariant) cross-section at oblique angles -- e.g. it
-        # predicts the AABB's diagonal instead of the actual diameter for a
-        # cylindrical can whose XY half-extents happen to be near-equal. Cap
-        # at the object's narrowest overall horizontal extent (always
-        # physically achievable at *some* yaw) so we never let that artifact
-        # inflate the estimate past what's actually graspable.
+        # after the yaw rotation). This is exact for a box-shaped object.
+        #
+        # An earlier version capped this at the object's narrowest overall
+        # horizontal extent, reasoning that a rotated-square-AABB projection
+        # *overestimates* a round object's true (yaw-invariant) cross-section
+        # at oblique angles (e.g. predicting the AABB's diagonal instead of
+        # the actual diameter for a cylinder with near-equal XY half-extents).
+        # That's true for genuinely round objects, but the cap can't tell a
+        # round object from a square one with the same AABB -- and applying
+        # it unconditionally made every yaw report the *same* optimistic
+        # width regardless of the object's real shape. Verified against a
+        # real (square-ish, not round) soup-can asset: capping reported
+        # ~8.6cm at every sampled yaw, hiding that the true projected width
+        # actually ranged from ~9.0cm to ~12.7cm depending on yaw (a ~1.41x
+        # spread matching a square cross-section's diagonal-to-side ratio).
+        # PickSkill's own IK/collision check then had no way to prefer the
+        # near-feasible yaw over the badly-infeasible ones, since the width
+        # pre-check saw them as identical.
+        #
+        # Leaving this uncapped is still safe for genuinely round objects:
+        # multiple yaws are already sampled, so the axis-aligned ones (where
+        # this formula is exact even for a circle) remain correctly
+        # estimated and available -- an oblique yaw being pessimistically
+        # over-estimated just means PickSkill prefers one of those instead,
+        # not that round objects become ungraspable.
         close_axis = np.array([-np.sin(yaw_rad), np.cos(yaw_rad)])
-        projected = 2.0 * abs(close_axis[0]) * extent.half_extents[0] + 2.0 * abs(
-            close_axis[1]
-        ) * extent.half_extents[1]
-        narrowest = 2.0 * float(min(extent.half_extents[0], extent.half_extents[1]))
-        return float(min(projected, narrowest))
+        return float(
+            2.0 * abs(close_axis[0]) * extent.half_extents[0]
+            + 2.0 * abs(close_axis[1]) * extent.half_extents[1]
+        )
 
     def _score(self, width: float | None) -> float:
         # Higher score = more preferred by the generator alone (before IK/

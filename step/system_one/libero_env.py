@@ -22,6 +22,7 @@ from .libero_scene import (
     infer_objects_from_mujoco,
     infer_objects_from_obs,
     load_libero_task_from_scene_context,
+    merge_drawer_fixtures_into_scene_context,
     normalize_entity_name,
     update_scene_context_from_objects,
 )
@@ -451,6 +452,7 @@ class LiberoManipulationEnv(BaseManipulationEnv):
             obs = env.reset()
             objects = infer_objects_from_obs(obs) or infer_objects_from_mujoco(env.env)
             ctx = update_scene_context_from_objects(scene_context, objects, source="libero_snapshot")
+            ctx = merge_drawer_fixtures_into_scene_context(ctx, env.env)
             return apply_libero_experiment_geometry(ctx)
         finally:
             env.close()

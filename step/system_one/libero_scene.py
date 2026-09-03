@@ -215,6 +215,73 @@ def infer_objects_from_mujoco(env: Any) -> dict[str, dict[str, Any]]:
     return out
 
 
+def infer_drawer_fixtures(env: Any) -> list[dict[str, Any]]:
+    """Discover slide-jointed drawer/cabinet fixtures in the live LIBERO env
+    (e.g. ``wooden_cabinet_1``'s top/middle/bottom drawers) and return them as
+    scene-context entities. Unlike movable objects, these never appear in
+    ``infer_objects_from_obs`` -- LIBERO only emits ``<name>_pos``/``_quat``
+    obs keys for ``env.objects_dict``, never for ``env.fixtures_dict`` -- so
+    without this, System 2 has no real entity to reference and can only
+    hallucinate a name like ``top_drawer_handle`` for an "open the drawer"
+    instruction. Lazily imports the motion package's MuJoCo introspection
+    (pure model discovery, no LIBERO API needed) to avoid a hard dependency
+    for callers that never touch LIBERO/mujoco.
+    """
+    sim = getattr(env, "sim", None) or getattr(getattr(env, "env", None), "sim", None)
+    if sim is None:
+        return []
+    try:
+        from .motion.articulation import discover_drawers
+        from .motion.scene_query import SceneQuery
+
+        scene = SceneQuery.from_robosuite_sim(sim)
+        drawers = discover_drawers(scene)
+    except Exception:
+        return []
+
+    out: list[dict[str, Any]] = []
+    for d in drawers:
+        name = normalize_entity_name(f"{d.level_label}_drawer")
+        aliases = sorted(
+            {
+                name,
+                name.replace("_", " "),
+                normalize_entity_name(d.joint_name),
+                normalize_entity_name(f"{d.level_label}_drawer_handle"),
+                f"{d.level_label} drawer handle",
+            }
+        )
+        out.append(
+            {
+                "name": name,
+                "role": "articulated_fixture",
+                "aliases": aliases,
+                "notes": (
+                    f"Auto-discovered articulated fixture (slide joint {d.joint_name!r}); "
+                    "use skill=\"open\" to grasp its handle and pull it open."
+                ),
+            }
+        )
+    return out
+
+
+def merge_drawer_fixtures_into_scene_context(scene_context: dict[str, Any], env: Any) -> dict[str, Any]:
+    """Append discovered drawer/cabinet entities (see ``infer_drawer_fixtures``)
+    into ``scene_context["entities"]``, skipping any name already present.
+    Unlike movable objects, fixtures have no meaningful single xyz/geometry
+    entry to add -- their entity record (name/role/aliases) is enough for
+    System 2 to reference them by name and for ``resolve_drawer`` to look
+    them up again from the live model at execution time."""
+    updated = copy.deepcopy(scene_context)
+    entities = updated.setdefault("entities", [])
+    existing_names = {e.get("name") for e in entities if e.get("name")}
+    for entity in infer_drawer_fixtures(env):
+        if entity["name"] not in existing_names:
+            entities.append(entity)
+            existing_names.add(entity["name"])
+    return updated
+
+
 def _entity_aliases(name: str) -> list[str]:
     base = normalize_entity_name(name)
     aliases = {base, base.replace("_", " ")}

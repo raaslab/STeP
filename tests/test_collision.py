@@ -83,8 +83,17 @@ def test_terminal_approach_permits_actual_gripper_target_contact(libero_scene, c
     (e.g. checking whether 'alphabet_soup_1_main' appears inside
     'alphabet_soup_1_g7'), which never matches LIBERO's geom naming
     convention -- every terminal grasp contact was incorrectly rejected as a
-    collision. Verified here directly against real gripper/object geom ids."""
-    finger_gid = next(iter(checker.gripper_geom_ids))
+    collision. Verified here directly against real gripper/object geom ids.
+
+    Also locks in a second, later fix: only the fingerPAD geoms are ever
+    permitted contact, not the whole gripper assembly -- an earlier version
+    permitted contact from *any* gripper geom, including the palm/hand body,
+    which silently allowed grasp candidates where the palm was already
+    penetrating the object (only caught once this test's palm assertion
+    below was added, after a real run showed the palm ~2cm inside a squat
+    can's top)."""
+    finger_gid = next(iter(checker.fingerpad_geom_ids))
+    palm_gid = libero_scene.geom_id("gripper0_right_hand_collision")
     object_gids = libero_scene.body_geom_ids("alphabet_soup_1_main")
     assert object_gids, "fixture object must have collision geoms"
     assert checker._permitted(
@@ -92,4 +101,7 @@ def test_terminal_approach_permits_actual_gripper_target_contact(libero_scene, c
     )
     assert not checker._permitted(
         finger_gid, object_gids[0], CollisionPhase.FREE_SPACE, set(object_gids)
+    )
+    assert not checker._permitted(
+        palm_gid, object_gids[0], CollisionPhase.TERMINAL_APPROACH, set(object_gids)
     )

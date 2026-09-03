@@ -21,7 +21,6 @@ free-space obstacle treatment once attached).
 
 from __future__ import annotations
 
-import mujoco
 import numpy as np
 
 from .scene_query import BodyExtent, SceneQuery, quat_to_rotmat_wxyz
@@ -59,56 +58,12 @@ def fit_spheres_to_extent(extent: BodyExtent, n_spheres: int = 3) -> list[tuple[
     return spheres
 
 
-def _geom_sample_points_local(scene: SceneQuery, gid: int, body_mat: np.ndarray, body_pos: np.ndarray) -> np.ndarray:
-    """A handful of extreme surface points of one geom, expressed in the
-    body's local frame -- box corners for box/mesh geoms, a ring of points
-    for round primitives. Used by ``fit_spheres_from_geoms`` to fit spheres
-    directly from real geometry instead of each geom's own worst-case
-    bounding-sphere radius, which double-counts extent along axes several
-    neighboring geoms already share (e.g. a dozen wedge-shaped pieces that
-    each individually span an object's full height -- binning by height
-    then can't separate them, and each wedge's own bounding sphere already
-    balloons to cover that shared full-height reach)."""
-    gpos = scene.data.geom_xpos[gid]
-    gmat = scene.data.geom_xmat[gid].reshape(3, 3)
-    size = scene.model.geom_size[gid]
-    gtype = scene.model.geom_type[gid]
-    rel_mat = body_mat.T @ gmat
-    rel_pos = body_mat.T @ (gpos - body_pos)
-
-    if gtype == mujoco.mjtGeom.mjGEOM_PLANE:
-        return np.zeros((0, 3))
-    if gtype == mujoco.mjtGeom.mjGEOM_SPHERE:
-        r = float(size[0])
-        local_pts = np.array(
-            [[r, 0, 0], [-r, 0, 0], [0, r, 0], [0, -r, 0], [0, 0, r], [0, 0, -r], [0, 0, 0]]
-        )
-    elif gtype in (mujoco.mjtGeom.mjGEOM_CAPSULE, mujoco.mjtGeom.mjGEOM_CYLINDER):
-        r, half_len = float(size[0]), float(size[1])
-        n_ring = 16
-        angles = np.linspace(0.0, 2.0 * np.pi, n_ring, endpoint=False)
-        # Slightly inflate the sampled ring radius so a finite number of
-        # angular samples still safely bounds the true (continuous) round
-        # surface at any angle in between.
-        r_safe = r / np.cos(np.pi / n_ring)
-        local_pts = np.array(
-            [[r_safe * np.cos(a), r_safe * np.sin(a), z] for z in (-half_len, half_len) for a in angles]
-            + [[0, 0, 0]]
-        )
-    else:  # box, mesh: 8 corners of the local half-extent box
-        hx, hy, hz = scene._geom_local_half_extent(gtype, size)
-        local_pts = np.array(
-            [[sx * hx, sy * hy, sz * hz] for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)]
-        )
-    return (rel_mat @ local_pts.T).T + rel_pos
-
-
 def fit_spheres_from_geoms(scene: SceneQuery, body_name: str, n_spheres: int = 3) -> list[tuple[np.ndarray, float]]:
     """Fit ``n_spheres`` collision spheres directly from a body's real
     collision geoms' extreme surface points (box corners / round-primitive
-    rings, see ``_geom_sample_points_local``), grouped into bins along the
-    body's longest local axis; each bin sphere is sized to enclose every
-    sample point that falls in it.
+    rings, see ``SceneQuery.body_surface_points_local``), grouped into bins
+    along the body's longest local axis; each bin sphere is sized to
+    enclose every sample point that falls in it.
 
     Tighter than ``fit_spheres_to_extent``'s single "treat the whole merged
     AABB as a worst-case rectangle at every slice, use its diagonal" formula
@@ -132,17 +87,10 @@ def fit_spheres_from_geoms(scene: SceneQuery, body_name: str, n_spheres: int = 3
     has no discrete collision geoms to inspect. Offsets returned in the
     body's local frame.
     """
-    gids = scene.body_collision_geom_ids(body_name)
-    if not gids:
+    points = scene.body_surface_points_local(body_name)
+    if len(points) == 0:
         extent = scene.body_extent_local(body_name)
         return fit_spheres_to_extent(extent, n_spheres) if extent is not None else [(np.zeros(3), 0.05)]
-
-    bid = scene.body_id(body_name)
-    body_pos = scene.data.xpos[bid]
-    body_mat = scene.data.xmat[bid].reshape(3, 3)
-
-    point_sets = [_geom_sample_points_local(scene, g, body_mat, body_pos) for g in gids]
-    points = np.concatenate([p for p in point_sets if len(p)], axis=0)
 
     span = points.max(axis=0) - points.min(axis=0)
     axis = int(np.argmax(span))

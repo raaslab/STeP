@@ -254,25 +254,40 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         keepout_name = None
         keepout_radius = 0.0
 
+        point_goal_xy: tuple[float, float] | None = None
+        point_goal_radius: float | None = None
+        point_goal_z: float | None = None
+
+        def _apply_goal_region(raw: Any) -> None:
+            nonlocal goal_name, point_goal_xy, point_goal_radius, point_goal_z
+            entity_name = self._goal_region_entity_name(raw)
+            if entity_name is not None:
+                goal_name = entity_name
+                return
+            point_target = self._point_target_from_goal_region(raw)
+            if point_target is not None:
+                xy, z, radius = point_target
+                point_goal_xy = xy
+                if z is not None:
+                    point_goal_z = z
+                if radius is not None:
+                    point_goal_radius = radius
+
         for sub in subtasks:
             if sub["skill"] == "pick":
                 grasp_mode = sub.get("params", {}).get("grasp_mode") or grasp_mode
             if sub["skill"] in {"transport", "place"}:
-                goal_name = sub.get("params", {}).get("goal_region") or goal_name
+                _apply_goal_region(sub.get("params", {}).get("goal_region"))
             for c in sub.get("applied_constraints", []):
                 if c["type"] == "min_carry_height":
                     carry_height = c["params"].get("height_above_table", carry_height)
                 elif c["type"] == "descend_only_near_goal":
                     descend_radius = c["params"].get("radius", descend_radius)
-                    goal_name = c["params"].get("goal_region", goal_name)
+                    _apply_goal_region(c["params"].get("goal_region"))
                 elif c["type"] == "avoid_region":
                     # Avoidance is now task-local. Do not convert any
                     # subtask-level avoid_region into a global runtime keepout.
                     pass
-
-        point_goal_xy: tuple[float, float] | None = None
-        point_goal_radius: float | None = None
-        point_goal_z: float | None = None
 
         for sub in subtasks:
             if sub["skill"] in {"transport", "place"}:
@@ -320,9 +335,6 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
             active_object_name = manipulated[0] if manipulated else "object"
         return {
             "mode": grasp_mode if grasp_mode in {"top", "left", "right"} else "top",
-            "num_blocks": int(
-                self.scene_context.get("execution_proxy", {}).get("num_blocks", 3)
-            ),
             "goal_name": goal_canonical,
             "goal_reference_name": goal_canonical
             if goal_canonical in dynamic_goal_refs
@@ -531,8 +543,25 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
             }
 
         params = sub.get("params", {}) or {}
-        goal_name = self.resolver.canonical(params.get("goal_region") or params.get("goal"))
+        raw_goal_region = params.get("goal_region")
+        entity_name = self._goal_region_entity_name(raw_goal_region) or params.get("goal")
+        goal_name = self.resolver.canonical(entity_name)
         if goal_name is None:
+            if self._point_target_from_goal_region(raw_goal_region) is not None:
+                # PlaceSkill (ompl_mpc backend) always plans onto a real
+                # container body's measured pose/extent/rim -- it has no mode
+                # for placing at a floating point with no supporting entity,
+                # unlike the legacy stage-machine backend's goal_x/goal_y path.
+                return False, 0, {
+                    "success": False,
+                    "failure_reason": "no_goal_container_body",
+                    "detail": (
+                        "place (ompl_mpc backend) got an explicit point goal_region "
+                        f"{raw_goal_region!r} with no matching scene entity -- this backend's "
+                        "PlaceSkill requires a real container body to plan onto and cannot "
+                        "place at a floating point."
+                    ),
+                }
             return False, 0, {"success": False, "failure_reason": "no_goal_region", "detail": "place subtask has no params.goal_region"}
 
         motion_config = MotionConfig.from_scene_context(self.scene_context)
@@ -555,6 +584,71 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
             "diagnostics": result.diagnostics,
         }
         return bool(result.success), steps, status
+
+    def _run_open_drawer_with_motion_pipeline(
+        self, env: BaseManipulationEnv, sub: dict[str, Any]
+    ) -> tuple[bool, int, dict[str, Any]]:
+        from .motion.config import MotionConfig
+        from .motion.libero_open_drawer_adapter import LiberoOpenDrawerAdapter
+
+        params = sub.get("params", {}) or {}
+        drawer_ref = self.resolver.canonical(params.get("object")) or params.get("object")
+        if not drawer_ref:
+            return False, 0, {"success": False, "failure_reason": "no_object", "detail": "open subtask has no params.object"}
+
+        motion_config = MotionConfig.from_scene_context(self.scene_context)
+        adapter = LiberoOpenDrawerAdapter(env, motion_config)
+        max_steps = int(self.max_subtask_steps) if self.max_subtask_steps is not None else 600
+        result, steps, open_verification = adapter.run(
+            drawer_ref,
+            constraints={},
+            max_steps=max_steps,
+            step_callback=lambda: self._capture_video_frame(env),
+        )
+        status: dict[str, Any] = {
+            "success": bool(result.success),
+            "selected_object": result.selected_object,
+            "failure_reason": str(result.failure_reason),
+            "cost_breakdown": result.cost_breakdown,
+            "diagnostics": result.diagnostics,
+            "open_verification": open_verification,
+        }
+        return bool(result.success), steps, status
+
+    @staticmethod
+    def _goal_region_entity_name(raw: Any) -> str | None:
+        """Return `raw` only when it names a scene entity (a plain string).
+
+        System 2's prompt (prompts.py, "explicit point targets") tells the LLM
+        to emit `params.goal_region = {"type": "point", "xy": [...], "z": ..,
+        "radius": ..}` whenever no scene entity matches the requested goal
+        (e.g. "put it on the stove" when there's no stove object) -- so a
+        dict here is an expected, documented shape, not malformed input.
+        `SceneResolver.canonical()`/`resolve_goal()` only resolve entity-name
+        strings, so a dict must never reach them; callers should route it
+        through `_point_target_from_goal_region` instead.
+        """
+        return raw if isinstance(raw, str) else None
+
+    @staticmethod
+    def _point_target_from_goal_region(
+        raw: Any,
+    ) -> tuple[tuple[float, float], float | None, float | None] | None:
+        """Parse a `{"type": "point", "xy": [x, y], "z": z, "radius": r}`
+        goal_region into `(xy, z, radius)`, or None if `raw` isn't that shape.
+        """
+        if not isinstance(raw, dict) or raw.get("type") != "point":
+            return None
+        xy = raw.get("xy")
+        if not isinstance(xy, (list, tuple)) or len(xy) < 2:
+            return None
+        z = raw.get("z")
+        radius = raw.get("radius")
+        return (
+            (float(xy[0]), float(xy[1])),
+            float(z) if z is not None else None,
+            float(radius) if radius is not None else None,
+        )
 
     @staticmethod
     def _grasp_offset_from_params(params: dict[str, Any]) -> list[float] | None:
@@ -596,7 +690,8 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         a hallucinated point.
         """
         params = sub.get("params", {}) if isinstance(sub, dict) else {}
-        goal_name = self.resolver.canonical(params.get("goal_region") or params.get("goal"))
+        raw_goal = self._goal_region_entity_name(params.get("goal_region")) or params.get("goal")
+        goal_name = self.resolver.canonical(raw_goal)
         if goal_name is None:
             return None
         if goal_name not in self.resolver.dynamic_goal_reference_names():
@@ -629,6 +724,13 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         goal_radius = params.get("goal_radius")
         goal_z = params.get("goal_z")
 
+        if goal_x is None or goal_y is None:
+            point_target = self._point_target_from_goal_region(params.get("goal_region"))
+            if point_target is not None:
+                (goal_x, goal_y), point_z, point_radius = point_target
+                goal_z = goal_z if goal_z is not None else point_z
+                goal_radius = goal_radius if goal_radius is not None else point_radius
+
         live_ref = self._dynamic_goal_reference_for_subtask(env, sub)
         if live_ref is not None:
             env.goal_reference_name = live_ref
@@ -651,7 +753,8 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                 env.goal_radius = float(goal_radius)
             return {"mode": "explicit_point", "goal_xy": env.goal_xy.copy()}
 
-        goal_name = self.resolver.canonical(params.get("goal_region") or params.get("goal"))
+        raw_goal = self._goal_region_entity_name(params.get("goal_region")) or params.get("goal")
+        goal_name = self.resolver.canonical(raw_goal)
         if goal_name is not None:
             env.goal_reference_name = None
             env.goal_z_override = None if goal_z is None else float(goal_z)
@@ -1253,6 +1356,8 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                     done, steps, last_status = self._run_pick_with_motion_pipeline(env, sub)
                 elif skill == "place" and motion_backend == "ompl_mpc":
                     done, steps, last_status = self._run_place_with_motion_pipeline(env, sub)
+                elif skill == "open" and motion_backend == "ompl_mpc":
+                    done, steps, last_status = self._run_open_drawer_with_motion_pipeline(env, sub)
                 else:
                     steps = 0
                     done = False
@@ -1375,7 +1480,6 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
 
             summary = {
                 "success": success,
-                "runtime_config": runtime,
                 "env_horizon": runtime.get("_computed_env_horizon", self.env_horizon),
                 "max_subtask_steps": None if self.max_subtask_steps is None else int(self.max_subtask_steps),
                 "reflection_enabled": bool(self.reflection_enabled),
