@@ -98,7 +98,7 @@ class PrivilegedTopDownGraspGenerator(GraspGenerator):
     def __init__(
         self,
         config: GraspSampleConfig | None = None,
-        hand_site: str = "gripper0_right_grip_site",
+        hand_site: str = "gripper0_grip_site",
         gripper_max_opening_m: float = 0.08,
     ) -> None:
         self.config = config or GraspSampleConfig()
@@ -235,12 +235,217 @@ class PrivilegedTopDownGraspGenerator(GraspGenerator):
         return float(np.clip(1.0 - width / self.gripper_max_opening_m, 0.0, 1.0))
 
 
+class MeshAntipodalGraspGenerator(GraspGenerator):
+    """Top-down antipodal grasp sampler over an object's real collision-geom
+    surface (``SceneQuery.body_surface_samples``), not its AABB.
+
+    For each height slice of the object, each wrist yaw, and each lateral offset
+    of the gripper across the object, take the two surface points the fingers
+    would first contact as they close (the extreme points along the closing axis
+    inside a thin corridor). Keep the pair when:
+
+    * the contact separation fits inside the gripper opening (minus margin), and
+    * both contact normals lie within ``mesh_friction_cone_deg`` of the closing
+      axis and point *outward on opposite sides* (a simple antipodal / force-
+      closure screen).
+
+    The grasp point is the contact midpoint at that slice's height -- so this
+    finds a mug handle, a bowl-rim straddle, or a book's thin cross-section
+    instead of always aiming at the object's geometric centre. Emits at most
+    ``mesh_max_candidates`` (best-scored, de-duplicated); ``PickSkill`` still
+    does the real IK/collision/OMPL feasibility ranking on top.
+    """
+
+    def __init__(
+        self,
+        config: GraspSampleConfig | None = None,
+        gripper_max_opening_m: float = 0.08,
+    ) -> None:
+        self.config = config or GraspSampleConfig()
+        self.gripper_max_opening_m = gripper_max_opening_m
+
+    def generate(self, scene: SceneQuery, object_names: list[str]) -> list[GraspCandidate]:
+        out: list[GraspCandidate] = []
+        for name in object_names:
+            out.extend(self._generate_for_object(scene, name))
+        return out
+
+    def _generate_for_object(self, scene: SceneQuery, object_name: str) -> list[GraspCandidate]:
+        pts, normals = scene.body_surface_samples(object_name, self.config.mesh_samples_per_geom)
+        if len(pts) < 8:
+            return []
+        obj_pos, _ = scene.body_pose(object_name)
+        com_xy = pts[:, :2].mean(axis=0)
+        z = pts[:, 2]
+        z_lo, z_hi = float(z.min()), float(z.max())
+        height = z_hi - z_lo
+        if height < 1e-4:
+            return []
+        lateral_scale = max(0.02, float(np.percentile(np.linalg.norm(pts[:, :2] - com_xy, axis=1), 90)))
+
+        levels = np.linspace(
+            z_lo + 0.25 * height,
+            z_hi - 0.08 * height,
+            max(1, int(self.config.mesh_num_height_levels)),
+        )
+        max_open = self.gripper_max_opening_m - 2.0 * self.config.mesh_width_margin_m
+        cos_cone = float(np.cos(np.deg2rad(self.config.mesh_friction_cone_deg)))
+
+        raw: list[dict] = []
+        for zc in levels:
+            band = np.abs(z - zc) <= self.config.mesh_band_half_m
+            if int(band.sum()) < 4:
+                continue
+            bxy = pts[band, :2]
+            bnx = normals[band, :2]
+            nmag = np.linalg.norm(bnx, axis=1)
+            keep = nmag > 0.3  # near-vertical normals carry no top-down antipodal info
+            if int(keep.sum()) < 4:
+                continue
+            bxy = bxy[keep]
+            bnx = bnx[keep] / nmag[keep, None]
+
+            for yaw in np.linspace(
+                0.0, np.pi, max(1, int(self.config.mesh_num_yaw_samples)), endpoint=False
+            ):
+                close_axis = np.array([-np.sin(yaw), np.cos(yaw)])
+                perp = np.array([np.cos(yaw), np.sin(yaw)])
+                s = bxy @ close_axis
+                p = bxy @ perp
+                p_lo, p_hi = float(p.min()), float(p.max())
+                if p_hi - p_lo < 1e-4:
+                    continue
+                dots = bnx @ close_axis
+                for t in np.linspace(p_lo, p_hi, max(1, int(self.config.mesh_num_perp_offsets))):
+                    corridor = np.abs(p - t) <= self.config.mesh_line_half_m
+                    if int(corridor.sum()) < 2:
+                        continue
+                    s_c = s[corridor]
+                    xy_c = bxy[corridor]
+                    d_c = dots[corridor]
+                    left = d_c <= -cos_cone   # surface normal faces -close_axis
+                    right = d_c >= cos_cone   # surface normal faces +close_axis
+                    if not left.any() or not right.any():
+                        continue
+                    # The contact each finger actually stops on: the innermost
+                    # left-facing surface (max s) and innermost right-facing
+                    # surface (min s). For a solid object these are its two
+                    # opposing outer faces; for a hollow wall clipped off-centre
+                    # they're the near/far side of that one wall (a rim straddle).
+                    li = np.where(left)[0][np.argmax(s_c[left])]
+                    ri = np.where(right)[0][np.argmin(s_c[right])]
+                    width = float(s_c[ri] - s_c[li])
+                    if width < self.config.mesh_min_width_m or width > max_open:
+                        continue
+                    dot_lo = float(d_c[li])
+                    dot_hi = float(d_c[ri])
+                    mid_xy = 0.5 * (xy_c[li] + xy_c[ri])
+                    antipodal_q = 0.5 * (-dot_lo + dot_hi)  # in [cos_cone, 1]
+                    com_dist = float(np.linalg.norm(mid_xy - com_xy))
+                    raw.append(
+                        {
+                            "zc": float(zc),
+                            "yaw": float(yaw),
+                            "width": width,
+                            "mid_xy": mid_xy,
+                            "antipodal_q": float(antipodal_q),
+                            "com_dist": com_dist,
+                        }
+                    )
+
+        if not raw:
+            return []
+
+        for r in raw:
+            narrow = 1.0 - r["width"] / self.gripper_max_opening_m
+            anti = (r["antipodal_q"] - cos_cone) / max(1e-6, 1.0 - cos_cone)
+            com_pen = float(np.clip(r["com_dist"] / lateral_scale, 0.0, 1.0))
+            r["score"] = float(np.clip(0.45 * narrow + 0.45 * anti + 0.10 * (1.0 - com_pen), 0.0, 1.0))
+
+        # De-dup near-identical grasps (5mm XY/Z, ~15 deg yaw), keep the best per bucket.
+        best_by_bucket: dict[tuple, dict] = {}
+        for r in raw:
+            bucket = (
+                round(float(r["mid_xy"][0]) / 0.008),
+                round(float(r["mid_xy"][1]) / 0.008),
+                round(r["zc"] / 0.012),
+                round(r["yaw"] / (np.pi / 12.0)),
+            )
+            if bucket not in best_by_bucket or r["score"] > best_by_bucket[bucket]["score"]:
+                best_by_bucket[bucket] = r
+
+        ranked = sorted(best_by_bucket.values(), key=lambda r: r["score"], reverse=True)
+        ranked = ranked[: max(1, int(self.config.mesh_max_candidates))]
+
+        out: list[GraspCandidate] = []
+        for r in ranked:
+            grasp_quat = quat_mul_wxyz(yaw_quat_wxyz(r["yaw"]), _TOP_DOWN_QUAT_WXYZ)
+            grasp_center = np.array([r["mid_xy"][0], r["mid_xy"][1], r["zc"]])
+            out.append(
+                GraspCandidate(
+                    object_name=object_name,
+                    grasp_pose_world=np.concatenate([grasp_center, grasp_quat]),
+                    approach_direction_world=np.array([0.0, 0.0, -1.0]),
+                    gripper_width=r["width"],
+                    generator_score=r["score"],
+                    metadata={
+                        "generator": "MeshAntipodalGraspGenerator",
+                        "strategy": "mesh_antipodal",
+                        "yaw_rad": r["yaw"],
+                        "height_z": r["zc"],
+                        "antipodal_quality": r["antipodal_q"],
+                        "width_m": r["width"],
+                        "com_dist_m": r["com_dist"],
+                    },
+                )
+            )
+        return out
+
+
+class CompositeGraspGenerator(GraspGenerator):
+    """Runs several generators and concatenates their candidates. ``PickSkill``
+    ranks the union by real IK/collision/OMPL cost, so adding a generator can
+    only widen the feasible set (at the cost of more downstream scoring work)."""
+
+    def __init__(self, generators: list[GraspGenerator], gripper_max_opening_m: float = 0.08) -> None:
+        self.generators = list(generators)
+        self.gripper_max_opening_m = gripper_max_opening_m
+
+    def generate(self, scene: SceneQuery, object_names: list[str]) -> list[GraspCandidate]:
+        out: list[GraspCandidate] = []
+        for gen in self.generators:
+            out.extend(gen.generate(scene, object_names))
+        return out
+
+
+def make_grasp_generator(config: GraspSampleConfig | None = None) -> GraspGenerator:
+    """Build the grasp generator named by ``config.strategy``.
+
+    ``"aabb"`` (default): the original ``PrivilegedTopDownGraspGenerator``.
+    ``"mesh_antipodal"``: a ``CompositeGraspGenerator`` of
+    ``MeshAntipodalGraspGenerator`` + the AABB generator (mesh candidates first,
+    AABB kept as a fallback so nothing regresses when the mesh sampler finds
+    nothing for an object)."""
+    config = config or GraspSampleConfig()
+    aabb = PrivilegedTopDownGraspGenerator(
+        config, gripper_max_opening_m=config.gripper_max_opening_m
+    )
+    if str(getattr(config, "strategy", "aabb")).lower() == "mesh_antipodal":
+        mesh = MeshAntipodalGraspGenerator(
+            config, gripper_max_opening_m=config.gripper_max_opening_m
+        )
+        return CompositeGraspGenerator(
+            [mesh, aabb], gripper_max_opening_m=config.gripper_max_opening_m
+        )
+    return aabb
+
+
 def hand_from_fingertip_pose(
     scene: SceneQuery,
     fingertip_pos: np.ndarray,
     fingertip_quat_wxyz: np.ndarray,
-    hand_site: str = "gripper0_right_ft_frame",
-    tcp_site: str = "gripper0_right_grip_site",
+    hand_site: str = "gripper0_ft_frame",
+    tcp_site: str = "gripper0_grip_site",
 ) -> np.ndarray:
     """Convert a grasp pose expressed in the fingertip/TCP frame (the
     convention most grasp detectors -- including Contact-GraspNet, per Cap-X's

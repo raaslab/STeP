@@ -43,7 +43,7 @@ class IKSolver:
     def __init__(
         self,
         joint_names: list[str],
-        site_name: str = "gripper0_right_grip_site",
+        site_name: str = "gripper0_grip_site",
         config: IKConfig | None = None,
     ) -> None:
         self.joint_names = list(joint_names)

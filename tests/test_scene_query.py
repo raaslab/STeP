@@ -62,5 +62,5 @@ def test_body_extent_world_is_positive_and_reasonable(libero_scene):
 
 @requires_libero
 def test_hand_to_tcp_transform_is_positive_and_small(libero_scene):
-    offset = libero_scene.hand_to_tcp_transform(HAND_SITE, "gripper0_right_grip_site")
+    offset = libero_scene.hand_to_tcp_transform(HAND_SITE, "gripper0_grip_site")
     assert 0.0 < offset < 0.3

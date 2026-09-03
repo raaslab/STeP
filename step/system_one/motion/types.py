@@ -26,7 +26,7 @@ class GraspCandidate:
     (e.g. ``scipy.spatial.transform.Rotation`` uses XYZW).
 
     ``grasp_pose_world`` is the **panda_hand / TCP frame** target (i.e. what
-    ``robot0_eef_pos``/the ``gripper0_right_grip_site`` reports), already
+    ``robot0_eef_pos``/the ``gripper0_grip_site`` reports), already
     converted from any fingertip-frame grasp-net-style output -- see
     ``grasp_generator.hand_from_fingertip_pose``.
 

@@ -8,12 +8,12 @@ from __future__ import annotations
 JOINT_NAMES = [f"robot0_joint{i}" for i in range(1, 8)]
 ROBOT_BODIES = ["robot0_base"] + [f"robot0_link{i}" for i in range(8)] + ["robot0_right_hand"]
 GRIPPER_BODIES = [
-    "gripper0_right_right_gripper",
-    "gripper0_right_eef",
-    "gripper0_right_leftfinger",
-    "gripper0_right_finger_joint1_tip",
-    "gripper0_right_rightfinger",
-    "gripper0_right_finger_joint2_tip",
+    "gripper0_right_gripper",
+    "gripper0_eef",
+    "gripper0_leftfinger",
+    "gripper0_finger_joint1_tip",
+    "gripper0_rightfinger",
+    "gripper0_finger_joint2_tip",
 ]
-EE_SITE = "gripper0_right_grip_site"
-HAND_SITE = "gripper0_right_ft_frame"
+EE_SITE = "gripper0_grip_site"
+HAND_SITE = "gripper0_ft_frame"

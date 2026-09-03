@@ -21,6 +21,31 @@ import sys
 import numpy as np
 
 
+def _patch_torch_load_for_libero() -> None:
+    """LIBERO's ``benchmark.get_task_init_states`` calls ``torch.load(path)`` with
+    no ``weights_only`` argument. PyTorch >= 2.6 flipped that default to ``True``,
+    which cannot unpickle LIBERO's numpy-backed init-state files -- so every
+    ``set_init_state`` silently falls back to the BDDL default layout (in this
+    repo the failure is swallowed by ``get_libero_init_state``'s bare except).
+    The init-state files ship inside the pinned LIBERO checkout and are trusted,
+    so restore the pre-2.6 behavior for them.
+    """
+    try:
+        import torch
+    except ImportError:
+        return
+    if getattr(torch.load, "_libero_weights_only_patched", False):
+        return
+    _orig_load = torch.load
+
+    def _load(*args, **kwargs):
+        kwargs.setdefault("weights_only", False)
+        return _orig_load(*args, **kwargs)
+
+    _load._libero_weights_only_patched = True
+    torch.load = _load
+
+
 def _ensure_libero_on_path() -> None:
     """Add the LIBERO source tree to sys.path if libero is not already importable.
 
@@ -30,6 +55,7 @@ def _ensure_libero_on_path() -> None:
     """
     try:
         import libero  # noqa: F401
+        _patch_torch_load_for_libero()
         return
     except ImportError:
         pass
@@ -45,7 +71,9 @@ def _ensure_libero_on_path() -> None:
             path_str = str(candidate)
             if path_str not in sys.path:
                 sys.path.insert(0, path_str)
+            _patch_torch_load_for_libero()
             return
+    _patch_torch_load_for_libero()
 
 
 _MOVABLE_HINTS = (

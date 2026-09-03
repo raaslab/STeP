@@ -30,7 +30,7 @@ from ..orientation_utils import orientation_error_rotvec
 from .attached_object import AttachedObjectManager
 from .collision import CollisionChecker, CollisionPhase
 from .config import MotionConfig
-from .grasp_generator import PrivilegedTopDownGraspGenerator
+from .grasp_generator import make_grasp_generator
 from .kinematics import IKSolver
 from .mpc import JointSpaceMPC, MPCContext
 from .ompl_planner import MotionPlanner
@@ -59,7 +59,7 @@ class LiberoPickAdapter:
             scene, self.joint_names, self.ee_site, ROBOT_BODIES, GRIPPER_BODIES, self.config.collision
         )
         lo, hi = scene.joint_qpos_range(self.joint_names)
-        gen = PrivilegedTopDownGraspGenerator(self.config.grasp)
+        gen = make_grasp_generator(self.config.grasp)
         ik = IKSolver(joint_names=self.joint_names, site_name=self.ee_site)
         planner = MotionPlanner(self.joint_names, lo, hi, checker, self.config.planner)
         return PickSkill(gen, ik, planner, checker, self.config)
@@ -276,7 +276,7 @@ class LiberoPickAdapter:
                 print(
                     f"[pick_adapter debug] ee_pos={ee_pos} obj_pos={obj_pos} "
                     f"grasp_target={cand.grasp_position} ee-target_err={np.linalg.norm(ee_pos - cand.grasp_position)} "
-                    f"gripper_qpos={dbg_scene.get_qpos(['gripper0_right_finger_joint1', 'gripper0_right_finger_joint2'])}"
+                    f"gripper_qpos={dbg_scene.get_qpos(['gripper0_finger_joint1', 'gripper0_finger_joint2'])}"
                 )
             plan_result.success = False
             plan_result.failure_reason = SkillFailureReason.GRASP_VERIFICATION_FAILED

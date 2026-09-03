@@ -121,7 +121,7 @@ def test_grasp_height_is_object_aabb_center_not_body_origin(libero_scene):
 
 @requires_libero
 def test_hand_from_fingertip_roundtrip(libero_scene):
-    tcp_pos, tcp_quat = libero_scene.site_pose("gripper0_right_grip_site")
+    tcp_pos, tcp_quat = libero_scene.site_pose("gripper0_grip_site")
     hand_pos, _ = libero_scene.site_pose(HAND_SITE)
     converted = hand_from_fingertip_pose(libero_scene, tcp_pos, tcp_quat, hand_site=HAND_SITE)
     assert np.linalg.norm(converted[:3] - hand_pos) < 1e-9

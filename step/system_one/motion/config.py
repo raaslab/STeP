@@ -30,6 +30,28 @@ class GraspSampleConfig:
     rim_num_angle_samples: int = 8
     rim_offset_fraction: float = 0.6
     rim_grasp_width_m: float = 0.02
+    # Grasp-candidate strategy:
+    #   "aabb"           -- the original PrivilegedTopDownGraspGenerator only
+    #                       (AABB-center yaw samples + rim ring).
+    #   "mesh_antipodal" -- also run MeshAntipodalGraspGenerator, which samples
+    #                       the object's real collision-geom surface and keeps
+    #                       finger-contact pairs that are antipodal within a
+    #                       friction cone and fit the gripper opening. The two
+    #                       generators' candidates are concatenated; PickSkill
+    #                       still ranks everything by IK/collision/OMPL cost.
+    strategy: str = "aabb"
+    gripper_max_opening_m: float = 0.08
+    # MeshAntipodalGraspGenerator knobs (only used when strategy="mesh_antipodal").
+    mesh_samples_per_geom: int = 48
+    mesh_num_height_levels: int = 7
+    mesh_num_yaw_samples: int = 6
+    mesh_num_perp_offsets: int = 5
+    mesh_band_half_m: float = 0.012          # vertical half-thickness of a height slice
+    mesh_line_half_m: float = 0.010          # lateral half-width of the "gripper line" corridor
+    mesh_friction_cone_deg: float = 25.0     # max angle between a contact normal and the close axis
+    mesh_min_width_m: float = 0.005
+    mesh_width_margin_m: float = 0.004       # keep this much clearance inside the max opening
+    mesh_max_candidates: int = 14            # keep only the best N (each costs IK+OMPL downstream)
 
 
 @dataclass

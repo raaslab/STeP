@@ -105,6 +105,8 @@ def main() -> int:
     parser.add_argument("--out", default="outputs/grasp_viz.png")
     parser.add_argument("--score-with-pick-skill", dest="score", action="store_true", default=True)
     parser.add_argument("--no-score-with-pick-skill", dest="score", action="store_false")
+    parser.add_argument("--grasp-strategy", default=None, choices=["aabb", "mesh_antipodal"],
+                        help="Override motion.grasp.strategy for this visualization run.")
     args = parser.parse_args()
 
     import mujoco
@@ -113,7 +115,7 @@ def main() -> int:
 
     from step.system_one.motion.collision import CollisionChecker
     from step.system_one.motion.config import MotionConfig
-    from step.system_one.motion.grasp_generator import PrivilegedTopDownGraspGenerator
+    from step.system_one.motion.grasp_generator import make_grasp_generator
     from step.system_one.motion.kinematics import IKSolver
     from step.system_one.motion.ompl_planner import MotionPlanner
     from step.system_one.motion.panda import EE_SITE, GRIPPER_BODIES, JOINT_NAMES, ROBOT_BODIES
@@ -155,7 +157,10 @@ def main() -> int:
         print("[visualize_grasp_poses] no object bodies found to visualize", file=sys.stderr)
         return 1
 
-    gen = PrivilegedTopDownGraspGenerator(MotionConfig().grasp)
+    grasp_cfg = MotionConfig().grasp
+    if args.grasp_strategy is not None:
+        grasp_cfg.strategy = args.grasp_strategy
+    gen = make_grasp_generator(grasp_cfg)
     candidates = gen.generate(scene, object_names)
     print(f"[visualize_grasp_poses] {len(candidates)} candidates across {object_names}")
 
@@ -191,7 +196,11 @@ def main() -> int:
 
         is_selected = i == selected_index
         strategy = cand.metadata.get("strategy", "center")
-        color = (0, 220, 0) if is_selected else ((255, 140, 0) if strategy == "rim_edge" else (60, 140, 255))
+        strategy_color = {
+            "rim_edge": (255, 140, 0),      # orange
+            "mesh_antipodal": (230, 0, 200),  # magenta
+        }.get(strategy, (60, 140, 255))     # blue = center
+        color = (0, 220, 0) if is_selected else strategy_color
         width_px = 4 if is_selected else 2
 
         draw.line([(c1, r1), (c2, r2)], fill=color, width=width_px)

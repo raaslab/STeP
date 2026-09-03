@@ -84,6 +84,66 @@ def rotmat_to_quat_wxyz(mat: np.ndarray) -> np.ndarray:
     return quat
 
 
+def _box_surface(half: np.ndarray, n: int) -> tuple[np.ndarray, np.ndarray]:
+    """~``n`` points spread over a box's 6 faces (local frame), with each
+    point's outward face normal. Face point count is weighted by face area so
+    a long thin box isn't oversampled on its small end caps."""
+    hx, hy, hz = (float(half[0]), float(half[1]), float(half[2]))
+    faces = [
+        (np.array([1.0, 0.0, 0.0]), hx, (hy, hz)),
+        (np.array([-1.0, 0.0, 0.0]), hx, (hy, hz)),
+        (np.array([0.0, 1.0, 0.0]), hy, (hx, hz)),
+        (np.array([0.0, -1.0, 0.0]), hy, (hx, hz)),
+        (np.array([0.0, 0.0, 1.0]), hz, (hx, hy)),
+        (np.array([0.0, 0.0, -1.0]), hz, (hx, hy)),
+    ]
+    areas = np.array([4.0 * a * b for _, _, (a, b) in faces])
+    total = float(areas.sum()) or 1.0
+    pts: list[np.ndarray] = []
+    nrm: list[np.ndarray] = []
+    rng = np.random.default_rng(0)
+    for (axis, offset, (ea, eb)), area in zip(faces, areas):
+        k = max(1, int(round(n * area / total)))
+        u = rng.uniform(-ea, ea, k)
+        v = rng.uniform(-eb, eb, k)
+        pf = np.tile(axis * offset, (k, 1)).astype(np.float64)
+        free = np.where(axis == 0.0)[0]
+        pf[:, free[0]] = u
+        pf[:, free[1]] = v
+        pts.append(pf)
+        nrm.append(np.tile(axis, (k, 1)))
+    return np.vstack(pts), np.vstack(nrm)
+
+
+def _cylinder_surface(radius: float, half_len: float, n: int) -> tuple[np.ndarray, np.ndarray]:
+    rng = np.random.default_rng(0)
+    k_barrel = max(1, int(round(n * 0.8)))
+    theta = rng.uniform(0.0, 2.0 * np.pi, k_barrel)
+    z = rng.uniform(-half_len, half_len, k_barrel)
+    barrel = np.stack([radius * np.cos(theta), radius * np.sin(theta), z], axis=1)
+    barrel_n = np.stack([np.cos(theta), np.sin(theta), np.zeros_like(theta)], axis=1)
+    k_cap = max(1, (n - k_barrel) // 2)
+    rr = radius * np.sqrt(rng.uniform(0.0, 1.0, k_cap))
+    tt = rng.uniform(0.0, 2.0 * np.pi, k_cap)
+    cap_xy = np.stack([rr * np.cos(tt), rr * np.sin(tt)], axis=1)
+    top = np.column_stack([cap_xy, np.full(k_cap, half_len)])
+    bot = np.column_stack([cap_xy, np.full(k_cap, -half_len)])
+    pts = np.vstack([barrel, top, bot])
+    nrm = np.vstack([barrel_n, np.tile([0, 0, 1.0], (k_cap, 1)), np.tile([0, 0, -1.0], (k_cap, 1))])
+    return pts, nrm
+
+
+def _sphere_surface(radius: float, n: int) -> tuple[np.ndarray, np.ndarray]:
+    idx = np.arange(0, max(1, n)) + 0.5
+    phi = np.arccos(1.0 - 2.0 * idx / max(1, n))
+    golden = np.pi * (1.0 + 5.0 ** 0.5)
+    theta = golden * idx
+    dirs = np.stack(
+        [np.cos(theta) * np.sin(phi), np.sin(theta) * np.sin(phi), np.cos(phi)], axis=1
+    )
+    return dirs * radius, dirs
+
+
 @dataclass
 class BodyExtent:
     """Axis-aligned half-extents of a body's collision geoms, in the body's own
@@ -171,7 +231,7 @@ class SceneQuery:
         return pos, quat
 
     def hand_to_tcp_transform(
-        self, hand_site: str = "gripper0_right_ft_frame", tcp_site: str = "gripper0_right_grip_site"
+        self, hand_site: str = "gripper0_ft_frame", tcp_site: str = "gripper0_grip_site"
     ) -> np.ndarray:
         """Signed distance (m) along the hand frame's local +Z from the hand/
         flange site to the TCP/grip site, computed live from the current model
@@ -313,6 +373,78 @@ class SceneQuery:
         center = (mins + maxs) / 2.0
         half = (maxs - mins) / 2.0
         return BodyExtent(half_extents=half, center_offset=center)
+
+    def body_surface_samples(
+        self, body_name: str, samples_per_geom: int = 64, include_children: bool = True
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """World-frame ``(points (N,3), outward_normals (N,3))`` sampled over the
+        surface of a body's **real collision geoms** (see
+        ``body_collision_geom_ids`` -- the purely-visual high-poly mesh is
+        excluded on purpose).
+
+        For LIBERO free-body objects the collision shape is a convex-decomposition
+        *swarm of small boxes* (an ``akita_black_bowl`` has ~40, tracing its rim
+        and walls -- concavity included), which is exactly the geometry
+        ``CollisionChecker`` reasons about. Sampling those box faces (plus analytic
+        sampling for cylinder/capsule/sphere geoms, and a face-centroid fallback
+        for a bare mesh geom if a body somehow has no primitive collision geoms)
+        gives an antipodal grasp sampler a surface that agrees with what
+        downstream collision validation will judge. Returns empty arrays if the
+        body has no usable collision geometry.
+        """
+        gids = self.body_collision_geom_ids(body_name, include_children=include_children)
+        if not gids:
+            gids = self.body_geom_ids(body_name, include_children=include_children)
+        pts: list[np.ndarray] = []
+        nrm: list[np.ndarray] = []
+        for g in gids:
+            gp, gn = self._geom_surface_samples(g, samples_per_geom)
+            if gp.size:
+                pts.append(gp)
+                nrm.append(gn)
+        if not pts:
+            return np.zeros((0, 3)), np.zeros((0, 3))
+        return np.vstack(pts), np.vstack(nrm)
+
+    def _geom_surface_samples(self, gid: int, n: int) -> tuple[np.ndarray, np.ndarray]:
+        gtype = int(self.model.geom_type[gid])
+        size = np.asarray(self.model.geom_size[gid], dtype=np.float64)
+        gpos = np.asarray(self.data.geom_xpos[gid], dtype=np.float64)
+        gmat = np.asarray(self.data.geom_xmat[gid], dtype=np.float64).reshape(3, 3)
+
+        local_pts: np.ndarray
+        local_nrm: np.ndarray
+        if gtype == mujoco.mjtGeom.mjGEOM_BOX:
+            local_pts, local_nrm = _box_surface(size, n)
+        elif gtype in (mujoco.mjtGeom.mjGEOM_CYLINDER, mujoco.mjtGeom.mjGEOM_CAPSULE):
+            local_pts, local_nrm = _cylinder_surface(float(size[0]), float(size[1]), n)
+        elif gtype == mujoco.mjtGeom.mjGEOM_SPHERE:
+            local_pts, local_nrm = _sphere_surface(float(size[0]), n)
+        elif gtype == mujoco.mjtGeom.mjGEOM_MESH:
+            local_pts, local_nrm = self._mesh_geom_surface(gid)
+        else:
+            return np.zeros((0, 3)), np.zeros((0, 3))
+
+        world_pts = local_pts @ gmat.T + gpos
+        world_nrm = local_nrm @ gmat.T
+        norms = np.linalg.norm(world_nrm, axis=1, keepdims=True)
+        world_nrm = world_nrm / np.where(norms < 1e-12, 1.0, norms)
+        return world_pts, world_nrm
+
+    def _mesh_geom_surface(self, gid: int) -> tuple[np.ndarray, np.ndarray]:
+        mesh_id = int(self.model.geom_dataid[gid])
+        if mesh_id < 0:
+            return np.zeros((0, 3)), np.zeros((0, 3))
+        v0 = int(self.model.mesh_vertadr[mesh_id])
+        nv = int(self.model.mesh_vertnum[mesh_id])
+        f0 = int(self.model.mesh_faceadr[mesh_id])
+        nf = int(self.model.mesh_facenum[mesh_id])
+        verts = np.asarray(self.model.mesh_vert[v0 : v0 + nv], dtype=np.float64)
+        faces = np.asarray(self.model.mesh_face[f0 : f0 + nf], dtype=np.int64)
+        tri = verts[faces]  # (nf, 3, 3)
+        centroids = tri.mean(axis=1)
+        normals = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
+        return centroids, normals
 
     def geom_world_aabb(self, gid: int) -> tuple[np.ndarray, np.ndarray]:
         """World-aligned (center, half_extents) bounding box for a single geom
