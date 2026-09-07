@@ -201,13 +201,16 @@ class DrawerConfig:
 @dataclass
 class ContactGraspNetConfig:
     """Tuning for ``ContactGraspNetGenerator`` (contact_graspnet_generator.py)
-    -- a learned grasp-candidate source, called in-process, that runs
-    *alongside* ``PrivilegedTopDownGraspGenerator`` via
-    ``CompositeGraspGenerator`` rather than replacing it. Disabled by default
-    so nothing changes for a machine without ``contact_graspnet_pytorch`` +
-    CUDA + a real checkpoint installed (that package is only ever imported
-    lazily, inside ``contact_graspnet_generator._load_real_estimator``, never
-    at module import time)."""
+    -- a learned grasp-candidate source, called in-process. When enabled,
+    ``LiberoPickAdapter`` uses it *instead of* ``PrivilegedTopDownGraspGenerator``
+    (not composited with it -- see ``libero_pick_adapter.py``'s comment: a
+    real run showed PickSkill's OR-set cost function always preferring the
+    heuristic's cheap-but-possibly-wrong candidates over the network's).
+    Disabled by default so nothing changes for a machine without
+    ``contact_graspnet_pytorch`` + CUDA + a real checkpoint installed (that
+    package is only ever imported lazily, inside
+    ``contact_graspnet_generator._load_real_estimator``, never at module
+    import time)."""
 
     enabled: bool = False
     # Path to the Contact-GraspNet checkpoint directory (expects model.pt
@@ -221,10 +224,36 @@ class ContactGraspNetConfig:
     # handed to PickSkill, so a large network output doesn't blow up the
     # downstream IK/collision feasibility search.
     max_candidates: int = 32
-    # Radius (m) around the target object's center within which other
-    # (free-jointed) bodies' points are folded into the pc_full scene
-    # context sent to the network -- see SceneQuery.nearby_body_names.
-    point_cloud_radius_m: float = 0.15
+    # Cameras rendered and fused for the point cloud (SceneQuery.
+    # render_depth_and_body_ids/deproject_camera_depth) -- standard LIBERO/
+    # robosuite camera names; mirrors Cap-X's own agentview + wrist-camera
+    # fusion for its LIBERO integration. A camera not present in a given
+    # model is skipped, not an error.
+    camera_names: list[str] = field(default_factory=lambda: ["agentview", "robot0_eye_in_hand"])
+    render_height: int = 480
+    render_width: int = 480
+    # Depth far-clip (m) -- drops background/sky rays (MuJoCo reports a very
+    # large depth, not a sentinel, where a ray hits nothing) before they
+    # pollute pc_full.
+    depth_max_m: float = 3.0
+    # Mirrors Cap-X's own synthetic-viewpoint retry
+    # (capx/serving/launch_contact_graspnet_server.py's _do_plan_point_clouds):
+    # if filter_grasps's real, tight (~0.1mm) contact-to-segment-cloud
+    # distance check leaves zero survivors -- which real testing showed
+    # happening for this pipeline's first (world-frame) attempt -- re-express
+    # the *same* captured points in a freshly sampled synthetic camera frame
+    # (looking at the object's own centroid from a random nearby pose) and
+    # retry, up to this many times, before giving up on this object. No new
+    # rendering needed: Contact-GraspNet's predictions are sensitive to which
+    # frame its input is expressed in, so a rigid re-expression alone is
+    # enough to reliably produce a different result.
+    max_viewpoint_retries: int = 10
+    viewpoint_xy_extent_m: float = 0.25
+    viewpoint_z_min_m: float = 0.4
+    viewpoint_z_max_m: float = 0.9
+    # None: a fresh (non-reproducible) RNG per generate() call, matching real
+    # deployment. Tests pass a fixed seed for determinism.
+    viewpoint_seed: int | None = None
 
 
 @dataclass

@@ -37,9 +37,14 @@
         "drawer": {"approach_standoff_m": 0.08, "pose_selection_attempts": 6, "planning_attempts": 3,
                    "pull_fraction_fallbacks": [0.85, 0.7, 0.5, 0.3],
                    "open_threshold_frac": 0.8, "retreat_m": 0.08, "retreat_steps": 40},
-        "contact_graspnet": {"enabled": false, "checkpoint_dir": "", "device": "cuda",
+        "contact_graspnet": {"enabled": true,
+                              "checkpoint_dir": "/home/amisha/Documents/step/cap-x/capx/third_party/contact_graspnet_pytorch/checkpoints/contact_graspnet",
+                              "device": "cuda",
                               "forward_passes": 1, "local_regions": true, "filter_grasps": true,
-                              "max_candidates": 32, "point_cloud_radius_m": 0.15}
+                              "max_candidates": 32, "camera_names": ["agentview", "robot0_eye_in_hand"],
+                              "render_height": 480, "render_width": 480, "depth_max_m": 3.0,
+                              "max_viewpoint_retries": 10, "viewpoint_xy_extent_m": 0.25,
+                              "viewpoint_z_min_m": 0.4, "viewpoint_z_max_m": 0.9}
       }
     },
     "libero_experiment": {

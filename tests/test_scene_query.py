@@ -38,7 +38,10 @@ def test_scene_query_from_robosuite_sim_matches_live_qpos(libero_env):
 
     sim = libero_env.env.sim
     sq = SceneQuery.from_robosuite_sim(sim)
-    live_pos = sim.data.site_xpos[sim.model.site_name2id(EE_SITE)]
+    # Resolved through SceneQuery.site_id (not sim.model.site_name2id directly)
+    # so this passes under either robosuite gripper-naming convention -- see
+    # SceneQuery._gripper_name_alt.
+    live_pos = sim.data.site_xpos[sq.site_id(EE_SITE)]
     sq_pos, _ = sq.site_pose(EE_SITE)
     assert np.allclose(sq_pos, live_pos, atol=1e-9)
     assert np.allclose(sq.get_qpos(JOINT_NAMES), sim.data.qpos[: len(sim.data.qpos)][sq.joint_qpos_addrs(JOINT_NAMES)])

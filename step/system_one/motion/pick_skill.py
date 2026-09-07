@@ -118,11 +118,19 @@ class PickSkill:
         object_set: list[str],
         start_q: np.ndarray,
         constraints: dict | None = None,
+        candidates: list[GraspCandidate] | None = None,
     ) -> SkillResult:
         constraints = constraints or {}
         downstream_goal_xy = constraints.get("downstream_goal_xy")  # optional (x, y) reachability hint
 
-        candidates = self.grasp_generator.generate(scene, object_set)
+        # Callers that already generated candidates for their own purposes
+        # (e.g. LiberoPickAdapter saving a grasp-pose visualization before
+        # executing) can pass them straight through -- avoids a second,
+        # possibly expensive/non-deterministic regenerate() call (a learned
+        # generator like ContactGraspNetGenerator re-runs real CUDA
+        # inference on every call).
+        if candidates is None:
+            candidates = self.grasp_generator.generate(scene, object_set)
         if not candidates:
             return SkillResult(
                 success=False,

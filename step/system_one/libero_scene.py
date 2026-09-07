@@ -21,6 +21,34 @@ import sys
 import numpy as np
 
 
+def _import_libero_benchmark():
+    """Return ``(benchmark_module, get_libero_path)``.
+
+    Handles both a properly pip/uv-installed ``libero`` (single-level --
+    ``from libero import benchmark``, e.g. Cap-X's own ``.venv-libero``,
+    which is how a "normal" LIBERO checkout is actually packaged) and a
+    double-nested vendored checkout reached via ``_ensure_libero_on_path``
+    (``from libero.libero import benchmark`` -- the historical vlm-stl
+    layout, where the repo root itself is added to ``sys.path`` instead of
+    the package root).
+    """
+    try:
+        from libero import benchmark, get_libero_path
+    except ImportError:
+        from libero.libero import benchmark, get_libero_path  # type: ignore
+    return benchmark, get_libero_path
+
+
+def _import_libero_env():
+    """Return the ``OffScreenRenderEnv`` class, single- or double-nested (see
+    ``_import_libero_benchmark``)."""
+    try:
+        from libero.envs import OffScreenRenderEnv
+    except ImportError:
+        from libero.libero.envs import OffScreenRenderEnv  # type: ignore
+    return OffScreenRenderEnv
+
+
 def _ensure_libero_on_path() -> None:
     """Add the LIBERO source tree to sys.path if libero is not already importable.
 
@@ -372,7 +400,7 @@ def load_libero_task_from_scene_context(scene_context: dict[str, Any]) -> Libero
 
     if suite is not None and task_id is not None and not bddl_file:
         _ensure_libero_on_path()
-        from libero.libero import benchmark, get_libero_path  # type: ignore
+        benchmark, get_libero_path = _import_libero_benchmark()
 
         benchmark_dict = benchmark.get_benchmark_dict()
         task_suite = benchmark_dict[str(suite)]()
@@ -404,7 +432,7 @@ def get_libero_init_state(scene_context: dict[str, Any]) -> Any | None:
         return None
     try:
         _ensure_libero_on_path()
-        from libero.libero import benchmark  # type: ignore
+        benchmark, _ = _import_libero_benchmark()
 
         task_suite = benchmark.get_benchmark_dict()[str(suite)]()
         init_states = task_suite.get_task_init_states(int(task_id))

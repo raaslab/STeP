@@ -86,7 +86,10 @@ def _load_safety_prompts(path: str | Path) -> dict[tuple[str, int], str]:
 
 
 def _enumerate_tasks(suites: list[str]) -> list[dict[str, Any]]:
-    from libero.libero.benchmark import get_benchmark
+    try:
+        from libero.benchmark import get_benchmark
+    except ImportError:
+        from libero.libero.benchmark import get_benchmark  # type: ignore
 
     tasks: list[dict[str, Any]] = []
     for suite in suites:

@@ -85,9 +85,9 @@ class LiberoManipulationEnv(BaseManipulationEnv):
                 "LIBERO backend needs platform.libero.bddl_file or platform.libero.suite + task_id."
             )
 
-        from step.system_one.libero_scene import _ensure_libero_on_path
+        from step.system_one.libero_scene import _ensure_libero_on_path, _import_libero_env
         _ensure_libero_on_path()
-        from libero.libero.envs import OffScreenRenderEnv  # type: ignore
+        OffScreenRenderEnv = _import_libero_env()
 
         env_args = {
             "bddl_file_name": self._task_info.bddl_file,
@@ -331,7 +331,26 @@ class LiberoManipulationEnv(BaseManipulationEnv):
         try:
             obj = self._active_pick_object()
             if obj is not None:
-                return bool(self.env.env._check_grasp(gripper=self.env.env.robots[0].gripper, object_geoms=obj))
+                gripper = self.env.env.robots[0].gripper
+                # Use the *whole* finger (pad + rigid base collision geom),
+                # not just "left_fingerpad"/"right_fingerpad" (GripperModel's
+                # own default for a bare gripper arg to _check_grasp) --
+                # confirmed by a real rollout's raw MuJoCo contact dump that a
+                # perfectly good, symmetric two-sided grip can register
+                # contact through one side's *pad* geom and the other side's
+                # rigid base geom (e.g. a slightly tilted/off-axis contact
+                # against a cylindrical object), which the pad-only groups
+                # then score as "only one side grasping" -> False. Both
+                # "left_finger"/"right_finger" groups already exist on
+                # robosuite's Panda gripper model for exactly this broader
+                # check; fall back to the gripper model itself (its own
+                # pad-only default) for any gripper that lacks them.
+                important = getattr(gripper, "important_geoms", {})
+                if "left_finger" in important and "right_finger" in important:
+                    gripper_arg = [important["left_finger"], important["right_finger"]]
+                else:
+                    gripper_arg = gripper
+                return bool(self.env.env._check_grasp(gripper=gripper_arg, object_geoms=obj))
         except Exception:
             pass
         # Generic fallback: gripper recently commanded closed and EE is close to

@@ -1,0 +1,61 @@
+{
+  "system2_plan": {
+    "type": "skill_graph",
+    "task_name": "Pick and place the ramekin",
+    "scene_summary": "libero_spatial task 0 -- plain top/center grasp on the ramekin (confirmed feasible via PickSkill's real IK/collision/OMPL scoring in this scene; the stock pick_place example's rim grasp on akita_black_bowl_2 has no feasible candidate here).",
+    "subtasks": [
+      {
+        "subtask_id": 0,
+        "skill": "pick",
+        "description": "Pick up the ramekin with a plain top grasp.",
+        "params": {
+          "object": "glazed_rim_porcelain_ramekin_1",
+          "grasp_mode": "top"
+        },
+        "formula": {
+          "type": "and",
+          "children": [
+            {
+              "type": "eventually",
+              "interval": [0, 40],
+              "child": { "type": "predicate", "name": "PreGrasp", "args": ["glazed_rim_porcelain_ramekin_1", "top"] }
+            },
+            {
+              "type": "eventually",
+              "interval": [0, 90],
+              "child": { "type": "predicate", "name": "Grasped", "args": ["glazed_rim_porcelain_ramekin_1"] }
+            }
+          ]
+        }
+      },
+      {
+        "subtask_id": 1,
+        "skill": "transport",
+        "description": "Move the object over the goal.",
+        "params": { "object": "object", "goal_region": "plate_1", "goal_radius": 0.05 },
+        "formula": {
+          "type": "eventually",
+          "interval": [0, 180],
+          "child": { "type": "predicate", "name": "OverGoal", "args": ["object", "plate_1"] }
+        }
+      },
+      {
+        "subtask_id": 2,
+        "skill": "place",
+        "description": "Place and release the object.",
+        "params": { "object": "object", "goal_region": "plate_1", "goal_radius": 0.05 },
+        "formula": {
+          "type": "eventually",
+          "interval": [0, 120],
+          "child": {
+            "type": "and",
+            "children": [
+              { "type": "predicate", "name": "Placed", "args": ["object", "plate_1"] },
+              { "type": "predicate", "name": "Released", "args": ["object"] }
+            ]
+          }
+        }
+      }
+    ]
+  }
+}

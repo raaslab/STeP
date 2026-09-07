@@ -14,6 +14,7 @@ the point of calling ``scipy.spatial.transform.Rotation``.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -97,9 +98,17 @@ class BodyExtent:
 class SceneQuery:
     """Read/query interface over a scratch MuJoCo model+data pair."""
 
-    def __init__(self, model: "mujoco.MjModel", data: "mujoco.MjData") -> None:
+    def __init__(self, model: "mujoco.MjModel", data: "mujoco.MjData", *, _render_sim: Any = None) -> None:
         self.model = model
         self.data = data
+        # Optional: the *live* robosuite sim, kept only for its already-
+        # established render context (see render_depth_and_body_ids) -- never
+        # read/written for anything else, so this doesn't weaken the
+        # scratch-data-only mutation guarantee the rest of this class relies
+        # on. None for a SceneQuery built directly from (model, data), e.g.
+        # in tests -- render_depth_and_body_ids falls back to mujoco.Renderer
+        # in that case.
+        self._render_sim = _render_sim
 
     # ---------------------------------------------------------------- construction
 
@@ -115,7 +124,7 @@ class SceneQuery:
         raw_data.qpos[:] = sim.data.qpos
         raw_data.qvel[:] = sim.data.qvel
         mujoco.mj_forward(raw_model, raw_data)
-        return cls(raw_model, raw_data)
+        return cls(raw_model, raw_data, _render_sim=sim)
 
     def clone(self) -> "SceneQuery":
         """A fresh scratch copy of this SceneQuery's current state, for planners
@@ -129,8 +138,33 @@ class SceneQuery:
 
     # ---------------------------------------------------------------- name lookups
 
+    def _gripper_name_alt(self, name: str) -> str | None:
+        """The other robosuite gripper-naming convention for ``name``, if any.
+
+        ``panda.py``'s constants (``gripper0_right_eef``, etc.) match
+        robosuite's multi-arm-ready naming, where every gripper part gets a
+        ``_right``/``_left`` side infix after ``gripper0_``. Older forks --
+        e.g. the ``robosuite==1.4.0`` this repo's LIBERO-PRO checkout
+        vendors -- only apply that infix to the top-level mount body
+        (``gripper0_right_gripper``) and drop it everywhere else
+        (``gripper0_eef``, ``gripper0_ft_frame``, ...), confirmed by reading
+        the actual loaded model rather than assumed from a version number.
+        Trying the other convention here, once, keeps every call site
+        working against either install without needing to know which one is
+        active.
+        """
+        if "gripper0_right_" in name:
+            return name.replace("gripper0_right_", "gripper0_", 1)
+        if name.startswith("gripper0_") and not name.startswith("gripper0_right_"):
+            return name.replace("gripper0_", "gripper0_right_", 1)
+        return None
+
     def body_id(self, name: str) -> int:
         bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name)
+        if bid < 0:
+            alt = self._gripper_name_alt(name)
+            if alt is not None:
+                bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, alt)
         if bid < 0:
             raise KeyError(f"No body named {name!r} in model.")
         return bid
@@ -138,17 +172,29 @@ class SceneQuery:
     def site_id(self, name: str) -> int:
         sid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, name)
         if sid < 0:
+            alt = self._gripper_name_alt(name)
+            if alt is not None:
+                sid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, alt)
+        if sid < 0:
             raise KeyError(f"No site named {name!r} in model.")
         return sid
 
     def joint_id(self, name: str) -> int:
         jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
         if jid < 0:
+            alt = self._gripper_name_alt(name)
+            if alt is not None:
+                jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, alt)
+        if jid < 0:
             raise KeyError(f"No joint named {name!r} in model.")
         return jid
 
     def geom_id(self, name: str) -> int:
         gid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, name)
+        if gid < 0:
+            alt = self._gripper_name_alt(name)
+            if alt is not None:
+                gid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, alt)
         if gid < 0:
             raise KeyError(f"No geom named {name!r} in model.")
         return gid
@@ -641,6 +687,156 @@ class SceneQuery:
 
     def forward(self) -> None:
         mujoco.mj_forward(self.model, self.data)
+
+    # ---------------------------------------------------------------- camera / rendering
+
+    def camera_id(self, name: str) -> int:
+        cid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA, name)
+        if cid < 0:
+            raise KeyError(f"No camera named {name!r} in model.")
+        return cid
+
+    def camera_pose_world(self, camera_name: str) -> tuple[np.ndarray, np.ndarray]:
+        """(position, 3x3 rotation) of a camera in world frame. Camera-local
+        +X is right, +Y is up, +Z points *away* from the view direction (the
+        camera looks down its own local -Z) -- MuJoCo's own convention,
+        matching ``scripts/visualize_grasp_poses.py``'s ``_camera_project``."""
+        cid = self.camera_id(camera_name)
+        return self.data.cam_xpos[cid].copy(), self.data.cam_xmat[cid].reshape(3, 3).copy()
+
+    def camera_intrinsics(self, camera_name: str, height: int, width: int) -> np.ndarray:
+        """Pinhole intrinsics matrix for a render of the given size, derived
+        from the camera's vertical FOV (``model.cam_fovy``) -- the same
+        formula ``visualize_grasp_poses.py`` already uses for its own forward
+        projection, so a render captured here and one captured there agree."""
+        cid = self.camera_id(camera_name)
+        fovy_deg = float(self.model.cam_fovy[cid])
+        f = 0.5 * height / np.tan(0.5 * np.deg2rad(fovy_deg))
+        return np.array([[f, 0.0, width / 2.0], [0.0, f, height / 2.0], [0.0, 0.0, 1.0]])
+
+    def render_depth_and_body_ids(
+        self, camera_name: str, height: int, width: int
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Real single-camera render: (depth_m (H,W) float32, body_id (H,W)
+        int64, -1 where no geom/an unknown object type was hit).
+
+        Renders through ``self._render_sim`` (the live robosuite sim's own,
+        already-established GL context -- set by ``from_robosuite_sim``) when
+        available, falling back to a fresh ``mujoco.Renderer`` otherwise (a
+        ``SceneQuery`` built directly from (model, data), e.g. in tests, has
+        no live sim to reuse).
+
+        The fallback path exists mainly for that case -- reusing the live
+        sim's context is not just an optimization. A real full rollout
+        showed a bare ``mujoco.Renderer`` corrupting *robosuite's own*
+        subsequent video frames into solid noise, reproduced with a minimal
+        before/after screenshot: creating (and especially closing) a second,
+        independent GL context steals the process's thread-local "current"
+        context away from robosuite's, which never re-binds its own context
+        on later ``render()`` calls (it isn't written to expect one to have
+        moved) -- so once stolen, every later robosuite render comes out
+        garbage for the rest of the process, not just the frame right after.
+        Rendering through the live sim's own context is the actual fix,
+        rather than trying to hand context ownership back afterward.
+        """
+        if self._render_sim is not None:
+            return self._render_depth_and_body_ids_via_sim(camera_name, height, width)
+        return self._render_depth_and_body_ids_via_mujoco_renderer(camera_name, height, width)
+
+    def _render_depth_and_body_ids_via_sim(
+        self, camera_name: str, height: int, width: int
+    ) -> tuple[np.ndarray, np.ndarray]:
+        from robosuite.utils.camera_utils import get_real_depth_map
+
+        sim = self._render_sim
+        seg, depth_normalized = sim.render(
+            width=width, height=height, camera_name=camera_name, depth=True, segmentation=True
+        )
+        # robosuite's raw sim.render() is OpenGL row order (row 0 = bottom of
+        # image) -- flip to the standard top-to-bottom order deproject_camera_
+        # depth assumes (the same convention mujoco.Renderer already returns
+        # unflipped, confirmed empirically -- see LiberoManipulationEnv.
+        # render_rgb_frame's own docstring for the same flip on its own
+        # sim.render()-derived frames).
+        seg = np.asarray(seg)[::-1]
+        depth_normalized = np.asarray(depth_normalized, dtype=np.float32)[::-1]
+        depth = np.asarray(get_real_depth_map(sim, depth_normalized), dtype=np.float32)
+
+        obj_type, geom_id = seg[:, :, 0], seg[:, :, 1]
+        body_id = np.full(geom_id.shape, -1, dtype=np.int64)
+        is_geom = obj_type == mujoco.mjtObj.mjOBJ_GEOM
+        body_id[is_geom] = self.model.geom_bodyid[geom_id[is_geom]]
+        return depth, body_id
+
+    def _render_depth_and_body_ids_via_mujoco_renderer(
+        self, camera_name: str, height: int, width: int
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Fallback used only when there's no live sim to render through
+        (``self._render_sim is None``). Two things had to be worked out
+        empirically against this package's actual installed mujoco (3.5.0),
+        not assumed from docs:
+
+        1. Offscreen multisampling (``model.vis.quality.offsamples``, 4 by
+           default) blends object-id colors at silhouette edges, and
+           ``mujoco.Renderer``'s segmentation decode has no bounds check
+           against that -- confirmed by a real ``IndexError`` at an
+           anti-aliased edge pixel. Multisampling is disabled here for the
+           duration of this one render (via a temporary flip, since
+           ``self.model`` may be the *same* object a live robosuite env
+           also renders with -- restored in ``finally`` either way) rather
+           than left off permanently, so video/other rendering elsewhere
+           keeps its antialiasing.
+        2. ``mujoco.Renderer``'s segmentation mode must be enabled and then
+           ``update_scene`` called *again* before rendering -- calling
+           ``render()`` right after ``enable_segmentation_rendering()``
+           without refreshing the scene reuses a stale id table and hits the
+           same ``IndexError``.
+
+        No row flip is needed on this path's output (confirmed by
+        deprojecting a real object's pixel and checking it lands on that
+        object's known world position) -- ``mujoco.Renderer`` already returns
+        standard top-to-bottom row order, unlike robosuite's own raw
+        ``sim.render()`` (see ``_render_depth_and_body_ids_via_sim``)."""
+        old_samples = self.model.vis.quality.offsamples
+        self.model.vis.quality.offsamples = 0
+        renderer = None
+        try:
+            renderer = mujoco.Renderer(self.model, height=height, width=width)
+            renderer.update_scene(self.data, camera=camera_name)
+            renderer.enable_depth_rendering()
+            depth = np.asarray(renderer.render(), dtype=np.float32).copy()
+            renderer.disable_depth_rendering()
+
+            renderer.enable_segmentation_rendering()
+            renderer.update_scene(self.data, camera=camera_name)
+            seg = np.asarray(renderer.render()).copy()  # (H, W, 2): (objid, objtype)
+            renderer.disable_segmentation_rendering()
+        finally:
+            if renderer is not None:
+                renderer.close()
+            self.model.vis.quality.offsamples = old_samples
+
+        geom_id, obj_type = seg[:, :, 0], seg[:, :, 1]
+        body_id = np.full(geom_id.shape, -1, dtype=np.int64)
+        is_geom = obj_type == mujoco.mjtObj.mjOBJ_GEOM
+        body_id[is_geom] = self.model.geom_bodyid[geom_id[is_geom]]
+        return depth, body_id
+
+    def deproject_camera_depth(self, camera_name: str, depth: np.ndarray) -> np.ndarray:
+        """(H, W) depth (meters, as returned by ``render_depth_and_body_ids``)
+        -> (H, W, 3) world-frame points, inverting ``_camera_project``'s
+        forward pinhole model (see ``camera_pose_world``/``camera_intrinsics``
+        for the convention)."""
+        height, width = depth.shape
+        cam_pos, cam_mat = self.camera_pose_world(camera_name)
+        K = self.camera_intrinsics(camera_name, height, width)
+        f, cx, cy = K[0, 0], K[0, 2], K[1, 2]
+        rows, cols = np.meshgrid(np.arange(height), np.arange(width), indexing="ij")
+        x_cam = (cols - cx) * depth / f
+        y_cam = -(rows - cy) * depth / f
+        z_cam = -depth
+        pts_cam = np.stack([x_cam, y_cam, z_cam], axis=-1)
+        return pts_cam @ cam_mat.T + cam_pos
 
     # ---------------------------------------------------------------- collision
 

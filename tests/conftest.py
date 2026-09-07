@@ -23,15 +23,7 @@ for _candidate in (VLM_STL_ROOT / "LIBERO", VLM_STL_ROOT):
 if str(STEP_ROOT) not in sys.path:
     sys.path.insert(0, str(STEP_ROOT))
 
-ALPHABET_SOUP_BDDL = (
-    VLM_STL_ROOT
-    / "LIBERO/libero/libero/bddl_files/libero_object/pick_up_the_alphabet_soup_and_place_it_in_the_basket.bddl"
-)
-OPEN_DRAWER_BDDL = (
-    VLM_STL_ROOT
-    / "LIBERO/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl"
-)
-
+from step.system_one.libero_scene import _import_libero_benchmark, _import_libero_env  # noqa: E402
 from step.system_one.motion.panda import (  # noqa: E402
     EE_SITE,
     GRIPPER_BODIES,
@@ -41,9 +33,28 @@ from step.system_one.motion.panda import (  # noqa: E402
 )
 
 
-def _libero_available() -> bool:
+def _bddl_path(suite: str, filename: str) -> Path | None:
+    """Resolve a bundled bddl file through the active ``libero`` install
+    (whatever its package layout -- see ``_import_libero_benchmark``)
+    instead of a hardcoded vlm-stl-relative path, so this also works
+    against a normal pip/uv-installed LIBERO (e.g. Cap-X's
+    ``.venv-libero``) that isn't checked out next to this repo at all."""
     try:
-        import libero.libero.envs  # noqa: F401
+        _, get_libero_path = _import_libero_benchmark()
+        return Path(get_libero_path("bddl_files")) / suite / filename
+    except Exception:
+        return None
+
+
+ALPHABET_SOUP_BDDL = _bddl_path("libero_object", "pick_up_the_alphabet_soup_and_place_it_in_the_basket.bddl")
+OPEN_DRAWER_BDDL = _bddl_path("libero_goal", "open_the_top_drawer_and_put_the_bowl_inside.bddl")
+
+
+def _libero_available() -> bool:
+    if ALPHABET_SOUP_BDDL is None:
+        return False
+    try:
+        _import_libero_env()
     except Exception:
         return False
     return ALPHABET_SOUP_BDDL.exists()
@@ -56,7 +67,7 @@ requires_libero = pytest.mark.skipif(not _libero_available(), reason="LIBERO/rob
 def libero_env():
     if not _libero_available():
         pytest.skip("LIBERO/robosuite env not available")
-    from libero.libero.envs import OffScreenRenderEnv
+    OffScreenRenderEnv = _import_libero_env()
 
     env = OffScreenRenderEnv(bddl_file_name=str(ALPHABET_SOUP_BDDL), camera_heights=64, camera_widths=64)
     env.reset()
@@ -74,8 +85,10 @@ def libero_scene(libero_env):
 
 
 def _libero_drawer_available() -> bool:
+    if OPEN_DRAWER_BDDL is None:
+        return False
     try:
-        import libero.libero.envs  # noqa: F401
+        _import_libero_env()
     except Exception:
         return False
     return OPEN_DRAWER_BDDL.exists()
@@ -90,7 +103,7 @@ requires_libero_drawer = pytest.mark.skipif(
 def libero_drawer_env():
     if not _libero_drawer_available():
         pytest.skip("LIBERO/robosuite drawer env not available")
-    from libero.libero.envs import OffScreenRenderEnv
+    OffScreenRenderEnv = _import_libero_env()
 
     env = OffScreenRenderEnv(bddl_file_name=str(OPEN_DRAWER_BDDL), camera_heights=64, camera_widths=64)
     env.reset()

@@ -90,11 +90,11 @@ class PlaceSkill:
         attached: AttachedObjectState,
         goal_container_body: str,
         start_q: np.ndarray,
-        max_lift_m: float = 0.12,
+        max_lift_m: float = 0.20,
         step_m: float = 0.01,
     ) -> np.ndarray:
-        """If ``start_q`` is already in collision, back straight up in small
-        collision-checked increments until clear (or the lift budget runs
+        """If ``start_q`` is already in collision, retreat in small
+        collision-checked increments until clear (or the retreat budget runs
         out). Standard "escape from initial contact" practice for a planner
         that (correctly) refuses to plan from an invalid start state.
 
@@ -105,6 +105,17 @@ class PlaceSkill:
         into a container wall by the time ``place`` takes over. Retreating
         first, rather than failing outright, means an imprecise transport
         handoff doesn't sink the whole placement.
+
+        Tries straight-up lift *and* a lift-while-moving-toward-the-
+        container's-center direction, not just straight up -- confirmed via a
+        real rollout's per-step contact distances that a purely vertical
+        retreat can leave a penetration depth completely unchanged across the
+        entire lift budget (e.g. a carried object embedded sideways in a
+        basket's wall stays embedded in that same wall at every height, since
+        the overlap is horizontal, not vertical -- lifting straight up just
+        slides along inside the wall instead of escaping it). Moving toward
+        the container's center pulls a laterally-embedded object back into
+        the (collision-free) interior instead.
         """
         check = self.collision_checker.check(
             start_q, phase=CollisionPhase.FREE_SPACE, attached=attached, goal_container_body=goal_container_body
@@ -118,19 +129,32 @@ class PlaceSkill:
         scratch.set_qpos(joint_names, start_q)
         hand_pos, hand_quat = scratch.site_pose(ee_site)
 
-        q = start_q
+        container_pos, _ = scene.body_pose(goal_container_body)
+        toward_center_xy = container_pos[:2] - hand_pos[:2]
+        norm = float(np.linalg.norm(toward_center_xy))
+        toward_center_xy = toward_center_xy / norm if norm > 1e-6 else np.zeros(2)
+
+        directions = {
+            "up": np.array([0.0, 0.0, 1.0]),
+            "up_toward_center": np.array(
+                [toward_center_xy[0], toward_center_xy[1], 1.0]
+            ),
+        }
         n_steps = max(1, int(round(max_lift_m / step_m)))
-        for i in range(1, n_steps + 1):
-            target_pos = hand_pos + np.array([0.0, 0.0, step_m * i])
-            ik = self.ik_solver.solve(scratch, target_pos, hand_quat, seed_q=q)
-            if not ik.success:
-                continue
-            q = ik.q
-            c = self.collision_checker.check(
-                q, phase=CollisionPhase.FREE_SPACE, attached=attached, goal_container_body=goal_container_body
-            )
-            if not c.in_collision:
-                return q
+        for direction in directions.values():
+            unit = direction / float(np.linalg.norm(direction))
+            q = start_q
+            for i in range(1, n_steps + 1):
+                target_pos = hand_pos + unit * step_m * i
+                ik = self.ik_solver.solve(scratch, target_pos, hand_quat, seed_q=q)
+                if not ik.success:
+                    continue
+                q = ik.q
+                c = self.collision_checker.check(
+                    q, phase=CollisionPhase.FREE_SPACE, attached=attached, goal_container_body=goal_container_body
+                )
+                if not c.in_collision:
+                    return q
         return start_q  # couldn't escape within budget; planner will report start_in_collision honestly
 
     def execute(

@@ -24,12 +24,15 @@ go, not the raw actuation.
 
 from __future__ import annotations
 
+import logging
+from pathlib import Path
+
 import numpy as np
 
 from .attached_object import AttachedObjectManager
 from .collision import CollisionChecker, CollisionPhase
 from .config import MotionConfig
-from .grasp_generator import CompositeGraspGenerator, GraspGenerator, PrivilegedTopDownGraspGenerator
+from .grasp_generator import GraspGenerator, PrivilegedTopDownGraspGenerator
 from .kinematics import IKSolver
 from .mpc import JointSpaceMPC, MPCContext
 from .ompl_planner import MotionPlanner
@@ -48,6 +51,7 @@ class LiberoPickAdapter(_ServoMixin):
         self.joint_names = JOINT_NAMES
         self.ee_site = EE_SITE
         self.hand_site = HAND_SITE
+        self._pick_image_counter = 0
 
     # ------------------------------------------------------------ construction
 
@@ -59,14 +63,26 @@ class LiberoPickAdapter(_ServoMixin):
             scene, self.joint_names, self.ee_site, ROBOT_BODIES, GRIPPER_BODIES, self.config.collision
         )
         lo, hi = scene.joint_qpos_range(self.joint_names)
-        gen: GraspGenerator = PrivilegedTopDownGraspGenerator(self.config.grasp)
         if self.config.contact_graspnet.enabled:
             # Lazily imported: this module (and the contact_graspnet_pytorch/
             # CUDA it needs) is only ever touched when explicitly enabled --
             # see contact_graspnet_generator.py's module docstring.
+            #
+            # GraspNet-only, not composited with the heuristic generator: a
+            # real run showed PickSkill's OR-set cost function picking the
+            # heuristic's cheap-but-wrong center-top candidate over every
+            # real GraspNet candidate for a shallow rim object (ramekin) --
+            # the heuristic's zero-cost `generator_score_penalty` (it doesn't
+            # score itself) plus its lower path/reachability cost beat every
+            # GraspNet candidate regardless of physical grasp quality. Once
+            # GraspNet is enabled, it alone proposes candidates so this
+            # tradeoff can't silently reintroduce the heuristic's known-bad
+            # grasps for rim/hollow objects.
             from .contact_graspnet_generator import ContactGraspNetGenerator
 
-            gen = CompositeGraspGenerator([gen, ContactGraspNetGenerator(self.config.contact_graspnet)])
+            gen: GraspGenerator = ContactGraspNetGenerator(self.config.contact_graspnet)
+        else:
+            gen = PrivilegedTopDownGraspGenerator(self.config.grasp)
         ik = IKSolver(joint_names=self.joint_names, site_name=self.ee_site)
         planner = MotionPlanner(self.joint_names, lo, hi, checker, self.config.planner)
         return PickSkill(gen, ik, planner, checker, self.config)
@@ -82,6 +98,111 @@ class LiberoPickAdapter(_ServoMixin):
         # (now-stale) scratch clone used purely for FK.
         return SceneQuery.from_robosuite_sim(self.env.env.sim).get_qpos(self.joint_names)
 
+    def _save_grasp_pose_image(
+        self, scene: SceneQuery, candidates: list, plan_result: SkillResult, outdir: str | Path | None
+    ) -> None:
+        if outdir is None:
+            return
+        try:
+            from .grasp_viz import save_grasp_candidates_image
+
+            camera_name = getattr(self.env, "camera_name", "agentview")
+            width = int(getattr(self.env, "camera_width", 512))
+            height = int(getattr(self.env, "camera_height", 512))
+            frame = self.env.render_rgb_frame(camera_name=camera_name, width=width, height=height)
+            selected = plan_result.selected_grasp if plan_result.success else None
+            out_path = Path(outdir) / f"grasp_poses_pick_{self._pick_image_counter}.png"
+            save_grasp_candidates_image(frame, scene.model, scene.data, camera_name, candidates, out_path, selected)
+            self._pick_image_counter += 1
+        except Exception:
+            # Purely observational -- a rendering hiccup here must never take
+            # down the actual pick attempt.
+            logging.getLogger(__name__).exception("Failed to save grasp-pose visualization")
+
+    # ------------------------------------------------------------ closer-look fallback
+
+    def _compute_hover_pose(
+        self, scene: SceneQuery, object_body_name: str, extra_height_m: float = 0.15
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        """A wrist-camera vantage point above the object, not a grasp pose.
+
+        Reuses ``PrivilegedTopDownGraspGenerator``'s own object-center/height
+        logic (already accounts for the object's real AABB and this robot's
+        palm/finger clearance, e.g. it already knows cream_cheese_1 is ~2cm
+        tall and won't put the target height inside the table) purely to get
+        a reasonable XY/Z above the object, then adds extra height on top so
+        the wrist camera gets a clear top-down view of it without itself
+        being close enough to collide. Orientation is a plain top-down look
+        (no yaw), since this is just a vantage point, not the eventual grasp.
+        """
+        heuristic = PrivilegedTopDownGraspGenerator(self.config.grasp)
+        candidates = heuristic.generate(scene, [object_body_name])
+        if not candidates:
+            return None
+        hover_pos = candidates[0].grasp_pose_world[:3].copy()
+        hover_pos[2] += extra_height_m
+        # Gripper approach axis (+Z) pointing straight down (-world Z) -- a
+        # 180 degree rotation about world X, same top-down convention
+        # grasp_generator.py's own _TOP_DOWN_QUAT_WXYZ uses; no yaw, since
+        # this is a vantage point, not the eventual grasp.
+        hover_quat = np.array([0.0, 1.0, 0.0, 0.0])
+        return hover_pos, hover_quat
+
+    def _move_to_hover(
+        self,
+        scene: SceneQuery,
+        skill: PickSkill,
+        start_q: np.ndarray,
+        hover_pos: np.ndarray,
+        hover_quat: np.ndarray,
+        step_callback,
+        max_steps: int,
+    ) -> tuple[SceneQuery, np.ndarray, int] | None:
+        """Physically move to ``hover_pos``/``hover_quat`` under the same
+        collision-aware planning/tracking this file uses everywhere else --
+        never a teleport. Returns ``(new_scene, new_start_q, steps_used)``, or
+        ``None`` if the hover pose itself isn't IK-reachable or planning to it
+        fails (the caller then just keeps the original failure)."""
+        ik = skill.ik_solver.solve(scene.clone(), hover_pos, hover_quat, seed_q=start_q)
+        if not ik.success:
+            return None
+        check = skill.collision_checker.check(ik.q, phase=CollisionPhase.FREE_SPACE)
+        if check.in_collision:
+            return None
+        plan = skill.planner.plan(start_q, [ik.q], phase=CollisionPhase.FREE_SPACE)
+        if not plan.success:
+            return None
+        traj = TimeParameterizer(self.config.time_param).parameterize(plan)
+        if traj.positions is None:
+            return None
+
+        mpc = JointSpaceMPC(
+            self.joint_names,
+            self.ee_site,
+            horizon=int(self.config.mpc.get("horizon", 16)),
+            cost_config=MPCCostConfig(**{k: v for k, v in self.config.mpc.items() if k in MPCCostConfig.__dataclass_fields__}),
+        )
+        ctx = MPCContext(reference=traj.positions)
+        mpc.reset()
+
+        steps = 0
+        for t0 in range(len(traj.positions)):
+            live_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
+            q_current = live_scene.get_qpos(self.joint_names)
+            mpc_result = mpc.step(
+                live_scene, q_current, ctx, t0_step=t0,
+                collision_checker=skill.collision_checker, collision_phase=CollisionPhase.FREE_SPACE,
+            )
+            cart_pos, cart_ori = self._servo_toward_joint_target(live_scene, mpc_result.joint_command)
+            self._step_env(cart_pos, cart_ori, self.env.open_gripper_cmd)
+            steps += 1
+            if step_callback is not None:
+                step_callback()
+            if steps >= max_steps:
+                break
+
+        return self._build_scene(), steps
+
     # ------------------------------------------------------------ public entry point
 
     def run(
@@ -90,6 +211,7 @@ class LiberoPickAdapter(_ServoMixin):
         constraints: dict | None = None,
         max_steps: int = 600,
         step_callback=None,
+        outdir: str | Path | None = None,
     ) -> tuple[SkillResult, int, AttachedObjectState | None]:
         """Returns (SkillResult, steps_executed, AttachedObjectState | None) so the executor can build a
         ``SkillExecutionRecord`` without re-deriving step counts.
@@ -98,6 +220,18 @@ class LiberoPickAdapter(_ServoMixin):
         real env step -- the executor wires this to ``_capture_video_frame``
         so ``--save-video`` works for this backend too (this loop doesn't go
         through ``step_nominal()``, which is where that normally gets called).
+
+        ``outdir``, if given, gets a ``grasp_poses_pick_N.png`` image of
+        every candidate this call considered (green = PickSkill's actual
+        selection, if any) -- a permanent, automatic record of what the
+        generator proposed and what got picked, saved on every real run (not
+        just when manually invoking ``scripts/visualize_grasp_poses.py``).
+        This was previously the only way to see this, and only by re-running
+        candidate generation from scratch against a scene snapshot -- doubly
+        wasteful for a learned generator like ContactGraspNetGenerator,
+        which re-runs real CUDA inference on every ``generate()`` call.
+        Generating candidates *here*, once, and handing them straight to
+        ``skill.execute()`` (its own ``candidates=`` param) avoids that.
         """
         constraints = constraints or {}
         scene = self._build_scene()
@@ -110,16 +244,53 @@ class LiberoPickAdapter(_ServoMixin):
         body_names = [resolve_body_name(scene, name) for name in object_set]
         canonical_by_body = dict(zip(body_names, object_set))
 
-        plan_result = skill.execute(scene, body_names, start_q, constraints)
+        candidates = skill.grasp_generator.generate(scene, body_names)
+        plan_result = skill.execute(scene, body_names, start_q, constraints, candidates=candidates)
+
+        pre_steps = 0
+        needs_closer_look = (
+            not plan_result.success
+            and plan_result.failure_reason == SkillFailureReason.NO_FEASIBLE_CANDIDATE
+            and len(body_names) == 1
+        )
+        if needs_closer_look:
+            # The single-shot capture (from wherever the arm started, e.g.
+            # its home pose) can be too sparse for a small/thin object --
+            # confirmed against the real cream_cheese_1 asset (~2cm tall):
+            # Contact-GraspNet found only 3 raw grasps total across every
+            # viewpoint retry, vs. 32+ for a soup can from the same capture
+            # setup. Move the wrist camera close to the object first, then
+            # recapture and regenerate from there, rather than giving up on
+            # the first (distant) look.
+            hover = self._compute_hover_pose(scene, body_names[0])
+            if hover is not None:
+                moved = self._move_to_hover(scene, skill, start_q, hover[0], hover[1], step_callback, max_steps)
+                if moved is not None:
+                    new_scene, hover_steps = moved
+                    pre_steps = hover_steps
+                    new_start_q = new_scene.get_qpos(self.joint_names)
+                    new_candidates = skill.grasp_generator.generate(new_scene, body_names)
+                    new_plan_result = skill.execute(
+                        new_scene, body_names, new_start_q, constraints, candidates=new_candidates
+                    )
+                    # Only adopt the closer-look attempt if it actually did
+                    # better -- keep the original (scene, candidates,
+                    # plan_result, start_q) if the second attempt is no
+                    # improvement, so diagnostics/video still reflect
+                    # whichever attempt is being reported.
+                    if new_plan_result.success or len(new_candidates) > len(candidates):
+                        scene, start_q, candidates, plan_result = new_scene, new_start_q, new_candidates, new_plan_result
+
+        self._save_grasp_pose_image(scene, candidates, plan_result, outdir)
         if not plan_result.success:
-            return plan_result, 0, None
+            return plan_result, pre_steps, None
 
         traj = TimeParameterizer(self.config.time_param).parameterize(plan_result.planned_trajectory)
         if traj.positions is None:
             plan_result.success = False
             plan_result.failure_reason = SkillFailureReason.EXECUTION_FAILED
             plan_result.diagnostics["detail"] = "time parameterization produced no reference"
-            return plan_result, 0, None
+            return plan_result, pre_steps, None
 
         cand = plan_result.selected_grasp
         object_body_name = plan_result.selected_grasp.object_name  # real MuJoCo body name
@@ -180,7 +351,7 @@ class LiberoPickAdapter(_ServoMixin):
         max_hold_steps = max_steps if max_steps is not None else len(full_reference) + cfg.max_settle_steps
         tracking_budget = min(max_hold_steps, len(full_reference) + cfg.max_settle_steps)
 
-        steps = 0
+        steps = pre_steps
         gripper_cmd = self.env.open_gripper_cmd
         pos_err = ori_err = float("inf")
         converged = False

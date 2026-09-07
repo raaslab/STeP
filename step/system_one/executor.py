@@ -324,11 +324,26 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         # legacy default. This is important for real scenes with arbitrary
         # object names / colors: "pick yellow_cube" should initialize the env
         # around yellow_cube, not whichever object happens to sort first.
+        #
+        # Trust any subtask's own explicit object reference as long as it
+        # resolves to a *known* scene entity -- checking against the full
+        # entity set (self.resolver.entity_roles), not just the
+        # "manipulated_object"-role subset. role_for_object_name's heuristic
+        # (libero_scene.py) checks _GOAL_OR_SUPPORT_HINTS before
+        # _MOVABLE_HINTS, and both lists contain "bowl"/"plate" -- so a task
+        # whose actual target *is* a bowl or plate (e.g. "pick up the black
+        # bowl...") always gets classified support_object, never
+        # manipulated_object. Gating on manipulated_object_names() alone then
+        # silently falls through to the "first manipulated object" fallback,
+        # which for an all-support_object scene means "no fallback" -- and a
+        # confirmed real rollout showed this landing on an arbitrary,
+        # never-touched object instead of the one actually picked.
+        known_entities = set(self.resolver.entity_roles)
         manipulated = sorted(self.resolver.manipulated_object_names())
         active_object_name = None
         for sub in subtasks:
             obj = self.resolver.canonical(sub.get("params", {}).get("object"))
-            if obj in manipulated:
+            if obj in known_entities:
                 active_object_name = obj
                 break
         if active_object_name is None:
@@ -480,7 +495,7 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         )
 
     def _run_pick_with_motion_pipeline(
-        self, env: BaseManipulationEnv, sub: dict[str, Any]
+        self, env: BaseManipulationEnv, sub: dict[str, Any], outdir: str | Path | None = None
     ) -> tuple[bool, int, dict[str, Any]]:
         from .motion.config import MotionConfig
         from .motion.libero_pick_adapter import LiberoPickAdapter
@@ -499,6 +514,7 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
             constraints={},
             max_steps=max_steps,
             step_callback=lambda: self._capture_video_frame(env),
+            outdir=outdir,
         )
         # Persisted across subtasks so a later `place` on the new pipeline
         # knows the grasp-relative transform/collision spheres of whatever
@@ -1275,8 +1291,23 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                 sub = active_subtasks[idx]
                 self._set_video_subtask_overlay(sub)
                 skill = sub["skill"]
+                # Only trust this subtask's own object reference if it
+                # resolves to a *known* scene entity. resolver.canonical()
+                # falls back to returning its input unchanged when nothing
+                # matches -- so a generic placeholder like "object" or
+                # "goal_region" (transport/place's own params, never meant to
+                # name a concrete body) comes back as that literal string,
+                # not None. Calling set_active_object() with it anyway
+                # overwrote whatever a prior pick had just correctly set via
+                # its own result.selected_object -- confirmed by a real
+                # rollout where transport immediately reported
+                # active_object_name='object' (a nonexistent body) right
+                # after pick had established 'glazed_rim_porcelain_ramekin_1',
+                # causing _is_grasped() to falsely report no grasp and the
+                # legacy transport stage machine to release and restart its
+                # own naive top-down grasp attempt.
                 object_name = self.resolver.canonical(sub.get("params", {}).get("object"))
-                if object_name is not None:
+                if object_name is not None and object_name in self.resolver.entity_roles:
                     env.set_active_object(object_name)
 
                 # Safety guard: if a previous interaction has knocked the
@@ -1350,10 +1381,29 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                         env.set_grasp_offset_override(None)
                     if hasattr(env, "set_active_object_height"):
                         env.set_active_object_height(None)
+                    # Mirror _begin_new_pick_skill's own "already grasped ->
+                    # skip straight to carry" logic. "transport" always runs
+                    # on the legacy step_nominal() stage machine (see
+                    # _motion_backend's docstring), whose self.stage the new
+                    # ompl_mpc pick pipeline never touches at all -- so after
+                    # a successful ompl_mpc pick, self.stage is still sitting
+                    # at its env.reset() default of 0 ("move to pregrasp,
+                    # gripper OPEN"). Dispatching transport without this sync
+                    # made stage 0 immediately open the gripper -- releasing
+                    # the real grasp pick just established -- and restart the
+                    # legacy stage machine's own naive top-down close from
+                    # scratch, which (confirmed by a real rollout: cube_pos
+                    # slid along the table at ~constant z instead of lifting,
+                    # eef-cube distance never closed to a real grip range)
+                    # only pushes a shallow object like a bowl/ramekin rather
+                    # than actually gripping it.
+                    if hasattr(env, "_is_grasped") and hasattr(env, "stage"):
+                        env.stage = 3 if env._is_grasped() else 0
+                        env.close_counter = 0
                     self._refresh_subtask_bookkeeping(env)
                 motion_backend = self._motion_backend(env)
                 if skill == "pick" and motion_backend == "ompl_mpc":
-                    done, steps, last_status = self._run_pick_with_motion_pipeline(env, sub)
+                    done, steps, last_status = self._run_pick_with_motion_pipeline(env, sub, outdir=outdir)
                 elif skill == "place" and motion_backend == "ompl_mpc":
                     done, steps, last_status = self._run_place_with_motion_pipeline(env, sub)
                 elif skill == "open" and motion_backend == "ompl_mpc":

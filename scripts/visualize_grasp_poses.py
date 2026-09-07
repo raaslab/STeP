@@ -27,7 +27,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
 
 STEP_ROOT = Path(__file__).resolve().parents[1]
 VLM_STL_ROOT = (STEP_ROOT / ".." / "vlm-stl").resolve()
@@ -67,32 +66,6 @@ def _configure_libero_paths() -> None:
 _configure_libero_paths()
 
 
-def _camera_project(model, data, camera_name: str, height: int, width: int, points_world: np.ndarray) -> np.ndarray:
-    """World (N,3) -> pixel (N,2) [row, col] for a MuJoCo camera, matching the
-    same up/down flip ``LiberoManipulationEnv.render_rgb_frame`` applies to
-    its rendered frames (see that method's docstring for why the flip is
-    needed instead of robosuite's private macro file)."""
-    import mujoco
-
-    cam_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, camera_name)
-    if cam_id < 0:
-        raise KeyError(f"No camera named {camera_name!r} in model.")
-    cam_pos = data.cam_xpos[cam_id]
-    cam_mat = data.cam_xmat[cam_id].reshape(3, 3)
-    fovy_deg = float(model.cam_fovy[cam_id])
-    f = 0.5 * height / np.tan(0.5 * np.deg2rad(fovy_deg))
-
-    local = (points_world - cam_pos[None, :]) @ cam_mat  # (N,3), camera frame
-    depth = -local[:, 2]
-    depth_safe = np.where(np.abs(depth) < 1e-6, 1e-6, depth)
-    col = width / 2.0 + f * local[:, 0] / depth_safe
-    row = height / 2.0 - f * local[:, 1] / depth_safe
-    row_flipped = height - 1 - row
-    pixels = np.stack([row_flipped, col], axis=1)
-    pixels[depth <= 0] = np.nan  # behind the camera
-    return pixels
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--suite", required=True)
@@ -107,24 +80,28 @@ def main() -> int:
     parser.add_argument("--no-score-with-pick-skill", dest="score", action="store_false")
     args = parser.parse_args()
 
+    from step.system_one.libero_scene import _import_libero_benchmark, _import_libero_env  # sets MUJOCO_GL (step/__init__.py) before mujoco is ever imported
+
     import mujoco
     import torch  # noqa: F401  -- LIBERO's benchmark module expects torch importable
-    from libero.libero import benchmark
+
+    benchmark, get_libero_path = _import_libero_benchmark()
 
     from step.system_one.motion.collision import CollisionChecker
     from step.system_one.motion.config import MotionConfig
     from step.system_one.motion.grasp_generator import PrivilegedTopDownGraspGenerator
+    from step.system_one.motion.grasp_viz import save_grasp_candidates_image
     from step.system_one.motion.kinematics import IKSolver
     from step.system_one.motion.ompl_planner import MotionPlanner
     from step.system_one.motion.panda import EE_SITE, GRIPPER_BODIES, JOINT_NAMES, ROBOT_BODIES
     from step.system_one.motion.pick_skill import PickSkill
-    from step.system_one.motion.scene_query import SceneQuery, quat_to_rotmat_wxyz
+    from step.system_one.motion.scene_query import SceneQuery
 
     bm = benchmark.get_benchmark_dict()[args.suite]()
     task = bm.get_task(args.task_id)
-    bddl_file = str(Path(benchmark.get_libero_path("bddl_files")) / task.problem_folder / task.bddl_file)
+    bddl_file = str(Path(get_libero_path("bddl_files")) / task.problem_folder / task.bddl_file)
 
-    from libero.libero.envs import OffScreenRenderEnv
+    OffScreenRenderEnv = _import_libero_env()
 
     env = OffScreenRenderEnv(bddl_file_name=bddl_file, camera_heights=args.height, camera_widths=args.width, camera_names=args.camera)
     env.reset()
@@ -139,12 +116,6 @@ def main() -> int:
 
     raw_frame = env.sim.render(camera_name=args.camera, height=args.height, width=args.width)
     frame = np.asarray(raw_frame)[::-1]
-    image = Image.fromarray(frame)
-    draw = ImageDraw.Draw(image)
-    try:
-        font = ImageFont.load_default()
-    except Exception:
-        font = None
 
     model = env.env.sim.model._model
     data = env.env.sim.data._data
@@ -159,7 +130,7 @@ def main() -> int:
     candidates = gen.generate(scene, object_names)
     print(f"[visualize_grasp_poses] {len(candidates)} candidates across {object_names}")
 
-    selected_index = None
+    selected_grasp = None
     if args.score:
         checker = CollisionChecker(scene, JOINT_NAMES, EE_SITE, ROBOT_BODIES, GRIPPER_BODIES, MotionConfig().collision)
         lo, hi = scene.joint_qpos_range(JOINT_NAMES)
@@ -167,44 +138,14 @@ def main() -> int:
         planner = MotionPlanner(JOINT_NAMES, lo, hi, checker, MotionConfig().planner)
         skill = PickSkill(gen, ik, planner, checker, MotionConfig())
         start_q = scene.get_qpos(JOINT_NAMES)
-        result = skill.execute(scene, object_names, start_q)
+        result = skill.execute(scene, object_names, start_q, candidates=candidates)
         print(f"[visualize_grasp_poses] PickSkill result: success={result.success} failure_reason={result.failure_reason}")
-        if result.success and result.selected_grasp is not None:
-            sel = result.selected_grasp
-            for i, c in enumerate(candidates):
-                if np.allclose(c.grasp_pose_world, sel.grasp_pose_world):
-                    selected_index = i
-                    break
+        if result.success:
+            selected_grasp = result.selected_grasp
 
-    finger_half_span = 0.04  # purely visual: half the gripper's max opening, to draw the closing-axis line
-    for i, cand in enumerate(candidates):
-        R = quat_to_rotmat_wxyz(cand.grasp_quat_wxyz)
-        close_axis_world = R @ np.array([1.0, 0.0, 0.0])  # gripper local +X is the closing axis
-        p_center = cand.grasp_position
-        p_a = p_center + finger_half_span * close_axis_world
-        p_b = p_center - finger_half_span * close_axis_world
-
-        pts = _camera_project(model, data, args.camera, args.height, args.width, np.stack([p_center, p_a, p_b]))
-        if np.isnan(pts).any():
-            continue
-        (r0, c0), (r1, c1), (r2, c2) = pts
-
-        is_selected = i == selected_index
-        strategy = cand.metadata.get("strategy", "center")
-        color = (0, 220, 0) if is_selected else ((255, 140, 0) if strategy == "rim_edge" else (60, 140, 255))
-        width_px = 4 if is_selected else 2
-
-        draw.line([(c1, r1), (c2, r2)], fill=color, width=width_px)
-        radius = 6 if is_selected else 4
-        draw.ellipse([c0 - radius, r0 - radius, c0 + radius, r0 + radius], outline=color, width=2)
-        label = "SELECTED" if is_selected else str(i)
-        draw.text((c0 + 6, r0 + 6), label, fill=color, font=font)
-
-    out_path = Path(args.out)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    image.save(out_path)
+    out_path = save_grasp_candidates_image(frame, model, data, args.camera, candidates, args.out, selected_grasp)
     print(f"[visualize_grasp_poses] wrote {out_path} ({len(candidates)} candidates, "
-          f"{'selected candidate highlighted in green' if selected_index is not None else 'no candidate selected/highlighted'})")
+          f"{'selected candidate highlighted in green' if selected_grasp is not None else 'no candidate selected/highlighted'})")
     return 0
 
 
