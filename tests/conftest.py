@@ -48,6 +48,7 @@ def _bddl_path(suite: str, filename: str) -> Path | None:
 
 ALPHABET_SOUP_BDDL = _bddl_path("libero_object", "pick_up_the_alphabet_soup_and_place_it_in_the_basket.bddl")
 OPEN_DRAWER_BDDL = _bddl_path("libero_goal", "open_the_top_drawer_and_put_the_bowl_inside.bddl")
+TURN_ON_STOVE_BDDL = _bddl_path("libero_goal", "turn_on_the_stove.bddl")
 
 
 def _libero_available() -> bool:
@@ -118,3 +119,39 @@ def libero_drawer_scene(libero_drawer_env):
     from step.system_one.motion.scene_query import SceneQuery
 
     return SceneQuery.from_robosuite_sim(libero_drawer_env.env.sim)
+
+
+def _libero_stove_available() -> bool:
+    if TURN_ON_STOVE_BDDL is None:
+        return False
+    try:
+        _import_libero_env()
+    except Exception:
+        return False
+    return TURN_ON_STOVE_BDDL.exists()
+
+
+requires_libero_stove = pytest.mark.skipif(
+    not _libero_stove_available(), reason="LIBERO/robosuite stove env not available"
+)
+
+
+@pytest.fixture(scope="session")
+def libero_stove_env():
+    if not _libero_stove_available():
+        pytest.skip("LIBERO/robosuite stove env not available")
+    OffScreenRenderEnv = _import_libero_env()
+
+    env = OffScreenRenderEnv(bddl_file_name=str(TURN_ON_STOVE_BDDL), camera_heights=64, camera_widths=64)
+    env.reset()
+    yield env
+    env.close()
+
+
+@pytest.fixture()
+def libero_stove_scene(libero_stove_env):
+    """A fresh scratch SceneQuery for each test, synced from the shared live
+    stove-task env but never written back to it."""
+    from step.system_one.motion.scene_query import SceneQuery
+
+    return SceneQuery.from_robosuite_sim(libero_stove_env.env.sim)

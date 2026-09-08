@@ -205,8 +205,39 @@ class KnobConfig:
     """
 
     approach_standoff_m: float = 0.06
+    # A knob's full diameter is typically wider than this gripper's max
+    # opening (measured ~5.5cm radius on LIBERO's flat_stove asset, i.e.
+    # ~11cm across -- wider than the gripper can span). Grasping instead
+    # targets a narrow chord near the rim this wide -- see
+    # turn_knob_skill.py's module docstring for the chord-geometry
+    # derivation. Must be comfortably under the gripper's real max opening.
+    grasp_chord_width_m: float = 0.035
+    # Vertical clearance (m), added along the knob's own rotation axis, above
+    # the knob's own measured surface before computing the grasp/standoff
+    # pose. A flat stove knob sits recessed relative to the raised burner
+    # grate/control-panel housing around it -- gripping exactly at the
+    # knob's own measured height put the gripper's *open* fingers into that
+    # surrounding housing at most tested angles (confirmed directly against
+    # the real flat_stove_1 asset: 0/8 candidate angles were collision-clear
+    # at 0 margin, climbing to 7/8 at 0.04). Same "raise the grasp height to
+    # clear a short/recessed feature" pattern as GraspSampleConfig.
+    # grasp_height_margin_m and ContactGraspNetConfig.grasp_height_margin_m,
+    # just a larger value -- this fixture's surrounding geometry is taller
+    # than either of those cases' short objects.
+    grasp_height_margin_m: float = 0.04
+    # Unlike a drawer handle (one measured position), a knob has a full
+    # circle of equally-valid grasp points -- rotational symmetry means there
+    # is no single "correct" angular position to grip it at, only ones that
+    # happen to be reachable/collision-clear given whatever else (a burner
+    # grate, an adjacent knob) sits around this particular knob. So the
+    # search has two dimensions where a drawer only has one: which angle
+    # around the rim to grip, and (per angle) which IK seed. This many
+    # evenly-spaced angles around the full circle are tried; each one
+    # delegates its own IK-seed retries to ``_solve_ik_robust``.
+    radial_angle_samples: int = 8
     # Same "try a few, take the first feasible" shape as
-    # DrawerConfig.pose_selection_attempts.
+    # DrawerConfig.pose_selection_attempts -- now spent per angle, not
+    # instead of the angle search.
     pose_selection_attempts: int = 6
     planning_attempts: int = 3
     # Tried largest-first; the first fraction of the joint's full measured

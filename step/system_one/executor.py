@@ -730,6 +730,36 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         }
         return bool(result.success), steps, status
 
+    def _run_turn_knob_with_motion_pipeline(
+        self, env: BaseManipulationEnv, sub: dict[str, Any]
+    ) -> tuple[bool, int, dict[str, Any]]:
+        from .motion.config import MotionConfig
+        from .motion.skills.libero_stove_adapter import LiberoStoveAdapter
+
+        params = sub.get("params", {}) or {}
+        knob_ref = self.resolver.canonical(params.get("object")) or params.get("object")
+        if not knob_ref:
+            return False, 0, {"success": False, "failure_reason": "no_object", "detail": "turn_on subtask has no params.object"}
+
+        motion_config = MotionConfig.from_scene_context(self.scene_context)
+        adapter = LiberoStoveAdapter(env, motion_config)
+        max_steps = int(self.max_subtask_steps) if self.max_subtask_steps is not None else 600
+        result, steps, turn_on_verification = adapter.run(
+            knob_ref,
+            constraints={},
+            max_steps=max_steps,
+            step_callback=lambda: self._capture_video_frame(env),
+        )
+        status: dict[str, Any] = {
+            "success": bool(result.success),
+            "selected_object": result.selected_object,
+            "failure_reason": str(result.failure_reason),
+            "cost_breakdown": result.cost_breakdown,
+            "diagnostics": result.diagnostics,
+            "turn_on_verification": turn_on_verification,
+        }
+        return bool(result.success), steps, status
+
     @staticmethod
     def _goal_region_entity_name(raw: Any) -> str | None:
         """Return `raw` only when it names a scene entity (a plain string).
@@ -1509,6 +1539,8 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                     done, steps, last_status = self._run_place_with_motion_pipeline(env, sub)
                 elif skill == "open" and motion_backend == "ompl_mpc":
                     done, steps, last_status = self._run_open_drawer_with_motion_pipeline(env, sub)
+                elif skill == "turn_on" and motion_backend == "ompl_mpc":
+                    done, steps, last_status = self._run_turn_knob_with_motion_pipeline(env, sub)
                 else:
                     steps = 0
                     done = False
