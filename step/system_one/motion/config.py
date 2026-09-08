@@ -199,6 +199,31 @@ class DrawerConfig:
 
 
 @dataclass
+class KnobConfig:
+    """Tuning for ``TurnKnobSkill``/``LiberoStoveAdapter`` (hinge-jointed
+    knobs/dials only -- see ``motion/articulation.py``'s ``discover_knobs``).
+    """
+
+    approach_standoff_m: float = 0.06
+    # Same "try a few, take the first feasible" shape as
+    # DrawerConfig.pose_selection_attempts.
+    pose_selection_attempts: int = 6
+    planning_attempts: int = 3
+    # Tried largest-first; the first fraction of the joint's full measured
+    # range (from its current qpos toward its "on" endpoint) that's both
+    # IK-reachable and collision-clear wins -- mirrors
+    # DrawerConfig.pull_fraction_fallbacks.
+    turn_fraction_fallbacks: tuple[float, ...] = (0.75, 0.6, 0.45, 0.3)
+    # Absolute qpos (radians) at/above which the knob counts as "turned on".
+    # Matches LIBERO's own flat_stove.turn_on() threshold (qpos >= 0.5) --
+    # see turn_knob_skill.py's module docstring for the source. Overridable
+    # per-scene for a different knob/threshold.
+    turn_on_qpos_threshold: float = 0.5
+    retreat_m: float = 0.06
+    retreat_steps: int = 40
+
+
+@dataclass
 class ContactGraspNetConfig:
     """Tuning for ``ContactGraspNetGenerator`` (contact_graspnet_generator.py)
     -- a learned grasp-candidate source, called in-process. When enabled,
@@ -254,6 +279,10 @@ class ContactGraspNetConfig:
     # None: a fresh (non-reproducible) RNG per generate() call, matching real
     # deployment. Tests pass a fixed seed for determinism.
     viewpoint_seed: int | None = None
+    # Same value and purpose as GraspSampleConfig.grasp_height_margin_m --
+    # see ContactGraspNetGenerator._generate_for_object's floor/palm-
+    # clearance clamp for why this generator needs it too.
+    grasp_height_margin_m: float = 0.01
 
 
 @dataclass
@@ -296,6 +325,7 @@ class MotionConfig:
     replan: ReplanConfig = field(default_factory=ReplanConfig)
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
     drawer: DrawerConfig = field(default_factory=DrawerConfig)
+    knob: KnobConfig = field(default_factory=KnobConfig)
     contact_graspnet: ContactGraspNetConfig = field(default_factory=ContactGraspNetConfig)
     mpc: dict[str, float] = field(default_factory=dict)  # raw dict -> MPCCostConfig(**mpc)
 
@@ -314,6 +344,7 @@ class MotionConfig:
             replan=ReplanConfig(**raw.get("replan", {})),
             execution=ExecutionConfig(**raw.get("execution", {})),
             drawer=DrawerConfig(**raw.get("drawer", {})),
+            knob=KnobConfig(**raw.get("knob", {})),
             contact_graspnet=ContactGraspNetConfig(**raw.get("contact_graspnet", {})),
             mpc=dict(raw.get("mpc", {})),
         )

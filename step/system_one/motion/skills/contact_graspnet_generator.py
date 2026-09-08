@@ -116,10 +116,10 @@ from typing import Any, Callable
 
 import numpy as np
 
-from .config import ContactGraspNetConfig
+from ..config import ContactGraspNetConfig
 from .grasp_generator import GraspGenerator
-from .scene_query import SceneQuery, quat_to_rotmat_wxyz, rotmat_to_quat_wxyz
-from .types import GraspCandidate
+from ..scene_query import SceneQuery, quat_to_rotmat_wxyz, rotmat_to_quat_wxyz
+from ..types import GraspCandidate
 
 logger = logging.getLogger(__name__)
 
@@ -255,9 +255,6 @@ class ContactGraspNetGenerator(GraspGenerator):
 
     def _generate_for_object(self, scene: SceneQuery, object_name: str) -> list[GraspCandidate]:
         pc_full_world, pc_segment_world = self._capture_point_clouds(scene, object_name)
-        import os as _os
-        if _os.environ.get("STEP_DEBUG_CAPTURE"):
-            print(f"[DEBUG capture] object={object_name!r} pc_full={len(pc_full_world)} pc_segment={len(pc_segment_world)}")
         if len(pc_segment_world) < 4:
             return []
 
@@ -267,6 +264,61 @@ class ContactGraspNetGenerator(GraspGenerator):
         )
         if len(grasps) == 0:
             return []
+
+        # Same floor/palm-clearance clamp as PrivilegedTopDownGraspGenerator
+        # (grasp_generator.py) -- the network's raw contact_pts height is
+        # otherwise used unclamped, which is fine for anything tall enough
+        # that its natural contact height already clears the table, but for
+        # a very short/thin object (e.g. cream_cheese_1, ~2cm tall) the
+        # network can correctly identify a low contact point on the object
+        # that this gripper's *hardware* can't reach without the palm or
+        # fingers -- which extend past the TCP -- hitting the table first.
+        # Confirmed via a real rollout: every rejected cream_cheese
+        # candidate's grasp height sat within ~2mm of the object's own
+        # resting/floor height, and PickSkill rejected them all with
+        # grasp_pose_in_collision/grasp_ik_failed, never even reaching a
+        # real grasp attempt.
+        #
+        # Two corrections beyond a direct port of that clamp, both confirmed
+        # against cream_cheese_1's real numbers:
+        # 1. "Floor height" must come from the object's own AABB *bottom*
+        #    (object_center_z - half_extents[2]), not raw obj_pos[2] --
+        #    PrivilegedTopDownGraspGenerator's own comment assumes obj_pos[2]
+        #    IS the resting/floor height, which holds only when a body's
+        #    origin coincides with its base. cream_cheese_1's origin instead
+        #    sits at its geometric *center* (center_offset[2] is ~0), so
+        #    using obj_pos[2] directly silently assumed a floor ~1cm too
+        #    high.
+        # 2. Even with (1) fixed, finger_reach_below_tcp_m() alone
+        #    (~1.27cm) already exceeds this object's full height (~2cm) --
+        #    for any object that thin, an *uncapped* clamp still overshoots
+        #    past the object's own top surface entirely (measured: clamp
+        #    landed at z=0.0316 vs the object's real top at z=0.0189, i.e.
+        #    1.3cm of empty air above a 2cm-tall object -- confirmed via a
+        #    real rollout as the reason the gripper closed on nothing despite
+        #    perfect tracking to that target). A safety clamp that floats the
+        #    grasp point above the object it's meant to protect defeats its
+        #    own purpose, so cap it -- worst case, grasp within the object's
+        #    own body rather than floating above it entirely. Capping at
+        #    *exactly* object_top_z (tried first) pinned every candidate for
+        #    this object to one identical height with zero margin below the
+        #    boundary the collision checker itself is evaluating -- confirmed
+        #    against a real rollout to still reject every candidate as
+        #    grasp_pose_in_collision, just at the opposite (too-tight, not
+        #    too-high) extreme. Backing off by the same margin used for the
+        #    other two thresholds gives the checker real clearance instead of
+        #    sitting exactly on its own decision boundary.
+        min_safe_z = None
+        extent = scene.body_extent_world(object_name)
+        if extent is not None:
+            obj_pos, _ = scene.body_pose(object_name)
+            margin = self.config.grasp_height_margin_m
+            object_center_z = obj_pos[2] + extent.center_offset[2]
+            object_top_z = object_center_z + extent.half_extents[2]
+            object_bottom_z = object_center_z - extent.half_extents[2]
+            min_safe_for_palm = object_top_z - scene.palm_clearance_above_tcp_m() + margin
+            min_safe_for_floor = object_bottom_z + scene.finger_reach_below_tcp_m() + margin
+            min_safe_z = min(max(min_safe_for_palm, min_safe_for_floor), object_top_z - margin)
 
         order = np.argsort(-raw_scores)[: self.config.max_candidates]
         out: list[GraspCandidate] = []
@@ -301,7 +353,9 @@ class ContactGraspNetGenerator(GraspGenerator):
             # yet the gripper visibly closed on empty air well above the
             # table -- i.e. the *target itself*, not the tracking, was
             # wrong.
-            fingertip_pos = contact_pts[i]
+            fingertip_pos = contact_pts[i].copy()
+            if min_safe_z is not None:
+                fingertip_pos[2] = max(fingertip_pos[2], min_safe_z)
             fingertip_quat = rotmat_to_quat_wxyz(transform[:3, :3])
             grasp_pose = np.concatenate([fingertip_pos, fingertip_quat])
             approach_direction_world = quat_to_approach_axis(fingertip_quat)

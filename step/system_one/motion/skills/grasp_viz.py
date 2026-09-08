@@ -18,8 +18,8 @@ from typing import Any
 
 import numpy as np
 
-from .scene_query import quat_to_rotmat_wxyz
-from .types import GraspCandidate
+from ..scene_query import quat_to_rotmat_wxyz
+from ..types import GraspCandidate
 
 
 def camera_project(model: Any, data: Any, camera_name: str, height: int, width: int, points_world: np.ndarray) -> np.ndarray:

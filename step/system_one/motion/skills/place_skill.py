@@ -19,12 +19,12 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .collision import CollisionChecker, CollisionPhase, required_hand_pose_for_object_pose
-from .config import MotionConfig
-from .kinematics import IKSolver
-from .ompl_planner import MotionPlanner
-from .scene_query import SceneQuery
-from .types import AttachedObjectState, MotionPlan, SkillFailureReason, SkillResult
+from ..collision import CollisionChecker, CollisionPhase, required_hand_pose_for_object_pose
+from ..config import MotionConfig
+from ..kinematics import IKSolver
+from ..ompl_planner import MotionPlanner
+from ..scene_query import SceneQuery
+from ..types import AttachedObjectState, MotionPlan, SkillFailureReason, SkillResult
 
 
 def _container_floor_and_rim_z(scene: SceneQuery, container_body: str) -> tuple[float, float]:

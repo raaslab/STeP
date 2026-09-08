@@ -5,13 +5,13 @@ from step.system_one.motion.collision import CollisionChecker
 from step.system_one.motion.config import MotionConfig, PlannerConfig
 from step.system_one.motion.kinematics import IKSolver
 from step.system_one.motion.ompl_planner import MotionPlanner
-from step.system_one.motion.open_drawer_skill import (
+from step.system_one.motion.skills.open_drawer_skill import (
     _orientation_from_approach_and_reference,
     _solve_ik_robust,
     handle_grasp_pose,
 )
 from step.system_one.motion.articulation import resolve_drawer
-from step.system_one.motion.open_drawer_skill import OpenDrawerSkill
+from step.system_one.motion.skills.open_drawer_skill import OpenDrawerSkill
 from step.system_one.motion.scene_query import quat_to_rotmat_wxyz
 from step.system_one.motion.types import SkillFailureReason
 

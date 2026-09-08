@@ -478,6 +478,105 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         env.close_counter = 0
         self._refresh_subtask_bookkeeping(env)
 
+    def _boost_carry_height_for_goal_container(self, env: BaseManipulationEnv, sub: dict[str, Any]) -> None:
+        """Raise ``env.carry_z`` if needed so the *carried object* -- not just
+        the gripper -- clears (1) the goal container's real rim, and (2) the
+        surface the object is being picked up *from*, during legacy
+        transport's travel.
+
+        Legacy transport has no notion of the carried object's own footprint
+        (see place_skill.py's ``_escape_start_collision`` docstring for the
+        same limitation at the transport->place handoff): ``carry_z`` is a
+        single fixed height (``table_z + carry_height_above_table``, default
+        17cm) meant to clear obstacles, but neither term in that formula
+        knows about anything taller than the table.
+
+        Case 1 (goal container): a tall object grasped near its top (e.g. a
+        bbq sauce bottle) hangs *below* the gripper by roughly its own
+        height -- confirmed via a real rollout where transport crashed with
+        "backend_step_error" after the object was dropped, and the numbers
+        work out almost exactly: eef height (~0.214m) minus the attached
+        object's own collision_radius_m (~0.072m, from the prior ompl_mpc
+        pick's sphere-fit) landed at ~0.142m, a hair below the real basket's
+        measured rim height (~0.1414m) -- razor-thin, and evidently not
+        always enough.
+
+        Case 2 (starting surface): confirmed via a real rollout ("pick up
+        the black bowl on the wooden cabinet") that an object resting on
+        something *taller than the table* (a cabinet top, measured ~1.128m)
+        can already sit at or above the *default* carry_z (table_z + 0.17 ~=
+        1.07-1.14m) -- with no real lift margin between "where the object
+        already is" and "carry_z", stage 2->3's own transition condition
+        (cube_pos[2] >= carry_z - 0.02) was satisfied the instant transport
+        began, skipping any deliberate vertical lift entirely and going
+        straight to stage 4's horizontal travel while the bowl (held only by
+        its rim) was still resting right at the cabinet's edge -- catching
+        on it as the arm swung sideways and losing the grip completely
+        (confirmed on video: the bowl never moves at all while the arm
+        travels away without it).
+
+        Raising carry_z above whichever of these two real surfaces is
+        taller (by the attached object's own collision_radius_m plus a
+        margin) accounts for both without needing the legacy stage machine
+        to become fully attachment-aware.
+
+        Best-effort: any failure to resolve the goal container, the
+        object's current position, or the attached state just leaves
+        carry_z at its existing value -- this is a safety margin increase,
+        never a hard requirement for transport to run.
+        """
+        attached = getattr(self, "_motion_attached_state", None)
+        if attached is None or not hasattr(env, "carry_z"):
+            return
+        try:
+            from .motion.skills.place_skill import _container_floor_and_rim_z
+            from .motion.scene_query import SceneQuery, resolve_body_name
+
+            scene = SceneQuery.from_robosuite_sim(env.env.sim)
+            margin = 0.02
+            candidate_carry_zs = []
+
+            params = sub.get("params", {}) or {}
+            raw_goal_region = params.get("goal_region")
+            entity_name = self._goal_region_entity_name(raw_goal_region) or params.get("goal")
+            goal_name = self.resolver.canonical(entity_name)
+            if goal_name is not None:
+                goal_container_body = resolve_body_name(scene, goal_name)
+                _, rim_top_z = _container_floor_and_rim_z(scene, goal_container_body)
+                candidate_carry_zs.append(rim_top_z + float(attached.collision_radius_m) + margin)
+
+            # Also clear the surface the object is being picked *up from*,
+            # not just the goal it's headed *to* -- confirmed via a real
+            # rollout ("pick up the black bowl on the wooden cabinet"): the
+            # bowl rests on the cabinet's own top (measured ~1.128m), almost
+            # exactly at the *default* carry_z (table_z + 0.17 ~= 1.07-1.14m
+            # depending on table_z). With no real lift margin between "where
+            # the object already is" and "carry_z", stage 2->3's own
+            # transition condition (cube_pos[2] >= carry_z - 0.02) was
+            # already satisfied the instant transport began -- skipping any
+            # deliberate vertical lift and going straight to stage 4's
+            # horizontal travel while the bowl (held only by its rim) was
+            # still resting right at the cabinet's edge, catching on it as
+            # the arm swung sideways and losing the grip entirely (confirmed
+            # on video: the bowl never moves at all while the arm travels
+            # away without it). Use the *attached object's own current
+            # height* (wherever it's actually resting -- table, cabinet top,
+            # drawer, whatever) plus its collision radius as a second lower
+            # bound, so there's always a real, deliberate clearance lift
+            # before any horizontal travel starts.
+            try:
+                object_pos, _ = scene.body_pose(attached.object_name)
+                candidate_carry_zs.append(float(object_pos[2]) + float(attached.collision_radius_m) + margin)
+            except Exception:
+                pass
+
+            if candidate_carry_zs:
+                required_carry_z = max(candidate_carry_zs)
+                if required_carry_z > float(env.carry_z):
+                    env.carry_z = required_carry_z
+        except Exception:
+            pass
+
     def _motion_backend(self, env: BaseManipulationEnv) -> str:
         """``platform.libero.motion_backend`` from scene_context: "legacy"
         (default -- the stage machine/STLCartesianMPC this whole file
@@ -498,7 +597,7 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         self, env: BaseManipulationEnv, sub: dict[str, Any], outdir: str | Path | None = None
     ) -> tuple[bool, int, dict[str, Any]]:
         from .motion.config import MotionConfig
-        from .motion.libero_pick_adapter import LiberoPickAdapter
+        from .motion.skills.libero_pick_adapter import LiberoPickAdapter
 
         params = sub.get("params", {}) or {}
         object_set = params.get("object_candidates")
@@ -544,7 +643,7 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         self, env: BaseManipulationEnv, sub: dict[str, Any]
     ) -> tuple[bool, int, dict[str, Any]]:
         from .motion.config import MotionConfig
-        from .motion.libero_place_adapter import LiberoPlaceAdapter
+        from .motion.skills.libero_place_adapter import LiberoPlaceAdapter
 
         attached_state = getattr(self, "_motion_attached_state", None)
         if attached_state is None:
@@ -605,7 +704,7 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         self, env: BaseManipulationEnv, sub: dict[str, Any]
     ) -> tuple[bool, int, dict[str, Any]]:
         from .motion.config import MotionConfig
-        from .motion.libero_open_drawer_adapter import LiberoOpenDrawerAdapter
+        from .motion.skills.libero_open_drawer_adapter import LiberoOpenDrawerAdapter
 
         params = sub.get("params", {}) or {}
         drawer_ref = self.resolver.canonical(params.get("object")) or params.get("object")
@@ -1400,6 +1499,8 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                     if hasattr(env, "_is_grasped") and hasattr(env, "stage"):
                         env.stage = 3 if env._is_grasped() else 0
                         env.close_counter = 0
+                    if skill == "transport":
+                        self._boost_carry_height_for_goal_container(env, sub)
                     self._refresh_subtask_bookkeeping(env)
                 motion_backend = self._motion_backend(env)
                 if skill == "pick" and motion_backend == "ompl_mpc":
@@ -1511,6 +1612,26 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
             post_steps_run = 0
             post_last_status: dict[str, Any] = {}
             if success and self.post_success_steps > 0:
+                # Same class of bug as the per-subtask stage sync above, one
+                # more place it was missing: this loop calls the legacy
+                # stage machine's own step_nominal() directly, completely
+                # outside the per-subtask dispatch loop that normally does
+                # this sync -- so if the *last* subtask (e.g. "place")
+                # actually ran on the new ompl_mpc pipeline, env.stage is
+                # still sitting at its env.reset() default of 0 ("approach
+                # pregrasp, gripper open"). Confirmed via a real rollout:
+                # these "settle" steps then restarted a brand-new pick
+                # attempt on whatever the legacy _cube_pos() tracks (the
+                # object that had just been correctly placed, now resting
+                # inside the goal container) and dove the arm back down,
+                # catching and lifting the whole basket. Stage 7 (retreat,
+                # gripper open, falls back to a computed generic retreat
+                # target if retreat_anchor_xy was never set by this
+                # backend) is the correct "we're already done" state here,
+                # not stage 0's "start a fresh pick".
+                if hasattr(env, "stage"):
+                    env.stage = 7
+                    env.close_counter = 0
                 for _ in range(self.post_success_steps):
                     try:
                         _, _, terminated, info = env.step_nominal()

@@ -26,7 +26,7 @@ from dataclasses import dataclass
 import mujoco
 import numpy as np
 
-from .scene_query import SceneQuery
+from .scene_query import SceneQuery, quat_to_rotmat_wxyz
 
 _LEVEL_KEYWORDS = ("top", "upper", "middle", "bottom", "lower")
 _EXCLUDE_NAME_PARTS = ("robot", "gripper", "panda")
@@ -194,3 +194,116 @@ def measure_pull_axis_and_travel(
     travel_m = float(np.linalg.norm(delta))
     pull_axis_world = delta / travel_m if travel_m > 1e-9 else np.array([0.0, 1.0, 0.0])
     return pull_axis_world, travel_m, qpos_closed, qpos_open
+
+
+# --------------------------------------------------------------------- knobs/dials
+
+
+@dataclass
+class KnobHandle:
+    knob_body: str
+    joint_name: str
+    label: str
+
+
+def discover_knobs(scene: SceneQuery) -> list[KnobHandle]:
+    """Every hinge-jointed knob/dial in the loaded model -- mirrors
+    ``discover_drawers``' generic (not name-hardcoded) discovery, just for
+    ``mjJNT_HINGE`` instead of ``mjJNT_SLIDE``. LIBERO's flat_stove knob is
+    itself named "button" in the source asset despite being a rotary dial
+    (confirmed against the real XML: a hinge joint with range [-0.005, 2.1]
+    rad, not a slide) -- so this discovers by joint *type*, the same
+    measured-not-assumed philosophy as the rest of this module, rather than
+    trusting either object's own naming."""
+    model = scene.model
+    out: list[KnobHandle] = []
+    for jid in range(model.njnt):
+        if model.jnt_type[jid] != mujoco.mjtJoint.mjJNT_HINGE:
+            continue
+        joint_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, jid)
+        if not joint_name or any(part in _normalize(joint_name) for part in _EXCLUDE_NAME_PARTS):
+            continue
+        body_id = int(model.jnt_bodyid[jid])
+        body_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, body_id)
+        if not body_name:
+            continue
+        out.append(KnobHandle(knob_body=body_name, joint_name=joint_name, label=_normalize(body_name)))
+    return out
+
+
+def resolve_knob(scene: SceneQuery, canonical_name: str) -> KnobHandle:
+    """Keyword-match a canonical name (e.g. ``"flat_stove_1"``, a raw joint
+    name, or the knob body's own name) against the discovered knobs."""
+    knobs = discover_knobs(scene)
+    query = _normalize(canonical_name)
+    for k in knobs:
+        if _normalize(k.joint_name) in query or _normalize(k.knob_body) in query or query in _normalize(k.knob_body):
+            return k
+    if len(knobs) == 1:
+        return knobs[0]
+    available = [f"{k.label} (joint={k.joint_name})" for k in knobs]
+    raise KeyError(f"Could not resolve {canonical_name!r} to a known knob/dial. Available: {available}")
+
+
+def measure_knob_rotation(scene: SceneQuery, knob: KnobHandle) -> tuple[np.ndarray, np.ndarray, float, float]:
+    """Measure (in world space, via real FK on two scratch clones at the
+    joint's own range endpoints) the fixed axis a knob's hinge joint
+    rotates about, and its pivot center.
+
+    Mirrors ``measure_pull_axis_and_travel``'s own reasoning: rather than
+    trusting the joint's local ``jnt_axis``/the body's own frame convention
+    (which depends on how the body happens to be re-oriented in its parent's
+    frame -- confirmed against the real flat_stove asset: its knob body
+    carries a 90-degree mounting quat, so the local +Z the XML defines the
+    hinge about is *not* the world axis it actually spins about), extract the
+    real rotation axis from the *measured* delta rotation between the two
+    range endpoints.
+
+    Returns ``(axis_world, center_world, qpos_lo, qpos_hi)`` -- the raw joint
+    range endpoints, not assumed ordered "off -> on" (callers compare against
+    the object's own known "on" threshold, e.g. flat_stove's qpos >= 0.5, to
+    decide which direction to turn).
+    """
+    lo, hi = scene.joint_qpos_range([knob.joint_name])
+    lo, hi = float(lo[0]), float(hi[0])
+
+    scene_lo = scene.clone()
+    scene_lo.set_qpos([knob.joint_name], np.array([lo]))
+    pos_lo, quat_lo = scene_lo.body_pose(knob.knob_body)
+
+    scene_hi = scene.clone()
+    scene_hi.set_qpos([knob.joint_name], np.array([hi]))
+    pos_hi, quat_hi = scene_hi.body_pose(knob.knob_body)
+
+    r_lo = quat_to_rotmat_wxyz(quat_lo)
+    r_hi = quat_to_rotmat_wxyz(quat_hi)
+    r_delta = r_hi @ r_lo.T
+    axis = np.array(
+        [
+            r_delta[2, 1] - r_delta[1, 2],
+            r_delta[0, 2] - r_delta[2, 0],
+            r_delta[1, 0] - r_delta[0, 1],
+        ]
+    )
+    norm = float(np.linalg.norm(axis))
+    axis_world = axis / norm if norm > 1e-9 else np.array([0.0, 0.0, 1.0])
+    # A hinge's own body origin doesn't translate as its qpos changes (only
+    # rotates about the joint's pivot, which -- for a knob mounted flush to
+    # its own body frame, confirmed against flat_stove -- coincides with the
+    # body origin); pos_lo and pos_hi should already match; averaging is a
+    # cheap safety net against float drift, not a real translation.
+    center_world = 0.5 * (pos_lo + pos_hi)
+    return axis_world, center_world, lo, hi
+
+
+def estimate_knob_radius_m(scene: SceneQuery, knob: KnobHandle, axis_world: np.ndarray) -> float:
+    """Real radius of the knob body, measured perpendicular to its rotation
+    axis from its own collision geoms' world AABB -- mirrors
+    ``estimate_handle_closing_width_m``'s "measure the actual geometry,
+    don't assume a constant" approach."""
+    extent = scene.body_extent_world(knob.knob_body)
+    if extent is None:
+        raise KeyError(f"knob body {knob.knob_body!r} has no collision geoms to measure a radius from")
+    axis = np.abs(axis_world / np.linalg.norm(axis_world))
+    perp_weight = 1.0 - axis  # ~0 along the rotation axis itself, ~1 perpendicular to it
+    return float(np.max(extent.half_extents * perp_weight))

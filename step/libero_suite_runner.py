@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +28,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--max-states", type=int, default=1)
     p.add_argument("--state-ids", nargs="+", type=int, default=None)
     p.add_argument("--all-states", action="store_true")
-    p.add_argument("--outdir", default="outputs/libero_suite")
+    p.add_argument(
+        "--outdir",
+        default=None,
+        help="Defaults to outputs/<suite>_<timestamp> (e.g. outputs/libero_object_20260907_143000) when omitted.",
+    )
     p.add_argument("--model", default=None)
     p.add_argument("--compiled-plan", default=None, help="Debug only: reuse one direct STL plan for every task.")
     p.add_argument("--save-video", default="rollout.mp4", help="Video filename inside each rollout directory.")
@@ -158,6 +163,13 @@ def _build_command(
     return cmd
 
 
+def _print_running_tally(results: list[dict[str, Any]]) -> None:
+    ran = [r for r in results if not r.get("skipped")]
+    successes = [r for r in ran if r.get("success") is True]
+    rate = len(successes) / max(1, len(ran))
+    print(f"[suite] running success rate: {len(successes)}/{len(ran)} ({rate:.1%})")
+
+
 def _read_summary(run_dir: Path) -> dict[str, Any]:
     path = run_dir / "execution_summary.json"
     if not path.exists():
@@ -170,6 +182,9 @@ def _read_summary(run_dir: Path) -> dict[str, Any]:
 
 def main() -> int:
     args = parse_args()
+    if args.outdir is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        args.outdir = f"outputs/{args.suite}_{timestamp}"
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     _add_paths(args.legacy_vlm_stl_root, outdir)
@@ -204,6 +219,7 @@ def main() -> int:
             print(f"{label} skip")
             summary = _read_summary(run_dir)
             results.append(_result_row(task, state_id, run_dir, prompt, 0, 0.0, summary, skipped=True))
+            _print_running_tally(results)
             continue
 
         cmd = _build_command(args, task=task, state_id=state_id, run_dir=run_dir, prompt=prompt)
@@ -218,6 +234,7 @@ def main() -> int:
         summary = _read_summary(run_dir)
         print(f"{label} exit={ret} success={summary.get('success')} elapsed={elapsed:.1f}s")
         results.append(_result_row(task, state_id, run_dir, prompt, ret, elapsed, summary, skipped=False))
+        _print_running_tally(results)
 
     if args.dry_run:
         print("[suite] dry-run complete")

@@ -3,7 +3,7 @@ import pytest
 
 from conftest import HAND_SITE, requires_libero
 from step.system_one.motion.config import GraspSampleConfig
-from step.system_one.motion.grasp_generator import (
+from step.system_one.motion.skills.grasp_generator import (
     CompositeGraspGenerator,
     GraspGenerator,
     PrivilegedTopDownGraspGenerator,
@@ -146,7 +146,7 @@ def test_rim_edge_gated_by_object_class(libero_scene):
     cands = gen.generate(libero_scene, ["alphabet_soup_1_main"])
     assert not any(c.metadata["strategy"] == "rim_edge" for c in cands)
 
-    from step.system_one.motion.grasp_generator import _is_rim_graspable_object_class
+    from step.system_one.motion.skills.grasp_generator import _is_rim_graspable_object_class
 
     assert _is_rim_graspable_object_class("akita_black_bowl_1_main")
     assert _is_rim_graspable_object_class("glazed_rim_porcelain_ramekin_1_main")
@@ -182,7 +182,7 @@ def test_zero_yaw_top_down_quat_is_wxyz_0100():
     grasp_generator._object_xy_obb_world) and generally isn't 0.
     ``test_generates_top_down_approach`` already covers that every generated
     candidate points straight down regardless of its yaw."""
-    from step.system_one.motion.grasp_generator import _TOP_DOWN_QUAT_WXYZ
+    from step.system_one.motion.skills.grasp_generator import _TOP_DOWN_QUAT_WXYZ
     from step.system_one.motion.scene_query import quat_mul_wxyz, quat_to_rotmat_wxyz
 
     q = quat_mul_wxyz(yaw_quat_wxyz(0.0), _TOP_DOWN_QUAT_WXYZ)
@@ -243,16 +243,36 @@ def test_grasp_height_clamped_above_floor_for_thin_object(libero_scene):
     plain AABB-center height would put the rigid fingers *below* the surface
     the object rests on (verified against the real cream_cheese_1 asset,
     2cm tall: the finger body ended up ~1cm into the floor). The generator
-    must raise the grasp height above that plain center formula, by exactly
-    the configured clamp."""
+    must raise the grasp height above that plain center formula.
+
+    The floor reference is the object's own AABB *bottom*
+    (object_bottom_z), not its raw body-origin z -- cream_cheese_1's origin
+    sits at its geometric center (center_offset[2] is ~0), so using the raw
+    origin directly would assume a floor ~1cm too high. And the result is
+    capped at object_top_z - margin, never allowed to exceed the object's
+    own body: for cream_cheese_1 specifically, finger_reach_below_tcp_m()
+    alone already exceeds the object's full height, so the "ideal" floor
+    clearance is infeasible and the cap is what actually determines the
+    final height -- confirmed via a real rollout that an uncapped clamp
+    landed 1.3cm *above* the object's own top surface, and the gripper
+    closed on nothing despite tracking to that target with near-zero error.
+    """
     gen = PrivilegedTopDownGraspGenerator(GraspSampleConfig(num_yaw_samples=1))
     cand = gen.generate(libero_scene, ["cream_cheese_1_main"])[0]
     origin_pos, _ = libero_scene.body_pose("cream_cheese_1_main")
     extent = libero_scene.body_extent_world("cream_cheese_1_main")
     naive_center_z = origin_pos[2] + extent.center_offset[2]
-    min_safe_z = origin_pos[2] + libero_scene.finger_reach_below_tcp_m() + gen.config.grasp_height_margin_m
-    assert min_safe_z > naive_center_z, "fixture object must actually need the clamp for this test to be meaningful"
-    assert np.isclose(cand.grasp_position[2], min_safe_z, atol=1e-6)
+    object_top_z = origin_pos[2] + extent.center_offset[2] + extent.half_extents[2]
+    object_bottom_z = origin_pos[2] + extent.center_offset[2] - extent.half_extents[2]
+    margin = gen.config.grasp_height_margin_m
+    min_safe_for_floor = object_bottom_z + libero_scene.finger_reach_below_tcp_m() + margin
+    assert min_safe_for_floor > naive_center_z, "fixture object must actually need the clamp for this test to be meaningful"
+    expected_z = min(min_safe_for_floor, object_top_z - margin)
+    assert np.isclose(cand.grasp_position[2], expected_z, atol=1e-6)
+    # And, regardless of the exact clamp formula, the result must never
+    # float above the object's own body -- that's the actual bug this test
+    # (and the clamp itself) exists to prevent.
+    assert cand.grasp_position[2] <= object_top_z + 1e-6
 
 
 @requires_libero
@@ -276,7 +296,7 @@ def test_width_estimate_matches_real_obb_and_is_minimal_at_optimum(libero_scene)
     yaws, (b) never be less than the OBB's true short side (the physical
     minimum), and (c) hit exactly that minimum at the fitted-optimal yaw
     (offset 0, always one of the samples)."""
-    from step.system_one.motion.grasp_generator import _object_xy_obb_world
+    from step.system_one.motion.skills.grasp_generator import _object_xy_obb_world
 
     gen = PrivilegedTopDownGraspGenerator(GraspSampleConfig(num_yaw_samples=8, yaw_search_half_range_rad=0.6))
     cands = gen.generate(libero_scene, ["alphabet_soup_1_main"])

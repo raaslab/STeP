@@ -24,24 +24,25 @@ go, not the raw actuation.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from pathlib import Path
 
 import numpy as np
 
-from .attached_object import AttachedObjectManager
-from .collision import CollisionChecker, CollisionPhase
-from .config import MotionConfig
+from ..attached_object import AttachedObjectManager
+from ..collision import CollisionChecker, CollisionPhase
+from ..config import MotionConfig
 from .grasp_generator import GraspGenerator, PrivilegedTopDownGraspGenerator
-from .kinematics import IKSolver
-from .mpc import JointSpaceMPC, MPCContext
-from .ompl_planner import MotionPlanner
-from .panda import EE_SITE, GRIPPER_BODIES, HAND_SITE, JOINT_NAMES, ROBOT_BODIES
+from ..kinematics import IKSolver
+from ..mpc import JointSpaceMPC, MPCContext
+from ..ompl_planner import MotionPlanner
+from ..panda import EE_SITE, GRIPPER_BODIES, HAND_SITE, JOINT_NAMES, ROBOT_BODIES
 from .pick_skill import PickSkill
-from .scene_query import SceneQuery, quat_to_rotmat_wxyz, resolve_body_name
-from .servo import _ServoMixin, is_settle_stalled
-from .time_parameterize import TimeParameterizer
-from .types import AttachedObjectState, MPCCostConfig, SkillFailureReason, SkillResult
+from ..scene_query import SceneQuery, quat_to_rotmat_wxyz, resolve_body_name
+from ..servo import _ServoMixin, is_settle_stalled
+from ..time_parameterize import TimeParameterizer
+from ..types import AttachedObjectState, MPCCostConfig, SkillFailureReason, SkillResult
 
 
 class LiberoPickAdapter(_ServoMixin):
@@ -58,9 +59,14 @@ class LiberoPickAdapter(_ServoMixin):
     def _build_scene(self) -> SceneQuery:
         return SceneQuery.from_robosuite_sim(self.env.env.sim)
 
-    def _build_pick_skill(self, scene: SceneQuery) -> PickSkill:
+    def _build_pick_skill(self, scene: SceneQuery, finger_overlap_tolerance_m: float | None = None) -> PickSkill:
+        collision_config = self.config.collision
+        if finger_overlap_tolerance_m is not None:
+            collision_config = dataclasses.replace(
+                collision_config, finger_overlap_tolerance_m=finger_overlap_tolerance_m
+            )
         checker = CollisionChecker(
-            scene, self.joint_names, self.ee_site, ROBOT_BODIES, GRIPPER_BODIES, self.config.collision
+            scene, self.joint_names, self.ee_site, ROBOT_BODIES, GRIPPER_BODIES, collision_config
         )
         lo, hi = scene.joint_qpos_range(self.joint_names)
         if self.config.contact_graspnet.enabled:
@@ -280,6 +286,64 @@ class LiberoPickAdapter(_ServoMixin):
                     # whichever attempt is being reported.
                     if new_plan_result.success or len(new_candidates) > len(candidates):
                         scene, start_q, candidates, plan_result = new_scene, new_start_q, new_candidates, new_plan_result
+
+        if not plan_result.success and plan_result.failure_reason == SkillFailureReason.NO_FEASIBLE_CANDIDATE:
+            # Last resort: GraspNet found nothing usable even after the
+            # closer look above. Rare for well-shaped objects, but real and
+            # hard to fully eliminate for very small/thin ones (confirmed on
+            # cream_cheese_1 -- see contact_graspnet_generator.py's module
+            # docstring for the height-clamp history, and this file's own
+            # closer-look comment for the sparse-candidate history).
+            #
+            # Try the privileged heuristic generator's own candidates as a
+            # genuinely separate, sequential attempt -- NOT composited into
+            # the same OR-set GraspNet's candidates went through.
+            # Compositing was tried and reverted (see _build_pick_skill's own
+            # comment): the heuristic's zero-cost generator_score_penalty let
+            # its cheap center-top candidate beat every real GraspNet
+            # candidate for a rim/hollow object (ramekin) regardless of
+            # physical grasp quality. A sequential fallback that only ever
+            # runs after GraspNet has already failed outright can't
+            # reintroduce that regression -- GraspNet still gets first and
+            # only say whenever it produces anything IK/collision-feasible.
+            heuristic_candidates = PrivilegedTopDownGraspGenerator(self.config.grasp).generate(scene, body_names)
+            if heuristic_candidates:
+                heuristic_plan_result = skill.execute(
+                    scene, body_names, start_q, constraints, candidates=heuristic_candidates
+                )
+                # Adopt this attempt's diagnostics either way, not just on
+                # success -- GraspNet has already definitively failed by this
+                # point, so if the heuristic also fails, ITS rejection
+                # reasons are what's actually worth seeing, not GraspNet's
+                # (silently keeping GraspNet's own diagnostics here made a
+                # real heuristic-side failure invisible in a past run).
+                candidates, plan_result = heuristic_candidates, heuristic_plan_result
+
+            if not plan_result.success and plan_result.failure_reason == SkillFailureReason.NO_FEASIBLE_CANDIDATE:
+                # Absolute last resort: even the heuristic's own center-top
+                # candidates (sampled across every yaw) were all rejected.
+                # Confirmed on cream_cheese_1's real collision data that this
+                # can happen for a genuinely real reason -- a specific
+                # sub-geom of the object's own mesh (a small, real protrusion
+                # not captured by its overall AABB) penetrates a finger by
+                # ~1.1cm, nearly double the default 6mm
+                # finger_overlap_tolerance_m compliance margin -- not a
+                # marginal/borderline case the normal tolerance is meant to
+                # paper over. Rather than refuse the pick entirely, retry the
+                # same heuristic candidates once more through a skill built
+                # with a deliberately widened tolerance for contact with the
+                # *target object specifically* (TERMINAL_APPROACH already
+                # only ever permits gripper<->target contact, never contact
+                # with the table/a neighbor/the robot itself -- widening this
+                # one number doesn't loosen any of those other real safety
+                # checks). Better to attempt a plain center grasp and let
+                # _is_grasped() be the real, final arbiter of whether it
+                # actually worked than to give up outright.
+                relaxed_skill = self._build_pick_skill(scene, finger_overlap_tolerance_m=0.02)
+                relaxed_plan_result = relaxed_skill.execute(
+                    scene, body_names, start_q, constraints, candidates=heuristic_candidates
+                )
+                candidates, plan_result = heuristic_candidates, relaxed_plan_result
 
         self._save_grasp_pose_image(scene, candidates, plan_result, outdir)
         if not plan_result.success:

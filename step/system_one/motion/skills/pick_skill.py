@@ -33,14 +33,14 @@ from __future__ import annotations
 
 import numpy as np
 
-from .collision import CollisionChecker, CollisionPhase
-from .config import MotionConfig
+from ..collision import CollisionChecker, CollisionPhase
+from ..config import MotionConfig
 from .grasp_generator import GraspGenerator
-from .kinematics import IKSolver
-from .ompl_planner import MotionPlanner
-from .panda import FINGER_CLOSED_QPOS, FINGER_JOINT_NAMES
-from .scene_query import SceneQuery
-from .types import (
+from ..kinematics import IKSolver
+from ..ompl_planner import MotionPlanner
+from ..panda import FINGER_CLOSED_QPOS, FINGER_JOINT_NAMES
+from ..scene_query import SceneQuery
+from ..types import (
     CandidateScore,
     GraspCandidate,
     SkillFailureReason,
@@ -393,11 +393,24 @@ class PickSkill:
         breakdown["reachability"] = float(standoff_ik.position_error + standoff_ik.orientation_error)
         breakdown["generator_score_penalty"] = float(1.0 - cand.generator_score)
 
+        # Weight 8.0, not 1.0: generator_score_penalty is bounded to [0, 1],
+        # but path_cost/joint_quality routinely land in the 2-12+ range for a
+        # real arm trajectory -- at weight 1.0 the network's own confidence
+        # was almost noise next to how far the arm has to travel, letting a
+        # candidate the network itself flagged as low-confidence (a real
+        # case: network_score=0.19) win purely for being cheap to reach.
+        # Confirmed via a real rollout ("pick up the milk"): that exact
+        # candidate's grasp_position was ~3.5cm laterally and ~6cm
+        # vertically off the carton's real body -- the gripper closed fully
+        # shut on nothing (finger pads touching each other directly, zero
+        # contact with the object) despite tracking to that target with
+        # near-zero error. It had 15 other feasible candidates to choose
+        # from; this scoring is why it picked the one that missed.
         total_cost = (
             1.0 * path_cost
             + 2.0 * breakdown["joint_quality"]
             + 5.0 * breakdown["reachability"]
-            + 1.0 * breakdown["generator_score_penalty"]
+            + 8.0 * breakdown["generator_score_penalty"]
         )
 
         return CandidateScore(

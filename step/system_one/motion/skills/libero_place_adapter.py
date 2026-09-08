@@ -14,17 +14,17 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..orientation_utils import orientation_error_rotvec
-from .collision import CollisionChecker, CollisionPhase
-from .config import MotionConfig
-from .kinematics import IKSolver
-from .mpc import JointSpaceMPC, MPCContext
-from .ompl_planner import MotionPlanner
-from .panda import EE_SITE, GRIPPER_BODIES, JOINT_NAMES, ROBOT_BODIES
+from ...orientation_utils import orientation_error_rotvec
+from ..collision import CollisionChecker, CollisionPhase
+from ..config import MotionConfig
+from ..kinematics import IKSolver
+from ..mpc import JointSpaceMPC, MPCContext
+from ..ompl_planner import MotionPlanner
+from ..panda import EE_SITE, GRIPPER_BODIES, JOINT_NAMES, ROBOT_BODIES
 from .place_skill import PlaceSkill
-from .scene_query import SceneQuery, quat_to_rotmat_wxyz, resolve_body_name
-from .time_parameterize import TimeParameterizer
-from .types import AttachedObjectState, MPCCostConfig, SkillFailureReason, SkillResult
+from ..scene_query import SceneQuery, quat_to_rotmat_wxyz, resolve_body_name
+from ..time_parameterize import TimeParameterizer
+from ..types import AttachedObjectState, MPCCostConfig, SkillFailureReason, SkillResult
 
 
 class LiberoPlaceAdapter:

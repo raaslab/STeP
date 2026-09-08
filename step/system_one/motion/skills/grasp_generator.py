@@ -56,10 +56,10 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
-from ..modes import RIM_GRASP_KEYWORDS
-from .config import GraspSampleConfig
-from .scene_query import SceneQuery, quat_mul_wxyz, quat_to_rotmat_wxyz
-from .types import GraspCandidate
+from ...modes import RIM_GRASP_KEYWORDS
+from ..config import GraspSampleConfig
+from ..scene_query import SceneQuery, quat_mul_wxyz, quat_to_rotmat_wxyz
+from ..types import GraspCandidate
 
 # Top-down grasp orientation in the *world* frame, expressed as a quaternion
 # that rotates the gripper's canonical +Z (approach axis) to point straight
@@ -281,10 +281,29 @@ class PrivilegedTopDownGraspGenerator(GraspGenerator):
             # target can put the fingertips *below* the surface it rests on
             # (verified against cream_cheese_1, 2cm tall: the finger body
             # ended up ~1cm into the floor even though the TCP itself was
-            # still comfortably above it). obj_pos[2] is the object's own
-            # resting-pose height, i.e. the floor/table surface it sits on.
-            min_safe_for_floor = obj_pos[2] + scene.finger_reach_below_tcp_m() + margin
-            grasp_z = max(grasp_z, min_safe_for_palm, min_safe_for_floor)
+            # still comfortably above it). Use the object's own AABB *bottom*
+            # as the floor reference, not raw obj_pos[2] -- that assumes a
+            # body's origin coincides with its base, which is false for
+            # cream_cheese_1 (origin sits at its geometric center instead,
+            # confirmed: center_offset[2] is ~0). Using obj_pos[2] directly
+            # silently assumed a floor ~1cm too high, and -- combined with
+            # finger_reach_below_tcp_m() alone already exceeding this
+            # object's full ~2cm height -- pushed grasp_z to 1.3cm *above*
+            # the object's own top surface. Confirmed via a real rollout:
+            # the arm tracked to that target with near-zero error and closed
+            # on nothing (object_displacement_m: 0.0).
+            object_bottom_z = obj_pos[2] + extent.center_offset[2] - extent.half_extents[2]
+            min_safe_for_floor = object_bottom_z + scene.finger_reach_below_tcp_m() + margin
+            # Never push the target above the object's own body -- for an
+            # object shorter than finger_reach_below_tcp_m() + margin, even
+            # the corrected min_safe_for_floor above can still exceed the
+            # object's own top, which just relocates the same failure from
+            # "1.3cm above" to "pinned exactly at the boundary with zero
+            # collision-checker margin" (also confirmed by a real rollout:
+            # every candidate for a too-thin object landed on the identical
+            # height and was still rejected as in-collision). Back off by
+            # the same margin instead of sitting on the exact boundary.
+            grasp_z = min(max(grasp_z, min_safe_for_palm, min_safe_for_floor), object_top_z - margin)
         grasp_center = np.array([obj_pos[0], obj_pos[1], grasp_z])
         approach_dir_world = np.array([0.0, 0.0, -1.0])  # top-down: approach from above
 
@@ -506,7 +525,7 @@ def hand_from_fingertip_pose(
     ``[x, y, z, qw, qx, qy, qz]`` pose.
     """
     offset_z = scene.hand_to_tcp_transform(hand_site, tcp_site)
-    from .scene_query import quat_to_rotmat_wxyz
+    from ..scene_query import quat_to_rotmat_wxyz
 
     R = quat_to_rotmat_wxyz(fingertip_quat_wxyz)
     hand_pos = np.asarray(fingertip_pos, dtype=np.float64) - R @ np.array([0.0, 0.0, offset_z])
