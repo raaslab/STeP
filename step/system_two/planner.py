@@ -23,7 +23,7 @@ class DirectSTLPlanner:
         if not api_key:
             raise RuntimeError("OPENAI_API_KEY is not set.")
         self.client = OpenAI(api_key=api_key)
-        self.model = model or os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
+        self.model = model or os.environ.get("OPENAI_MODEL", "gpt-5.4")
         self.schema = schema
         self.scene_context = scene_context
 

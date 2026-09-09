@@ -35,7 +35,7 @@ def validate_stl_plan(plan: dict[str, Any]) -> ValidationResult:
         if sid != expected_id:
             errors.append(f"subtask {expected_id} has subtask_id={sid}; expected {expected_id}")
         skill = subtask.get("skill")
-        if skill not in {"pick", "transport", "place", "pour", "open"}:
+        if skill not in {"pick", "transport", "place", "pour", "open", "close", "turn_on"}:
             errors.append(f"subtask {expected_id} has unsupported skill={skill!r}")
         if not isinstance(subtask.get("params"), dict):
             errors.append(f"subtask {expected_id} params must be an object")

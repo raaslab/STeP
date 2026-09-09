@@ -39,62 +39,16 @@ from .grasp_generator import GraspGenerator
 from ..kinematics import IKSolver
 from ..ompl_planner import MotionPlanner
 from ..panda import FINGER_CLOSED_QPOS, FINGER_JOINT_NAMES
+from .place_skill import _solve_ik_robust, escape_start_collision
 from ..scene_query import SceneQuery
+from .standoff_search import standoff_candidates
 from ..types import (
     CandidateScore,
     GraspCandidate,
+    PlannerFailureReason,
     SkillFailureReason,
     SkillResult,
 )
-
-
-def _standoff_candidates(
-    grasp_position: np.ndarray,
-    approach_direction_world: np.ndarray,
-    standoff_m: float,
-    standoff_distance_multipliers: tuple[float, ...],
-    lateral_offsets_m: tuple[float, ...],
-    n_directions: int,
-) -> list[np.ndarray]:
-    """Candidate standoff positions to try, in order: the plain straight-line
-    standoff first (directly opposite the approach direction, e.g. straight
-    up for a top-down grasp, at the nominal distance), then increasingly
-    wide rings of positions offset sideways in the plane perpendicular to
-    the approach, *and* at increasingly larger standoff distances -- see
-    ``GraspSampleConfig.standoff_lateral_offsets_m``'s docstring for why a
-    single fixed vertical standoff isn't always enough (something else can
-    move into that airspace as a side effect of an earlier subtask).
-
-    Distance matters independently of lateral direction: an obstacle
-    hovering over the object can block every horizontal direction at the
-    *nominal* standoff height simply because reaching that height at all
-    requires sweeping an arm link (elbow/forearm, not just the gripper)
-    through the obstacle's footprint -- measured directly against a real
-    drawer-overhang scene, widening the lateral search alone left most
-    angles still blocked at the standoff stage. A taller standoff (further
-    back along the approach direction -- higher above the object, for a
-    top-down grasp) can clear the obstacle's own height entirely, letting
-    the final descent come down past it instead of trying to detour around
-    it at the same blocked altitude.
-    """
-    approach = approach_direction_world / np.linalg.norm(approach_direction_world)
-
-    # Any orthonormal basis for the plane perpendicular to `approach`.
-    ref = np.array([0.0, 0.0, 1.0]) if abs(approach[2]) < 0.9 else np.array([1.0, 0.0, 0.0])
-    lateral1 = np.cross(approach, ref)
-    lateral1 /= np.linalg.norm(lateral1)
-    lateral2 = np.cross(approach, lateral1)
-
-    angles = np.linspace(0.0, 2.0 * np.pi, max(1, n_directions), endpoint=False)
-    candidates: list[np.ndarray] = []
-    for multiplier in standoff_distance_multipliers:
-        straight = grasp_position - (standoff_m * multiplier) * approach
-        candidates.append(straight)
-        for radius in lateral_offsets_m:
-            for angle in angles:
-                offset = radius * (np.cos(angle) * lateral1 + np.sin(angle) * lateral2)
-                candidates.append(straight + offset)
-    return candidates
 
 
 class PickSkill:
@@ -111,6 +65,7 @@ class PickSkill:
         self.planner = planner
         self.collision_checker = collision_checker
         self.config = config or MotionConfig()
+        self._rng = np.random.default_rng(self.config.planner.seed)
 
     def execute(
         self,
@@ -122,6 +77,19 @@ class PickSkill:
     ) -> SkillResult:
         constraints = constraints or {}
         downstream_goal_xy = constraints.get("downstream_goal_xy")  # optional (x, y) reachability hint
+
+        # A pick is often the very next skill called right after a place
+        # released its object -- the arm's resting spot at that instant is
+        # wherever the release left it, not necessarily lifted clear (see
+        # escape_start_collision's own docstring). Confirmed directly via a
+        # real rollout: this start_q registered START_IN_COLLISION for every
+        # single pick candidate, since OMPL (correctly) refuses to plan from
+        # an invalid start regardless of how good the candidate goal is.
+        # PickSkill has no single "attached object" or "goal" the way
+        # Place/Transport do (nothing is held yet, and there may be several
+        # candidate objects), so this only tries the "straight up" retreat,
+        # not the "toward a goal's center" one those two also get.
+        start_q = escape_start_collision(self.ik_solver, self.collision_checker, scene, None, None, start_q)
 
         # Callers that already generated candidates for their own purposes
         # (e.g. LiberoPickAdapter saving a grasp-pose visualization before
@@ -201,10 +169,24 @@ class PickSkill:
         # tolerance avoids hard-rejecting genuinely graspable objects whose real
         # cross-section is a bit smaller than their bounding box; grossly
         # incompatible widths are still rejected.
+        #
+        # The tolerance is deliberately *not* applied past the gripper's own
+        # physical opening. Slack above that admits candidates the hand can
+        # never straddle no matter how good the estimate was: at 1.15 this
+        # accepted widths up to 9.2cm on an 8cm gripper, which is how
+        # cream_cheese_1 (8.3 x 4.4cm) got grasped across its long axis --
+        # the fingers bottom out at their limit, clip the box and shove it,
+        # which reads as a successful pick and then fails downstream. An
+        # over-estimated round object still has its narrower yaw candidates
+        # to fall back on; a candidate wider than the hand has nothing.
         width_tolerance = 1.15
         if (
             cand.gripper_width is not None
-            and cand.gripper_width > self.grasp_generator.gripper_max_opening_m * width_tolerance
+            and cand.gripper_width
+            > min(
+                self.grasp_generator.gripper_max_opening_m * width_tolerance,
+                self.grasp_generator.gripper_max_opening_m,
+            )
         ):
             return CandidateScore(
                 object_name=cand.object_name,
@@ -242,7 +224,7 @@ class PickSkill:
         # it -- measured directly: after opening a drawer that ends up
         # hovering above a bowl, every rim-edge candidate at every angle
         # failed identically, because they all shared that same now-blocked
-        # straight-up standoff direction. See _standoff_candidates.
+        # straight-up standoff direction. See standoff_search.standoff_candidates.
         # Each finger travels symmetrically from center (qpos=[0,0] is *zero*
         # gap, not "closed on an object" -- see check_gripper_closure's
         # docstring), so the right closed-finger target is half the object's
@@ -273,7 +255,7 @@ class PickSkill:
         # the identical final target.
         standoff_ik = grasp_ik = None
         last_rejection = "approach_standoff_ik_failed"
-        for standoff_position in _standoff_candidates(
+        for standoff_position in standoff_candidates(
             cand.grasp_position,
             cand.approach_direction_world,
             self.config.grasp.approach_standoff_m,
@@ -281,8 +263,9 @@ class PickSkill:
             self.config.grasp.standoff_lateral_offsets_m,
             self.config.grasp.standoff_lateral_directions,
         ):
-            candidate_standoff_ik = self.ik_solver.solve(
-                scene.clone(), standoff_position, cand.grasp_quat_wxyz, seed_q=start_q
+            candidate_standoff_ik = _solve_ik_robust(
+                self.ik_solver, scene, standoff_position, cand.grasp_quat_wxyz, start_q, self._rng,
+                n_restarts=self.config.grasp.pose_selection_attempts,
             )
             if not candidate_standoff_ik.success:
                 continue
@@ -293,8 +276,9 @@ class PickSkill:
                 last_rejection = "approach_standoff_in_collision"
                 continue
 
-            candidate_grasp_ik = self.ik_solver.solve(
-                scene.clone(), cand.grasp_position, cand.grasp_quat_wxyz, seed_q=candidate_standoff_ik.q
+            candidate_grasp_ik = _solve_ik_robust(
+                self.ik_solver, scene, cand.grasp_position, cand.grasp_quat_wxyz, candidate_standoff_ik.q, self._rng,
+                n_restarts=self.config.grasp.pose_selection_attempts,
             )
             if not candidate_grasp_ik.success:
                 last_rejection = "grasp_ik_failed"
@@ -369,9 +353,17 @@ class PickSkill:
                 )
 
         # --- plan the long-range approach to the standoff point, scored by path + reachability + clearance --
-        plan = self.planner.plan(
-            start_q, [standoff_ik.q], phase=CollisionPhase.FREE_SPACE, target_object_body=cand.object_name
-        )
+        plan = None
+        for _ in range(self.config.grasp.planning_attempts):
+            plan = self.planner.plan(
+                start_q, [standoff_ik.q], phase=CollisionPhase.FREE_SPACE, target_object_body=cand.object_name
+            )
+            if plan.success or plan.failure_reason not in (
+                PlannerFailureReason.NO_PATH_FOUND,
+                PlannerFailureReason.APPROXIMATE_SOLUTION_ONLY,
+                PlannerFailureReason.TIMEOUT,
+            ):
+                break
         if not plan.success:
             return CandidateScore(
                 cand.object_name, cand, None, False, float("inf"), rejection_reason=f"planning_failed:{plan.failure_reason}"

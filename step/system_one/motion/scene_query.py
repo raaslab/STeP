@@ -66,6 +66,19 @@ def resolve_body_name(scene: "SceneQuery", canonical_name: str) -> str:
     resolver layer was never MuJoCo-body-name-aware (it only tracks XY/z
     geometry hints), so anything in ``step/system_one/motion/`` that needs a
     real body/geom lookup must go through this first.
+
+    A drawer/cabinet-level entity (e.g. ``"top_drawer"``) is neither of
+    those -- it's a level_label alias ``infer_drawer_fixtures`` registers,
+    never a real body name at all (the real body is something like
+    ``"wooden_cabinet_1_cabinet_top"``, which doesn't derive from the alias
+    by any string rule). Confirmed via a real rollout: transporting/placing
+    into a drawer goal crashed outright here, a gap that had simply never
+    been exercised through this function before (legacy transport, and
+    apparently place too until a real drawer-goal ompl_mpc run finally hit
+    it, never needed a literal MuJoCo body match for a drawer target).
+    Falls back to ``articulation.resolve_drawer`` (lazily imported to avoid
+    a circular import -- ``articulation.py`` itself imports from this
+    module) before giving up.
     """
     for candidate in (f"{canonical_name}_main", canonical_name):
         try:
@@ -73,9 +86,15 @@ def resolve_body_name(scene: "SceneQuery", canonical_name: str) -> str:
             return candidate
         except KeyError:
             continue
+    try:
+        from .articulation import resolve_drawer
+
+        return resolve_drawer(scene, canonical_name).drawer_body
+    except KeyError:
+        pass
     raise KeyError(
         f"Could not find a MuJoCo body for canonical object {canonical_name!r} "
-        "(tried the '_main' suffix convention and the exact name)."
+        "(tried the '_main' suffix convention, the exact name, and drawer-level resolution)."
     )
 
 

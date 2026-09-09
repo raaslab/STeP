@@ -93,6 +93,18 @@ class MotionPlanner:
         """Plan from ``start_q`` to the best-reachable of ``goal_qs`` (already
         IK-filtered by the caller -- e.g. ``PickSkill`` tries several grasp
         candidates' IK solutions as alternate goals for one plan call).
+
+        Note for callers wrapping this in a "retry planning_attempts times"
+        loop: retrying this exact (start_q, goal_qs) pair does *not* resample
+        a different solution. OMPL seeds its global RNG once per process and
+        refuses later reseeds ("Random number generation already started"),
+        and for a short hop RRTConnect's trees connect on their first
+        extension anyway, so repeated identical calls return byte-identical
+        paths -- measured directly: 8 back-to-back retries of one transport
+        call, all identical. Retries only help when something about the
+        problem itself differs (a different goal configuration, a moved
+        scene); to get a *better* path, give a better goal (see
+        ``TransportSkill``'s nearest-configuration hover-IK selection).
         """
         if not OMPL_AVAILABLE:
             return self.unavailable_plan()
@@ -130,6 +142,38 @@ class MotionPlanner:
                 failure_reason=PlannerFailureReason.GOAL_IN_COLLISION,
                 planning_time_sec=time.time() - t0,
             )
+
+        # Try the trivial straight-line joint-space path to each goal before
+        # invoking a sampling planner at all. RRTConnect returns whatever its
+        # trees happen to connect, which is *feasible* but carries no
+        # guarantee of being direct -- and its own simplification pass can't
+        # recover a direct path it never found. When the straight line is
+        # already collision-free (the common case for a short hop through
+        # open space, e.g. lifting a grasped bowl to a hover point a few cm
+        # away) it is both optimal and deterministic, so there is nothing to
+        # gain from sampling. Costs one edge check per goal on the way in.
+        edge_resolution = self.config.validity_resolution * float(
+            np.max(self.joint_limits_hi - self.joint_limits_lo)
+        )
+        for gq in valid_goals:
+            direct = self.collision_checker.check_edge(
+                start_q,
+                gq,
+                resolution=edge_resolution,
+                phase=phase,
+                target_object_body=target_object_body,
+                attached=attached,
+                goal_container_body=goal_container_body,
+            )
+            if not direct.in_collision:
+                return MotionPlan(
+                    success=True,
+                    joint_names=self.joint_names,
+                    geometric_path=np.linspace(start_q, gq, int(self.config.interpolation_density)),
+                    planning_time_sec=time.time() - t0,
+                    failure_reason=PlannerFailureReason.NONE,
+                    metadata={"solve_status": "Direct path", "n_goals_tried": len(goal_qs)},
+                )
 
         ou.RNG.setSeed(int(self.config.seed))
         space = self._make_space()

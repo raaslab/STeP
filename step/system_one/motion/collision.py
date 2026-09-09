@@ -265,7 +265,25 @@ class CollisionChecker:
         for body_name in self._obstacle_body_names:
             if body_name == attached.object_name or body_name == permitted_body:
                 continue
-            for gid in scratch.body_collision_geom_ids(body_name):
+            # include_children=False: `_obstacle_body_names` already lists
+            # every body individually (parents and their descendants both
+            # get their own entry), so an inclusive per-body query here
+            # would recheck a descendant's own geoms a second time under
+            # each of its ancestors too. That's only redundant work for an
+            # ordinary body -- but for one whose ancestor is *not* excluded
+            # while the descendant itself *is* (a real, confirmed case: a
+            # fixture's world-parented root can be an empty pass-through
+            # frame with a permitted_body match only on its real,
+            # geometry-owning child -- see
+            # articulation.discover_cabinet_support_bodies's own docstring),
+            # the ancestor's inclusive query silently re-admits the exact
+            # geoms the child-level exclusion above was supposed to permit.
+            # Confirmed via a real rollout: every "place on top of the
+            # cabinet" candidate directly on its own measured top surface
+            # kept reading as colliding with that same surface, because the
+            # empty root body (never excluded, since only its child matched
+            # `permitted_body`) still enumerated the child's real geoms.
+            for gid in scratch.body_collision_geom_ids(body_name, include_children=False):
                 aabb_center, half_extents = scratch.geom_world_aabb(gid)
                 for sphere_center, radius in world_spheres:
                     dist = sphere_aabb_distance(sphere_center, radius, aabb_center, half_extents)
@@ -284,8 +302,31 @@ class CollisionChecker:
         attached: AttachedObjectState | None = None,
         goal_container_body: str | None = None,
         check_margin: bool = False,
+        finger_joint_names: list[str] | None = None,
+        finger_qpos: np.ndarray | None = None,
+        permitted_contact_geom_ids: set[int] | None = None,
     ) -> CollisionResult:
         """Validity check at one configuration.
+
+        ``permitted_contact_geom_ids`` are geoms the *gripper* is allowed to
+        press against outright -- not merely touch with its pads. Opening a
+        drawer is the case that needs it: the handle is the thing the hand
+        is deliberately going for, and a hook-style pull works by bearing on
+        it rather than by a clean pinch, so contact there is the intent, not
+        a failure. Kept to an explicit geom set (the handle assembly) rather
+        than the whole target body, so this cannot silently excuse planning
+        the hand through a drawer's front panel or side walls.
+
+        ``finger_joint_names``/``finger_qpos`` evaluate the pose with the
+        gripper held at a specific opening instead of whatever the live
+        scene happened to be at (see ``check_gripper_closure``'s docstring:
+        only the arm joints are otherwise set, so the fingers stay wherever
+        the clone inherited them -- in practice fully open). A caller that
+        intends to *approach* with partly-closed fingers has to be checked
+        that way or the check answers a question about a hand shape it will
+        never actually be in: measured on the middle drawer, the open
+        gripper's ~8cm span cannot fit the 4.0cm gap above its handle at
+        all, while a narrowed one has room to spare.
 
         ``check_margin=False`` (the default, used by the OMPL state-validity
         checker where speed matters -- this runs on the order of 1e3-1e4 times
@@ -297,6 +338,8 @@ class CollisionChecker:
         """
         scratch = self.base_scene.clone()
         scratch.set_qpos(self.joint_names, q)
+        if finger_joint_names is not None and finger_qpos is not None:
+            scratch.set_qpos(list(finger_joint_names), np.asarray(finger_qpos, dtype=np.float64))
 
         target_object_geom_ids: set[int] = set()
         if target_object_body:
@@ -331,6 +374,11 @@ class CollisionChecker:
             if dist >= 0:
                 continue
             if self._permitted(g1, g2, phase, target_object_geom_ids):
+                continue
+            if permitted_contact_geom_ids and (
+                (g1 in permitted_contact_geom_ids and g2 in self.gripper_geom_ids)
+                or (g2 in permitted_contact_geom_ids and g1 in self.gripper_geom_ids)
+            ):
                 continue
             if self._finger_overlap_within_tolerance(g1, g2, phase, target_object_geom_ids, dist):
                 continue
@@ -375,6 +423,9 @@ class CollisionChecker:
         attached: AttachedObjectState | None = None,
         goal_container_body: str | None = None,
         check_margin: bool = False,
+        finger_joint_names: list[str] | None = None,
+        finger_qpos: np.ndarray | None = None,
+        permitted_contact_geom_ids: set[int] | None = None,
     ) -> CollisionResult:
         """Validate an entire path segment at a configurable joint-space
         resolution, not just its OMPL vertices."""
@@ -392,6 +443,9 @@ class CollisionChecker:
                 attached=attached,
                 goal_container_body=goal_container_body,
                 check_margin=check_margin,
+                finger_joint_names=finger_joint_names,
+                finger_qpos=finger_qpos,
+                permitted_contact_geom_ids=permitted_contact_geom_ids,
             )
             if result.in_collision:
                 return result

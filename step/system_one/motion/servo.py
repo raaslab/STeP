@@ -42,7 +42,13 @@ def is_settle_stalled(recent_errors: list[float], window: int, tol_m: float) -> 
     return (max(tail) - min(tail)) < tol_m
 
 
-def real_nonpermitted_contacts(scene: SceneQuery, checker, phase, target_object_body: str | None) -> list[list]:
+def real_nonpermitted_contacts(
+    scene: SceneQuery,
+    checker,
+    phase,
+    target_object_body: str | None,
+    permitted_contact_geom_ids: set[int] | None = None,
+) -> list[list]:
     """Real contacts from the *live* sim (not a hypothetical ``q``) involving
     the robot/gripper that ``CollisionChecker`` would not have permitted --
     i.e. a genuine collision, not the deliberate fingerpad<->target contact
@@ -51,7 +57,13 @@ def real_nonpermitted_contacts(scene: SceneQuery, checker, phase, target_object_
     ``_finger_overlap_within_tolerance`` logic so this reports exactly the
     same thing the planner itself would have flagged as a violation, not a
     cruder "any negative distance" check (which fires constantly on
-    sub-millimeter numerical grazing that never mattered)."""
+    sub-millimeter numerical grazing that never mattered).
+
+    ``permitted_contact_geom_ids``, when given, also excludes gripper<->target
+    contact through those specific geoms -- mirrors ``CollisionChecker.
+    check``'s own parameter of the same name (see its docstring), needed by
+    a skill (e.g. ``close``) whose intended contact is made by the palm, not
+    the fingerpads ``_permitted`` alone recognizes."""
     target_ids = set(scene.body_geom_ids(target_object_body)) if target_object_body else set()
     out: list[list] = []
     for g1n, g2n, dist in scene.compute_contacts():
@@ -61,6 +73,11 @@ def real_nonpermitted_contacts(scene: SceneQuery, checker, phase, target_object_
         if g1 not in checker.robot_geom_ids and g2 not in checker.robot_geom_ids:
             continue
         if checker._permitted(g1, g2, phase, target_ids):
+            continue
+        if permitted_contact_geom_ids and (
+            (g1 in permitted_contact_geom_ids and g2 in checker.gripper_geom_ids)
+            or (g2 in permitted_contact_geom_ids and g1 in checker.gripper_geom_ids)
+        ):
             continue
         if checker._finger_overlap_within_tolerance(g1, g2, phase, target_ids, dist):
             continue
@@ -132,6 +149,36 @@ class MotionTraceRecorder:
 class _ServoMixin:
     """Requires ``self.env``, ``self.joint_names``, ``self.ee_site`` on the
     including class (set by each adapter's ``__init__``)."""
+
+    def servo_to_home(self, n_steps: int = 60, step_callback=None) -> int:
+        """Densely interpolate the arm back to its own reset configuration,
+        gripper open, and return the steps consumed.
+
+        A skill otherwise starts from wherever the previous one finished --
+        a configuration chosen for *that* task, often mid-reach over the spot
+        it just released something. Planning a fresh approach from there is a
+        recurring failure (measured: an outright planner TIMEOUT from one
+        such pose, a settle ending 0.53m from its target from another, and a
+        NO_PATH_FOUND transporting an object away from a just-completed
+        pick). Resetting first costs a fixed, cheap joint-space move and
+        gives every skill the same known starting point. Shared by the pick
+        and open-drawer adapters; a joint-space interpolation rather than one
+        Cartesian move to home's end-effector pose, for the reason in
+        DrawerConfig.return_home_steps.
+        """
+        home_q = np.asarray(self.env.env.robots[0].init_qpos, dtype=np.float64)
+        current_q = SceneQuery.from_robosuite_sim(self.env.env.sim).get_qpos(self.joint_names)
+        if float(np.linalg.norm(current_q - home_q)) < 1e-3:
+            return 0
+        steps = 0
+        for target_q in np.linspace(current_q, home_q, max(2, int(n_steps))):
+            live_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
+            cart_pos, cart_ori = self._servo_toward_joint_target(live_scene, target_q)
+            self._step_env(cart_pos, cart_ori, self.env.open_gripper_cmd)
+            steps += 1
+            if step_callback is not None:
+                step_callback()
+        return steps
 
     def _servo_toward_joint_target(
         self, scene: SceneQuery, target_q: np.ndarray, pos_scale_m: float = 0.03, ori_gain: float = 2.0

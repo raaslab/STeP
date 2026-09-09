@@ -17,6 +17,8 @@ RIM_GRASP_KEYWORDS: frozenset[str] = frozenset([
     "cup",
     "pitcher",
     "stein",
+    "plate",
+    "saucer",
 ])
 
 

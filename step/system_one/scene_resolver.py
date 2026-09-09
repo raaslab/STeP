@@ -69,7 +69,23 @@ class SceneResolver:
 
     def resolve_goal(
         self, name: str | None
-    ) -> tuple[str, tuple[float, float], float, float]:
+    ) -> tuple[str, tuple[float, float], float | None, float, float]:
+        """Returns (canonical_name, (x, y), z, radius, descend_radius).
+
+        ``z`` is ``None`` unless the entity's own geometry carries one (see
+        ``libero_scene.infer_cabinet_support_entities``, the first entity
+        type to populate it) -- most callers only ever needed XY since a
+        *movable* goal reference gets its Z from ``_object_pos_by_name``'s
+        own live tracking instead (a different code path in
+        ``base_env._goal_anchor``). A static fixture like a cabinet has no
+        live per-step object pose to read there, so its own measured
+        geometry is the only source of a sensible place height -- without
+        it, the legacy transport backend's own Z fallback (bare table
+        height) drove a carried object straight into the fixture's solid
+        top instead of onto it (confirmed with a real rollout: transporting
+        a grasped bowl toward a cabinet's own body dropped the grasp
+        partway there).
+        """
         canonical = self.canonical(name)
         geom = self.geometry.get(canonical, {})
         if not geom or "xy" not in geom:
@@ -81,9 +97,11 @@ class SceneResolver:
                 "descend_radius": 0.075,
             }
         xy = geom.get("xy", list(self._workspace_center_xy()))
+        z = geom.get("z")
         return (
             canonical or "goal_region",
             (float(xy[0]), float(xy[1])),
+            float(z) if z is not None else None,
             float(geom.get("radius", 0.055)),
             float(geom.get("descend_radius", 0.075)),
         )

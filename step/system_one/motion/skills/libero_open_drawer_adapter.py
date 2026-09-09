@@ -23,14 +23,14 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..articulation import measure_pull_axis_and_travel, resolve_drawer
+from ..articulation import discover_drawers, measure_pull_axis_and_travel, resolve_drawer
 from ..collision import CollisionChecker, CollisionPhase
 from ..config import MotionConfig
 from ..kinematics import IKSolver
 from ..mpc import JointSpaceMPC, MPCContext
 from ..ompl_planner import MotionPlanner
 from .open_drawer_skill import OpenDrawerSkill
-from ..panda import EE_SITE, GRIPPER_BODIES, HAND_SITE, JOINT_NAMES, ROBOT_BODIES
+from ..panda import EE_SITE, FINGER_JOINT_NAMES, GRIPPER_BODIES, HAND_SITE, JOINT_NAMES, ROBOT_BODIES
 from ..scene_query import SceneQuery
 from ..servo import MotionTraceRecorder, _ServoMixin, is_settle_stalled, real_nonpermitted_contacts
 from ..time_parameterize import TimeParameterizer
@@ -57,6 +57,9 @@ class LiberoOpenDrawerAdapter(_ServoMixin):
         planner = MotionPlanner(self.joint_names, lo, hi, checker, self.config.planner)
         return OpenDrawerSkill(ik, planner, checker, self.config)
 
+    def _servo_to_home(self, step_callback=None) -> int:
+        return self.servo_to_home(self.config.drawer.return_home_steps, step_callback)
+
     def run(
         self,
         drawer_ref: str,
@@ -65,13 +68,27 @@ class LiberoOpenDrawerAdapter(_ServoMixin):
         step_callback=None,
     ) -> tuple[SkillResult, int, dict]:
         constraints = constraints or {}
+
+        # Go to the robot's home configuration *before* planning the handle
+        # approach. Whatever ran previously leaves the arm wherever it
+        # finished -- typically hovering over the spot where it just
+        # released an object, in a configuration chosen for that task, not
+        # this one. Planning the long reach to a drawer handle from there
+        # was a recurring failure (measured across rollouts: an outright
+        # planner TIMEOUT from one such pose, and a settle that ended 0.53m
+        # from the handle from another), and it is the same reasoning that
+        # already sends the arm home *after* opening. Homing first costs a
+        # fixed, cheap joint-space move and makes this skill start from the
+        # one configuration its approach is reliably solvable from.
+        pre_home_steps = self._servo_to_home(step_callback)
+
         scene = self._build_scene()
         skill = self._build_skill(scene)
         start_q = scene.get_qpos(self.joint_names)
 
         plan_result = skill.execute(scene, drawer_ref, start_q, constraints)
         if not plan_result.success:
-            return plan_result, 0, {}
+            return plan_result, pre_home_steps, {}
 
         drawer = resolve_drawer(scene, drawer_ref)
         pull_axis_world, travel_m, qpos_closed, qpos_open = measure_pull_axis_and_travel(scene, drawer)
@@ -124,7 +141,7 @@ class LiberoOpenDrawerAdapter(_ServoMixin):
         max_hold_steps = max_steps if max_steps is not None else len(full_reference) + cfg.max_settle_steps
         tracking_budget = min(max_hold_steps, len(full_reference) + cfg.max_settle_steps)
 
-        steps = 0
+        steps = pre_home_steps  # the homing move above is real env time too
         gripper_cmd = self.env.open_gripper_cmd
         pos_err = ori_err = float("inf")
         converged = False
@@ -223,7 +240,54 @@ class LiberoOpenDrawerAdapter(_ServoMixin):
             for name1, name2, _dist in grip_scene.compute_contacts()
             for g1, g2 in [(grip_scene.geom_id(name1), grip_scene.geom_id(name2))]
         )
+        # How far, and in which direction, the descent actually ended from
+        # the handle it aimed at. A scalar settle error can't distinguish
+        # "stopped short along the approach" from "ended up below the target"
+        # -- and below is what matters here, since the drawers' handles are
+        # only ~7cm apart vertically, so a downward miss lands on the *next
+        # drawer's* handle.
+        end_hand_pos = grip_scene.site_pose(self.ee_site)[0]
+        handle_miss = np.asarray(end_hand_pos) - grasp_position
+        plan_result.diagnostics["handle_approach_miss"] = {
+            "delta_xyz": [float(v) for v in handle_miss],
+            "distance_m": float(np.linalg.norm(handle_miss)),
+            "dz_m": float(handle_miss[2]),
+        }
+
         plan_result.diagnostics["handle_grip_verification"] = {"gripped": gripped_handle}
+
+        # Hard gate, not just a diagnostic. Pulling without actually holding
+        # the handle does not simply fail harmlessly: the hand is still
+        # pressed against the cabinet, so dragging it along the pull axis
+        # rakes whatever it *is* touching. Measured on a real rollout -- the
+        # target (top) drawer ended 2.4% open while the middle drawer, never
+        # asked for, was dragged 94% open, leaving the scene in a worse state
+        # than before the skill ran and looking, in the user's words, "very
+        # clunky". Failing here keeps the wrong-drawer damage from happening
+        # at all; the diagnostics above say exactly why the grip missed.
+        # Opening a drawer does not require a clean grasp: an open gripper
+        # whose fingers straddle the handle hooks it, and pulling along the
+        # joint axis opens the drawer regardless of whether the pads ever
+        # made contact. So the gate is "is the handle actually captured
+        # between the fingers", not "did we grip it" -- the strict pad test
+        # alone would reject a perfectly good hook pull. What the gate is
+        # really there to prevent is pulling while the hand is merely
+        # *resting against* the cabinet somewhere, which is how a missed
+        # approach dragged the middle drawer 94% open while its own target
+        # barely moved.
+        captured = gripped_handle or float(np.linalg.norm(handle_miss)) <= self.config.drawer.handle_capture_radius_m
+        plan_result.diagnostics["handle_grip_verification"]["captured_between_fingers"] = bool(captured)
+        if not captured:
+            plan_result.success = False
+            plan_result.failure_reason = SkillFailureReason.EXECUTION_FAILED
+            plan_result.diagnostics["detail"] = (
+                "aborted before pulling: the handle is not between the fingers after the "
+                f"descent (missed {drawer_body}'s handle by {np.linalg.norm(handle_miss):.3f}m, "
+                f"dz={handle_miss[2]:+.3f}m). Pulling from here would drag whatever the hand "
+                "is resting against."
+            )
+            steps += self._servo_to_home(step_callback)
+            return plan_result, steps, {}
 
         # Track the pull leg with its own short MPC-tracked reference (fresh
         # context, not a continuation of `ctx`/`full_reference`, which only
@@ -349,16 +413,66 @@ class LiberoOpenDrawerAdapter(_ServoMixin):
         open_frac_post_retreat = (qpos_post_retreat - qpos_closed) / denom if abs(denom) > 1e-9 else 0.0
         plan_result.diagnostics["open_verification"]["open_frac_post_retreat"] = open_frac_post_retreat
 
+        # Every drawer's travel, not just the target's. Verifying only the
+        # joint we aimed at cannot tell "opened the right drawer" from
+        # "shoved a neighbouring one open on the way past" -- and a hand that
+        # stalls short of its handle and drags along the cabinet face does
+        # exactly that. Cheap to record, and the only way to check the
+        # complaint "it opened the middle drawer" against data rather than
+        # against a low-resolution video frame.
+        sibling_travel = {}
+        for other in discover_drawers(post_retreat_scene):
+            lo_o, hi_o = post_retreat_scene.joint_qpos_range([other.joint_name])
+            span = float(hi_o[0] - lo_o[0])
+            q_now = float(post_retreat_scene.get_qpos([other.joint_name])[0])
+            q_closed = float(np.clip(0.0, lo_o[0], hi_o[0]))
+            sibling_travel[other.level_label] = {
+                "joint": other.joint_name,
+                "qpos": q_now,
+                "open_fraction_of_range": abs(q_now - q_closed) / span if span > 1e-9 else 0.0,
+                "is_target": other.joint_name == drawer.joint_name,
+            }
+        plan_result.diagnostics["open_verification"]["all_drawers"] = sibling_travel
+
+        # Return to the robot's own home/reset joint configuration --
+        # regardless of outcome, same "leave the arm in a good state for
+        # whatever runs next" reasoning as the retreat above. The handle-
+        # approach IK solution that opened the drawer is often a genuinely
+        # awkward configuration (elbow twisted, wrist near a joint limit);
+        # see DrawerConfig.return_home_steps's own comment for why this is
+        # a dense joint-space interpolation, not a single Cartesian move to
+        # home's end-effector pose.
+        home_q = np.asarray(self.env.env.robots[0].init_qpos, dtype=np.float64)
+        current_q = post_retreat_scene.get_qpos(self.joint_names)
+        home_reference = np.linspace(current_q, home_q, self.config.drawer.return_home_steps)
+        return_home_trace = MotionTraceRecorder()
+        for target_q in home_reference:
+            live_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
+            cart_pos, cart_ori = self._servo_toward_joint_target(live_scene, target_q)
+            self._step_env(cart_pos, cart_ori, gripper_cmd)
+            steps += 1
+            if step_callback is not None:
+                step_callback()
+            post_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
+            return_home_trace.record_step(
+                steps,
+                post_scene.site_pose(self.ee_site)[0],
+                float("inf"),
+                False,
+                real_nonpermitted_contacts(post_scene, checker, CollisionPhase.FREE_SPACE, drawer_body),
+            )
+
         # Stand-in for "what did this look like" without needing to watch
         # the saved video: per-phase path smoothness (path_efficiency near
         # 1.0 = moved directly to target; well below = wandered/oscillated),
         # worst clearance seen, and any real (non-permitted) collisions,
         # each phase-tagged so a bad-looking run can be localized to
-        # descent/pull/retreat specifically.
+        # descent/pull/retreat/return_home specifically.
         plan_result.diagnostics["motion_trace"] = {
             "descent": descent_trace.summary(),
             "pull": pull_trace.summary(),
             "retreat": retreat_trace.summary(),
+            "return_home": return_home_trace.summary(),
         }
 
         if open_frac_post_retreat < self.config.drawer.open_threshold_frac:

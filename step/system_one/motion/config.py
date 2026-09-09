@@ -52,7 +52,7 @@ class GraspSampleConfig:
     # (elbow/forearm) to sweep through the obstacle's footprint regardless
     # of which horizontal direction the endpoint sits in -- a taller
     # standoff (further back along the approach direction) can clear the
-    # obstacle's height entirely instead. See _standoff_candidates.
+    # obstacle's height entirely instead. See standoff_search.standoff_candidates.
     standoff_distance_multipliers: tuple[float, ...] = (1.0, 2.5, 4.0)
     # Widened from an initial (0.05, 0.08)/4-direction search: measured
     # directly against a real drawer-overhang scene, that narrower search
@@ -71,11 +71,34 @@ class GraspSampleConfig:
     rim_num_angle_samples: int = 8
     rim_offset_fraction: float = 0.6
     rim_grasp_width_m: float = 0.02
+    # Edge-pinch grasp strategy (plates, saucers, lids: flat/thin objects
+    # whose *height*, not just cross-section, makes the rim-edge wall-
+    # straddle strategy above physically meaningless -- there's no hollow
+    # wall to straddle at any radius, just uniformly solid material all the
+    # way to the edge. See grasp_generator._edge_pinch_candidates).
+    edge_pinch_num_angle_samples: int = 8
+    edge_pinch_offset_fraction: float = 0.92
+    edge_pinch_width_m: float = 0.02
+    # Randomized-seed IK retries for the standoff/grasp solves below (same
+    # pattern as PlaceSampleConfig.pose_selection_attempts): a single fixed
+    # seed (the arm's current resting pose) is a good seed for a top-down
+    # grasp, since that's kinematically close to how the arm usually rests,
+    # but not always for others -- confirmed directly via a real rollout
+    # that this alone let a rim-edge candidate for a real plate object
+    # succeed where it hadn't before.
+    pose_selection_attempts: int = 6
     # Safety margin (m) added on top of the gripper's real measured reach
     # (see SceneQuery.palm_clearance_above_tcp_m / finger_reach_below_tcp_m)
     # when raising a grasp height to keep the palm off a short object's top,
     # or the fingertips off the floor under a thin one.
     grasp_height_margin_m: float = 0.01
+    # RRTConnect is stochastic (see TransportConfig's own comment on this) --
+    # PickSkill's long-range approach-to-standoff plan had no retry loop at
+    # all until a real rollout showed several otherwise-valid candidates
+    # (passed IK/collision) rejected outright on a single NO_PATH_FOUND,
+    # for a scene no more cluttered than ones that succeed on a later
+    # attempt of the same plan.
+    planning_attempts: int = 6
 
 
 @dataclass
@@ -157,8 +180,64 @@ class PlaceSampleConfig:
     # "don't aim at the wall" reason.
     interior_shrink_fraction: float = 0.35
     num_ring_samples: int = 4
+    # place_surface="top" candidate search (a large open support like the
+    # table -- see [[move_bowl_via_table]]/libero_scene.infer_table_support_
+    # entity) -- deliberately wider/denser than the container-interior
+    # defaults above. A container's interior is small and empty by
+    # construction (nothing else is normally *inside* a drawer/bowl yet), so
+    # one shrunk ring is plenty; the table is large, shared across every
+    # "move this out of the way" detour in a plan, and has a real fixed
+    # obstacle sitting on it (the cabinet itself) -- confirmed directly via
+    # a real multi-object rollout (bowl, then plate, then wine bottle all
+    # needing their own clear spot on the table in the same run): the single
+    # 4-point ring above put one candidate almost exactly on top of the
+    # cabinet's own footprint, and left too few alternatives once an earlier
+    # subtask's object already occupied the center. Multiple radii and more
+    # angles give a real chance of landing somewhere clear of both the
+    # cabinet and whatever an earlier subtask already parked there.
+    top_surface_shrink_fractions: tuple[float, ...] = (0.2, 0.35, 0.5)
+    top_surface_num_ring_samples: int = 10
     hover_clearance_m: float = 0.06  # above the container's rim before descending
     drop_clearance_m: float = 0.02  # above the container's floor (or the next object already in it)
+    # IK is not unique -- same reasoning as every other skill in this
+    # package (OpenDrawerSkill, TurnKnobSkill, TransportSkill): a single
+    # DLS solve from one seed can land in a bad basin even when a feasible
+    # solution exists nearby. PlaceSkill's own hover/place IK solves were
+    # the one holdout still using a single, non-robust attempt -- confirmed
+    # via a real rollout (placing into an opened drawer) that all 5
+    # placement candidates failed hover IK with large (0.18-0.64m) position
+    # errors from the single seed tried, despite the target itself being a
+    # perfectly reasonable, reachable Cartesian pose.
+    pose_selection_attempts: int = 6
+
+
+@dataclass
+class TransportConfig:
+    """Tuning for ``TransportSkill``/``LiberoTransportAdapter`` -- moves the
+    currently-attached object to a hover point above the goal container/
+    support, the same target ``PlaceSkill``'s own internal hover leg plans
+    to (see ``place_skill.py``'s module docstring), just exposed as its own
+    subtask instead of only ever running as a step inside ``place``. Exists
+    because the *legacy* stage-machine transport backend has no notion of
+    the carried object's own footprint at all (a single fixed carry height,
+    no attached-object collision checking) -- confirmed via a real rollout
+    that it drove a grasped bowl straight into a cabinet's wall reaching
+    for a goal on top of it, dropping the grasp.
+    """
+
+    # IK is not unique -- see OpenDrawerSkill/PlaceSkill's own comments on
+    # the same point. This many attempts (a mix of near-start_q perturbation
+    # and, for the back half, full-joint-range random seeds -- see
+    # TransportSkill.execute's own comment on why both are needed) are
+    # tried before giving up on one hover-pose candidate.
+    pose_selection_attempts: int = 8
+    # RRTConnect is stochastic; retried more times than most other
+    # OMPL-backed skills in this package (their own default is 3) --
+    # confirmed via real rollouts that transporting a carried object into
+    # an already-open drawer (a tight, recessed target, harder than most
+    # other transport goals) needed more than 3 attempts to reliably
+    # succeed.
+    planning_attempts: int = 8
 
 
 @dataclass
@@ -173,6 +252,64 @@ class DrawerConfig:
     drawers/cabinets only -- see ``motion/articulation.py``)."""
 
     approach_standoff_m: float = 0.08
+    # Downward tilts (radians) tried for the handle approach, in order. 0 is
+    # the straight-along-the-pull-axis approach, which is the cleanest pull
+    # when the space in front of the drawer is clear; the tilted ones bring
+    # the hand in from above instead, which is the only way past clutter
+    # sitting in that space (measured on the middle drawer: every one of 44
+    # reachable straight-on standoffs had its descent blocked by the tabletop
+    # or by objects parked in front of the cabinet). Opening a drawer does
+    # not need a clean grasp -- an open gripper straddling the handle pulls
+    # it fine -- so a tilted, hook-style approach is a perfectly good way to
+    # do it, not a compromise.
+    approach_tilts_rad: tuple[float, ...] = (0.0, 0.35, 0.61, 0.87)  # 0, 20, 35, 50 degrees
+    # Wrist roll about the approach axis. The two values are two genuinely
+    # fingers sit above/below a horizontal handle bar and close on it -- the
+    # plain pinch, and the only orientation kept. Rolls of pi/2 and +/-45
+    # were both tried against the middle drawer and both measured worse: at
+    # pi/2 the fingers lie *along* the bar so the gripper cannot close at all
+    # (a hook that slipped after ~7% of travel), and at +/-45 it closes
+    # properly (0.0744m, inside the 8cm opening) but still cannot reach past
+    # the tabletop, managing 1% while brushing all three drawers. The
+    # blocker was never the wrist angle; it is the clutter in front of the
+    # cabinet, so that is what gets cleared instead.
+    # which keeps the palm and forearm out of the thin band in front of the
+    # cabinet entirely. Measured on the middle drawer, and confirmed visually
+    # by the user against rendered poses: at 35-50 degrees of tilt with a
+    # pi/2 roll the arm reaches the handle with *nothing* else in contact --
+    # no forearm in the bowl, no palm in the plate -- where every roll-0
+    # orientation is blocked by one or the other.
+    approach_rolls_rad: tuple[float, ...] = (0.0,)  # straight pinch only
+    # Offsets applied to the handle target, as (along-pull-axis, vertical)
+    # metres. Aiming dead centre drives the fingers into the bar itself
+    # (measured: 1.8cm of interpenetration at roll pi/2, the *only* thing
+    # left blocking an otherwise clear pose). Opening a drawer does not need
+    # the bar centred between the pads -- it needs the fingers somewhere they
+    # catch it when pulled -- so a few offsets are tried around it.
+    grasp_offsets_m: tuple[tuple[float, float], ...] = (
+        (0.0, 0.0),
+        (0.0, 0.02),
+        (-0.02, 0.02),
+        (-0.03, 0.02),
+        (-0.04, 0.02),
+        (-0.03, 0.0),
+        (0.0, -0.02),
+        (-0.015, 0.0),
+    )
+    # How close the hand has to end up to the handle for the pull to count as
+    # "the handle is between the fingers". Deliberately looser than a grasp
+    # test: the fingers are ~8cm apart when open, so the handle can sit well
+    # off the exact target and still be hooked. Tight enough, though, to
+    # still reject the failure this guards against -- an approach that ended
+    # 0.10m away, resting on the cabinet face near the *next* drawer's
+    # handle, which pulled that one open instead.
+    handle_capture_radius_m: float = 0.045
+    # Clearance left on each side of the handle when approaching with
+    # pre-narrowed fingers (see OpenDrawerSkill's approach_finger_qpos).
+    # Enough that the handle passes cleanly between the fingers without
+    # needing the full open span, which is what does not fit the gap above a
+    # lower drawer's handle.
+    approach_finger_clearance_m: float = 0.006
     # IK is not unique -- different seeds can converge to different elbow/
     # wrist configurations that reach the identical grasp pose while sweeping
     # through different parts of the scene. This many (grasp, standoff)
@@ -180,6 +317,19 @@ class DrawerConfig:
     # giving up, taking the first whose connecting segment is actually
     # collision-clear -- see OpenDrawerSkill.execute()'s docstring comment.
     pose_selection_attempts: int = 6
+    # Same standoff-candidate search PickSkill uses (see
+    # standoff_search.standoff_candidates) -- the nominal straight-back
+    # standoff (multiplier 1.0, no lateral offset) is always tried first, so
+    # an uncluttered scene still gets the simple, direct approach; these
+    # only matter once that's blocked. Confirmed necessary directly: a real
+    # cluttered scene (objects left on the table between the robot and a
+    # cabinet) blocked the single fixed standoff position at *every* IK seed
+    # tried, for every drawer level in that cabinet, since a fixed-direction
+    # standoff has no way to route the approach past something sitting
+    # directly in that one path.
+    standoff_distance_multipliers: tuple[float, ...] = (1.0, 2.5, 4.0)
+    standoff_lateral_offsets_m: tuple[float, ...] = (0.05, 0.08, 0.12)
+    standoff_lateral_directions: int = 8
     # RRTConnect is stochastic and can occasionally return only an
     # "approximate" (rejected) solution or hit its timeout on a genuinely
     # feasible start/goal pair; this many attempts are retried before
@@ -196,6 +346,22 @@ class DrawerConfig:
     open_threshold_frac: float = 0.8
     retreat_m: float = 0.08
     retreat_steps: int = 40
+    # After retreating, servo back to the robot's own defined home/reset
+    # joint configuration (``robot.init_qpos``) before ending the subtask.
+    # The handle-approach IK solution that got the drawer open is often a
+    # genuinely awkward configuration (elbow twisted, wrist near a joint
+    # limit) -- confirmed directly: left as-is, it measurably reduced the
+    # arm's reachable workspace for whatever subtask ran next (a
+    # following pick's own IK solve had far less room to maneuver, and
+    # visibly moved stiffly). A dense joint-space interpolation (not a
+    # single Cartesian jump) is tracked here, same reasoning as the
+    # pull/turn legs elsewhere in this package: OSC's own IK is not
+    # unique, so commanding the home pose's Cartesian target directly can
+    # still converge to a *different* elbow config than true home: only
+    # incremental, densely-sampled joint waypoints reliably guide the
+    # actual joint configuration back to the target, not just the
+    # end-effector's Cartesian position.
+    return_home_steps: int = 60
 
 
 @dataclass
@@ -212,19 +378,27 @@ class KnobConfig:
     # turn_knob_skill.py's module docstring for the chord-geometry
     # derivation. Must be comfortably under the gripper's real max opening.
     grasp_chord_width_m: float = 0.035
-    # Vertical clearance (m), added along the knob's own rotation axis, above
-    # the knob's own measured surface before computing the grasp/standoff
-    # pose. A flat stove knob sits recessed relative to the raised burner
-    # grate/control-panel housing around it -- gripping exactly at the
-    # knob's own measured height put the gripper's *open* fingers into that
-    # surrounding housing at most tested angles (confirmed directly against
-    # the real flat_stove_1 asset: 0/8 candidate angles were collision-clear
-    # at 0 margin, climbing to 7/8 at 0.04). Same "raise the grasp height to
-    # clear a short/recessed feature" pattern as GraspSampleConfig.
-    # grasp_height_margin_m and ContactGraspNetConfig.grasp_height_margin_m,
-    # just a larger value -- this fixture's surrounding geometry is taller
-    # than either of those cases' short objects.
-    grasp_height_margin_m: float = 0.04
+    # Vertical offsets (m), added along the knob's own rotation axis above
+    # the knob body's own origin, tried (together with the angle search
+    # below) when picking the grasp/standoff pose. A flat stove knob's own
+    # collision geometry is a real, non-cylindrical mesh (a raised
+    # pointer/dial shape on a wider base, confirmed directly against the
+    # real flat_stove_1 asset via its geoms) -- so unlike a drawer handle's
+    # simple measured axis, there is no single "right" height to grip it at
+    # a fixed radius; the true solid cross-section at that radius varies
+    # with height, and only a real contact check (not just "not colliding",
+    # see turn_knob_skill.py's ``_verify_grip_contact``) can tell which
+    # height actually has material there. An earlier version picked a single
+    # large fixed margin (0.04) reasoned from the body's overall AABB alone,
+    # assuming raising the grip height would simply clear the surrounding
+    # burner housing -- it did (collision-clear at 7/8 angles), but a direct
+    # contact check showed *zero* of those candidates actually touched real
+    # knob material: the mesh narrows sharply above its base, so the
+    # gripper closed on empty air every time. Real closed-fingertip contact
+    # was only ever found at small margins close to the knob's own base
+    # (0.0-0.02); this list is tried smallest-real-contact-distance-first
+    # (largest measured overlap = most robust grip), largest margin last.
+    grasp_height_margins_m: tuple[float, ...] = (0.01, 0.0, 0.02, 0.015, 0.03, 0.005)
     # Unlike a drawer handle (one measured position), a knob has a full
     # circle of equally-valid grasp points -- rotational symmetry means there
     # is no single "correct" angular position to grip it at, only ones that
@@ -234,7 +408,7 @@ class KnobConfig:
     # around the rim to grip, and (per angle) which IK seed. This many
     # evenly-spaced angles around the full circle are tried; each one
     # delegates its own IK-seed retries to ``_solve_ik_robust``.
-    radial_angle_samples: int = 8
+    radial_angle_samples: int = 16
     # Same "try a few, take the first feasible" shape as
     # DrawerConfig.pose_selection_attempts -- now spent per angle, not
     # instead of the angle search.
@@ -250,8 +424,72 @@ class KnobConfig:
     # see turn_knob_skill.py's module docstring for the source. Overridable
     # per-scene for a different knob/threshold.
     turn_on_qpos_threshold: float = 0.5
+    # How far past `turn_on_qpos_threshold` to target turning the knob to
+    # (not the joint's full range end). Confirmed directly against the real
+    # flat_stove_1 asset (full range [-0.005, 2.1] rad, threshold 0.5):
+    # targeting the far endpoint (2.1) asks the wrist to sweep ~120 degrees
+    # while rigidly gripping a point near table height, dragging the arm
+    # through the surrounding burner grate/table at every tested turn
+    # fraction. A real stove only needs turning to "click on", not cranking
+    # to the mechanical stop -- targeting just past the threshold keeps the
+    # turn to the smallest rotation that reliably registers as on.
+    turn_on_safety_margin_rad: float = 0.6
     retreat_m: float = 0.06
     retreat_steps: int = 40
+
+
+@dataclass
+class CloseConfig:
+    """Tuning for ``CloseSkill``/``LiberoCloseAdapter`` -- closes a drawer
+    (slide joint) or a microwave door (hinge joint) by pushing it shut with
+    a closed gripper, never grasping it. Pushing has none of
+    ``DrawerConfig``'s grasp-precision machinery (offsets, tilts, per-angle
+    finger width) because a closed fist just needs to *contact* the fixture
+    somewhere and keep moving through it -- there is no handle to miss."""
+
+    approach_standoff_m: float = 0.08
+    # Higher than every other skill's own pose_selection_attempts (6) --
+    # measured necessary specifically for the microwave door: its hinge axis
+    # is vertical, so every approach reaches sideways across the robot's own
+    # base/pedestal instead of straight down onto a tabletop object, and a
+    # DLS solve from a perturbed seed converges to a self-colliding elbow
+    # configuration (forearm swept behind the pedestal) far more often than
+    # not. Measured directly: 6 restarts found a real descent-clear
+    # candidate ~1/75 tries; 40 found 5/75, with every candidate's IK
+    # converging at all (vs. some failing outright at 6). Drawer closing
+    # doesn't need this itself (reaches forward across the tabletop, not
+    # sideways past the base) but shares this config field for simplicity.
+    pose_selection_attempts: int = 24
+    standoff_distance_multipliers: tuple[float, ...] = (1.0, 2.5, 4.0)
+    standoff_lateral_offsets_m: tuple[float, ...] = (0.05, 0.08, 0.12)
+    standoff_lateral_directions: int = 8
+    # Drawer branch only (see DrawerConfig.approach_tilts_rad, same
+    # reasoning): a purely horizontal approach sweeps the forearm through
+    # whatever sits on the table in front of the cabinet at handle height --
+    # confirmed necessary, not just ported for parity, by a real close
+    # attempt on libero_10's own bottom-drawer task, whose scene has a wine
+    # rack sitting right next to the cabinet: every one of 31 reachable
+    # straight-on standoffs had its descent blocked (table or the wine rack)
+    # until this tilt search was added. Not used by the door branch, whose
+    # approach direction already comes from the arc's own tangent.
+    approach_tilts_rad: tuple[float, ...] = (0.0, 0.35, 0.61, 0.87)
+    planning_attempts: int = 3
+    # Number of Cartesian waypoints FK-sampled along a microwave door's
+    # swept closing arc (see articulation.measure_door_close_arc) -- each is
+    # IK-solved in sequence, warm-started from the previous one, to build the
+    # joint-space reference the MPC tracks. Irrelevant for a drawer, whose
+    # closing path is a straight line (2 endpoints, IK-solved directly).
+    door_arc_waypoints: int = 10
+    # Fraction of the joint's full qpos range still open, required to call
+    # the fixture "closed" -- the mirror image of
+    # DrawerConfig.open_threshold_frac, just checked in the other direction
+    # (<= this counts as closed, vs. >= open_threshold_frac counts as open).
+    # Looser than 0.0 because a real push rarely drives the joint to its
+    # exact mechanical zero.
+    close_threshold_frac: float = 0.15
+    retreat_m: float = 0.06
+    retreat_steps: int = 40
+    return_home_steps: int = 60
 
 
 @dataclass
@@ -353,10 +591,12 @@ class MotionConfig:
     collision: CollisionConfig = field(default_factory=CollisionConfig)
     time_param: TimeParamConfig = field(default_factory=TimeParamConfig)
     place: PlaceSampleConfig = field(default_factory=PlaceSampleConfig)
+    transport: TransportConfig = field(default_factory=TransportConfig)
     replan: ReplanConfig = field(default_factory=ReplanConfig)
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
     drawer: DrawerConfig = field(default_factory=DrawerConfig)
     knob: KnobConfig = field(default_factory=KnobConfig)
+    close: CloseConfig = field(default_factory=CloseConfig)
     contact_graspnet: ContactGraspNetConfig = field(default_factory=ContactGraspNetConfig)
     mpc: dict[str, float] = field(default_factory=dict)  # raw dict -> MPCCostConfig(**mpc)
 
@@ -372,10 +612,12 @@ class MotionConfig:
             collision=CollisionConfig(**raw.get("collision", {})),
             time_param=TimeParamConfig(**raw.get("time_param", {})),
             place=PlaceSampleConfig(**raw.get("place", {})),
+            transport=TransportConfig(**raw.get("transport", {})),
             replan=ReplanConfig(**raw.get("replan", {})),
             execution=ExecutionConfig(**raw.get("execution", {})),
             drawer=DrawerConfig(**raw.get("drawer", {})),
             knob=KnobConfig(**raw.get("knob", {})),
+            close=CloseConfig(**raw.get("close", {})),
             contact_graspnet=ContactGraspNetConfig(**raw.get("contact_graspnet", {})),
             mpc=dict(raw.get("mpc", {})),
         )

@@ -105,7 +105,17 @@ def test_turn_knob_skill_produces_feasible_plan(libero_stove_scene):
 
 
 @requires_libero_stove
-def test_turn_knob_skill_unknown_knob_reports_structured_failure(libero_stove_scene):
+def test_turn_knob_skill_unresolvable_knob_reports_structured_failure(libero_stove_scene, monkeypatch):
+    # A single-knob scene resolves any reference to that one knob (same
+    # fallback as resolve_drawer's own single-fixture case) -- so an
+    # unmatched name only actually fails to resolve when more than one
+    # candidate exists. Fake a second knob to exercise that ambiguous path.
+    import step.system_one.motion.articulation as articulation_module
+
+    real_knob = resolve_knob(libero_stove_scene, "flat_stove_1")
+    fake_second = articulation_module.KnobHandle(knob_body="other_knob", joint_name="other_knob_joint", label="other_knob")
+    monkeypatch.setattr(articulation_module, "discover_knobs", lambda scene: [real_knob, fake_second])
+
     skill = _build_skill(libero_stove_scene)
     start_q = libero_stove_scene.get_qpos(JOINT_NAMES)
     result = skill.execute(libero_stove_scene, "nonexistent_knob_xyz", start_q, {})

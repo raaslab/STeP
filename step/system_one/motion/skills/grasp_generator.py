@@ -67,6 +67,19 @@ from ..types import GraspCandidate
 # degree rotation about the world X axis.
 _TOP_DOWN_QUAT_WXYZ = np.array([0.0, 1.0, 0.0, 0.0])
 
+# Base orientation for the edge-pinch strategy (see _edge_pinch_candidates):
+# a 120-degree rotation about the (1,1,1) world axis that cyclically permutes
+# the local frame -- local +Z (approach) -> world +X, local +Y (closing
+# axis) -> world +Z, local +X -> world +Y. Composing a further world-frame
+# yaw_quat_wxyz(heading) rotation (about world Z, the same axis the closing
+# direction already maps to) sweeps the horizontal approach heading around
+# the full circle while leaving the closing axis exactly vertical throughout
+# -- unlike the top-down base above, where yaw sweeps the *closing* axis and
+# leaves the (vertical) approach direction fixed. Same quaternion the
+# grasp_generator module docstring already references for milk_1 (a
+# clean 90-degree-family rotation mapping local Y to world-vertical).
+_EDGE_PINCH_BASE_QUAT_WXYZ = np.array([0.5, 0.5, 0.5, 0.5])
+
 
 def yaw_quat_wxyz(yaw_rad: float) -> np.ndarray:
     """Quaternion for a rotation of ``yaw_rad`` about the world +Z axis."""
@@ -328,6 +341,26 @@ class PrivilegedTopDownGraspGenerator(GraspGenerator):
             out.extend(
                 self._rim_edge_candidates(scene, object_name, obj_pos, obj_quat, grasp_center, approach_dir_world, extent)
             )
+        # Edge-pinch: a *geometric* trigger, not a keyword list, deliberately
+        # -- unlike rim-edge above, "is this object flat and wide" doesn't
+        # need object-class knowledge to answer, and a keyword list would
+        # only repeat the exact fragility already hit once this session (a
+        # real "plate" object silently missing from RIM_GRASP_KEYWORDS).
+        # Triggers whenever the object is both too *thin* for the top-down
+        # strategies' vertical clearance logic to find a safe height (real
+        # height less than the gripper's max opening) and too *wide* for any
+        # center-grasp yaw to span (confirmed empirically against the real
+        # plate_1 LIBERO asset: every rim-edge candidate there also failed,
+        # 1-1.5cm penetrations into solid material -- a flat disc has no
+        # hollow wall to straddle at any radius, so that strategy alone
+        # isn't sufficient here the way it is for a bowl).
+        if extent is not None:
+            real_height_m = 2.0 * float(extent.half_extents[2])
+            widest_span_m = 2.0 * float(max(extent.half_extents[0], extent.half_extents[1]))
+            if real_height_m < self.gripper_max_opening_m and widest_span_m > self.gripper_max_opening_m:
+                out.extend(
+                    self._edge_pinch_candidates(scene, object_name, obj_pos, obj_quat, extent)
+                )
         return out
 
     def _center_grasp_candidates(
@@ -455,6 +488,76 @@ class PrivilegedTopDownGraspGenerator(GraspGenerator):
                         "yaw_rad": float(yaw),
                         "rim_angle_rad": float(theta),
                         "rim_radius_m": float(radius),
+                    },
+                )
+            )
+        return out
+
+    def _edge_pinch_candidates(
+        self,
+        scene: SceneQuery,
+        object_name: str,
+        obj_pos: np.ndarray,
+        obj_quat_wxyz: np.ndarray,
+        extent,
+    ) -> list[GraspCandidate]:
+        """Grasp a flat, wide object (a plate, saucer, lid -- see the
+        geometric trigger in ``_generate_for_object``) by its outer edge,
+        approaching *horizontally* and closing *vertically*: one finger
+        lands above the rim, one below, pinching the object's own thickness
+        at that point (a couple cm) instead of trying to span its full
+        diameter (the center-grasp strategy, which can't -- that's the whole
+        reason this strategy exists) or straddle a hollow wall that, for a
+        solid disc, simply isn't there at any radius (the rim-edge strategy
+        above, which for the same reason is geometrically guaranteed to
+        fail here too).
+
+        Height is the object's own true geometric mid-height, not the
+        top-down strategies' palm/finger-clearance-adjusted height -- that
+        adjustment is about vertical descent clearance, which doesn't apply
+        to a horizontal approach. Radius is close to (not a fraction well
+        inside) the object's true outer edge, since there's no rim-cavity
+        depth to aim inside of the way there is for a bowl."""
+        n = max(0, int(self.config.edge_pinch_num_angle_samples))
+        if n == 0:
+            return []
+        grasp_z = obj_pos[2] + float(extent.center_offset[2])
+        radius = self.config.edge_pinch_offset_fraction * min(extent.half_extents[0], extent.half_extents[1])
+        fallback_width = float(self.config.edge_pinch_width_m)
+
+        out: list[GraspCandidate] = []
+        for i in range(n):
+            theta = 2.0 * np.pi * i / n
+            radial_dir = np.array([np.cos(theta), np.sin(theta)])
+            point_center = np.array(
+                [obj_pos[0] + radius * radial_dir[0], obj_pos[1] + radius * radial_dir[1], grasp_z]
+            )
+            approach_dir_world = np.array([-radial_dir[0], -radial_dir[1], 0.0])  # horizontal, radially inward
+            # Sweeping the approach heading by (theta + pi) about world Z on
+            # top of _EDGE_PINCH_BASE_QUAT_WXYZ points the approach axis at
+            # `approach_dir_world` above while leaving the closing axis
+            # (already aligned with world Z, the rotation axis) vertical
+            # regardless of heading -- see that constant's own docstring.
+            grasp_quat = quat_mul_wxyz(yaw_quat_wxyz(float(theta + np.pi)), _EDGE_PINCH_BASE_QUAT_WXYZ)
+
+            width = _measure_local_wall_width_m(
+                scene, object_name, obj_pos, obj_quat_wxyz, point_center, np.array([0.0, 0.0, 1.0]),
+                fallback_width,
+            )
+            score = self._score(width)
+
+            out.append(
+                GraspCandidate(
+                    object_name=object_name,
+                    grasp_pose_world=np.concatenate([point_center, grasp_quat]),
+                    approach_direction_world=approach_dir_world,
+                    gripper_width=width,
+                    generator_score=score,
+                    metadata={
+                        "generator": "PrivilegedTopDownGraspGenerator",
+                        "strategy": "edge_pinch",
+                        "edge_angle_rad": float(theta),
+                        "edge_radius_m": float(radius),
                     },
                 )
             )

@@ -25,7 +25,7 @@
       "type": "object",
       "properties": {
         "subtask_id": { "type": "integer", "minimum": 0 },
-        "skill": { "type": "string", "enum": ["pick", "transport", "place", "pour", "open", "turn_on"] },
+        "skill": { "type": "string", "enum": ["pick", "transport", "place", "pour", "open", "close", "turn_on"] },
         "description": { "type": "string" },
         "params": { "type": "object", "additionalProperties": true },
         "formula": { "$ref": "#/$defs/formula" }

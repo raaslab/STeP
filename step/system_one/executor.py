@@ -19,6 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 import json
+import math
 import os
 import time
 
@@ -36,6 +37,11 @@ from .history_log import STLHistoryLog
 
 class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin):
     """Runs a compiled STL plan against any :class:`BaseManipulationEnv`."""
+
+    # Times to re-attempt a drawer-handle grip that missed. See
+    # _run_open_drawer_with_motion_pipeline for why a miss is safely
+    # repeatable and why only this failure mode is retried.
+    OPEN_DRAWER_GRIP_ATTEMPTS = 3
 
     def __init__(
         self,
@@ -300,7 +306,7 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                 if goal_x is not None and goal_y is not None:
                     point_goal_xy = (float(goal_x), float(goal_y))
 
-        goal_canonical, goal_xy, goal_radius, default_descend = self.resolver.resolve_goal(
+        goal_canonical, goal_xy, _goal_z, goal_radius, default_descend = self.resolver.resolve_goal(
             goal_name
         )
         dynamic_goal_refs = self.resolver.dynamic_goal_reference_names()
@@ -661,23 +667,17 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         raw_goal_region = params.get("goal_region")
         entity_name = self._goal_region_entity_name(raw_goal_region) or params.get("goal")
         goal_name = self.resolver.canonical(entity_name)
+        goal_name, goal_point_xyz, point_error = self._resolve_point_goal(raw_goal_region, params, goal_name)
+        if point_error is not None:
+            return False, 0, point_error
         if goal_name is None:
-            if self._point_target_from_goal_region(raw_goal_region) is not None:
-                # PlaceSkill (ompl_mpc backend) always plans onto a real
-                # container body's measured pose/extent/rim -- it has no mode
-                # for placing at a floating point with no supporting entity,
-                # unlike the legacy stage-machine backend's goal_x/goal_y path.
-                return False, 0, {
-                    "success": False,
-                    "failure_reason": "no_goal_container_body",
-                    "detail": (
-                        "place (ompl_mpc backend) got an explicit point goal_region "
-                        f"{raw_goal_region!r} with no matching scene entity -- this backend's "
-                        "PlaceSkill requires a real container body to plan onto and cannot "
-                        "place at a floating point."
-                    ),
-                }
             return False, 0, {"success": False, "failure_reason": "no_goal_region", "detail": "place subtask has no params.goal_region"}
+
+        # "top" places on a solid support's own top surface (e.g. a
+        # cabinet's static frame body -- see
+        # libero_scene.infer_cabinet_support_entities); default "inside"
+        # keeps the existing container-interior behavior unchanged.
+        place_surface = params.get("place_surface", "inside")
 
         motion_config = MotionConfig.from_scene_context(self.scene_context)
         adapter = LiberoPlaceAdapter(env, motion_config)
@@ -687,9 +687,68 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
             attached_state,
             max_steps=max_steps,
             step_callback=lambda: self._capture_video_frame(env),
+            place_surface=place_surface,
+            goal_point_xyz=goal_point_xyz,
         )
         if result.success:
             self._motion_attached_state = None  # detached -- next pick must re-attach
+
+        status: dict[str, Any] = {
+            "success": bool(result.success),
+            "selected_object": result.selected_object,
+            "failure_reason": str(result.failure_reason),
+            "cost_breakdown": result.cost_breakdown,
+            "diagnostics": result.diagnostics,
+        }
+        return bool(result.success), steps, status
+
+    def _run_transport_with_motion_pipeline(
+        self, env: BaseManipulationEnv, sub: dict[str, Any]
+    ) -> tuple[bool, int, dict[str, Any]]:
+        from .motion.config import MotionConfig
+        from .motion.skills.libero_transport_adapter import LiberoTransportAdapter
+
+        attached_state = getattr(self, "_motion_attached_state", None)
+        if attached_state is None:
+            return False, 0, {
+                "success": False,
+                "failure_reason": "no_attached_object",
+                "detail": (
+                    "transport (ompl_mpc backend) requires a prior pick on the same backend to "
+                    "have attached an object -- none is recorded (either pick used "
+                    "motion_backend=legacy, or pick failed before attaching)."
+                ),
+            }
+
+        params = sub.get("params", {}) or {}
+        raw_goal_region = params.get("goal_region")
+        entity_name = self._goal_region_entity_name(raw_goal_region) or params.get("goal")
+        goal_name = self.resolver.canonical(entity_name)
+        goal_name, goal_point_xyz, point_error = self._resolve_point_goal(raw_goal_region, params, goal_name)
+        if point_error is not None:
+            return False, 0, point_error
+        if goal_name is None:
+            return False, 0, {
+                "success": False,
+                "failure_reason": "no_goal_region",
+                "detail": "transport (ompl_mpc backend) subtask has no resolvable params.goal_region",
+            }
+        place_surface = params.get("place_surface", "inside")
+
+        motion_config = MotionConfig.from_scene_context(self.scene_context)
+        adapter = LiberoTransportAdapter(env, motion_config)
+        max_steps = int(self.max_subtask_steps) if self.max_subtask_steps is not None else 400
+        result, steps = adapter.run(
+            goal_name,
+            attached_state,
+            max_steps=max_steps,
+            step_callback=lambda: self._capture_video_frame(env),
+            place_surface=place_surface,
+            goal_point_xyz=goal_point_xyz,
+        )
+        # Unlike place, transport never detaches on success -- it's still
+        # holding the object at the hover pose, waiting for the following
+        # place subtask to take over.
 
         status: dict[str, Any] = {
             "success": bool(result.success),
@@ -714,8 +773,59 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         motion_config = MotionConfig.from_scene_context(self.scene_context)
         adapter = LiberoOpenDrawerAdapter(env, motion_config)
         max_steps = int(self.max_subtask_steps) if self.max_subtask_steps is not None else 600
-        result, steps, open_verification = adapter.run(
-            drawer_ref,
+
+        # Retry a missed handle grip. Landing the gripper on a drawer handle
+        # is this skill's genuinely unreliable step (its own notes record a
+        # measured ~3/10-3/8 grip rate, and a real rollout missed by 0.10m
+        # with dz=-0.083m -- almost exactly the 0.073m spacing to the next
+        # handle down). The attempt is safely repeatable now that the pull is
+        # gated on actually holding the handle: a miss changes nothing in the
+        # scene, and adapter.run() begins by homing the arm, so each attempt
+        # starts from the same known configuration rather than from wherever
+        # the last one gave up. Only the grip miss is retried -- a planning
+        # failure re-plans identically (see MotionPlanner.plan's note on
+        # repeated identical calls) and would just burn the budget.
+        steps = 0
+        for attempt in range(self.OPEN_DRAWER_GRIP_ATTEMPTS):
+            result, attempt_steps, open_verification = adapter.run(
+                drawer_ref,
+                constraints={},
+                max_steps=max_steps,
+                step_callback=lambda: self._capture_video_frame(env),
+            )
+            steps += attempt_steps
+            if result.success or "aborted before pulling" not in str(result.diagnostics.get("detail", "")):
+                break
+            result.diagnostics["grip_attempts_used"] = attempt + 1
+        status: dict[str, Any] = {
+            "success": bool(result.success),
+            "selected_object": result.selected_object,
+            "failure_reason": str(result.failure_reason),
+            "cost_breakdown": result.cost_breakdown,
+            "diagnostics": result.diagnostics,
+            "open_verification": open_verification,
+        }
+        return bool(result.success), steps, status
+
+    def _run_close_with_motion_pipeline(
+        self, env: BaseManipulationEnv, sub: dict[str, Any]
+    ) -> tuple[bool, int, dict[str, Any]]:
+        from .motion.config import MotionConfig
+        from .motion.skills.libero_close_adapter import LiberoCloseAdapter
+
+        params = sub.get("params", {}) or {}
+        target_ref = self.resolver.canonical(params.get("object")) or params.get("object")
+        if not target_ref:
+            return False, 0, {"success": False, "failure_reason": "no_object", "detail": "close subtask has no params.object"}
+
+        motion_config = MotionConfig.from_scene_context(self.scene_context)
+        adapter = LiberoCloseAdapter(env, motion_config)
+        max_steps = int(self.max_subtask_steps) if self.max_subtask_steps is not None else 600
+
+        # No grip-retry loop here (unlike open) -- closing never grasps
+        # anything, so there is no missed-handle failure mode to retry.
+        result, steps, close_verification = adapter.run(
+            target_ref,
             constraints={},
             max_steps=max_steps,
             step_callback=lambda: self._capture_video_frame(env),
@@ -726,7 +836,7 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
             "failure_reason": str(result.failure_reason),
             "cost_breakdown": result.cost_breakdown,
             "diagnostics": result.diagnostics,
-            "open_verification": open_verification,
+            "close_verification": close_verification,
         }
         return bool(result.success), steps, status
 
@@ -774,6 +884,40 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         through `_point_target_from_goal_region` instead.
         """
         return raw if isinstance(raw, str) else None
+
+    def _resolve_point_goal(
+        self,
+        raw_goal_region: Any,
+        params: dict[str, Any],
+        goal_name: str | None,
+    ) -> tuple[str | None, list[float] | None, dict[str, Any] | None]:
+        """Resolve an explicit `{"type":"point",...}` goal_region for the
+        ompl_mpc transport/place path into `(surface_entity_name, xyz, error)`.
+
+        A point on its own isn't enough to place onto: the object still has to
+        come to rest on something, and the skills measure the resting height
+        from that surface's real geometry rather than trusting a caller's z.
+        So a point goal names *where* over the surface, and
+        `params.goal_surface` (defaulting to the table, the only always-present
+        support) names *what* it rests on. Returns the goal_name unchanged and
+        a None xyz when `raw_goal_region` isn't a point, so callers can use
+        this unconditionally.
+        """
+        point_target = self._point_target_from_goal_region(raw_goal_region)
+        if point_target is None:
+            return goal_name, None, None
+        xy, z, _radius = point_target
+        surface_name = self.resolver.canonical(params.get("goal_surface") or "table")
+        if surface_name is None:
+            return None, None, {
+                "success": False,
+                "failure_reason": "no_goal_container_body",
+                "detail": (
+                    f"explicit point goal_region {raw_goal_region!r} needs a supporting surface, "
+                    "and neither params.goal_surface nor a 'table' entity resolved to one."
+                ),
+            }
+        return surface_name, [float(xy[0]), float(xy[1]), float(z) if z is not None else float("nan")], None
 
     @staticmethod
     def _point_target_from_goal_region(
@@ -902,8 +1046,16 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         goal_name = self.resolver.canonical(raw_goal)
         if goal_name is not None:
             env.goal_reference_name = None
-            env.goal_z_override = None if goal_z is None else float(goal_z)
-            _, goal_xy, resolved_radius, _ = self.resolver.resolve_goal(goal_name)
+            _, goal_xy, resolved_z, resolved_radius, _ = self.resolver.resolve_goal(goal_name)
+            # An explicit params.goal_z always wins; otherwise fall back to
+            # the entity's own measured height (see resolve_goal's own
+            # docstring) rather than leaving this None -- a static fixture
+            # (a cabinet's frame body, say) has no live per-step pose for
+            # base_env._goal_anchor's *other* z fallback to read, so None
+            # here left legacy transport aiming at bare table height,
+            # confirmed driving a carried object straight into the
+            # fixture's solid top instead of onto it.
+            env.goal_z_override = float(goal_z) if goal_z is not None else resolved_z
             env.goal_xy = np.asarray(goal_xy, dtype=np.float32)
             env.goal_radius = float(goal_radius) if goal_radius is not None else float(resolved_radius)
             return {"mode": "static_goal_region", "goal_region": goal_name}
@@ -930,7 +1082,7 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
             ):
                 xy = (float(params["region_x"]), float(params["region_y"]))
             elif params.get("region_name") is not None:
-                _, xy, _, _ = self.resolver.resolve_goal(params.get("region_name"))
+                _, xy, _, _, _ = self.resolver.resolve_goal(params.get("region_name"))
             else:
                 continue
             env.configure_pass_through(
@@ -1539,8 +1691,12 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                     done, steps, last_status = self._run_place_with_motion_pipeline(env, sub)
                 elif skill == "open" and motion_backend == "ompl_mpc":
                     done, steps, last_status = self._run_open_drawer_with_motion_pipeline(env, sub)
+                elif skill == "close" and motion_backend == "ompl_mpc":
+                    done, steps, last_status = self._run_close_with_motion_pipeline(env, sub)
                 elif skill == "turn_on" and motion_backend == "ompl_mpc":
                     done, steps, last_status = self._run_turn_knob_with_motion_pipeline(env, sub)
+                elif skill == "transport" and motion_backend == "ompl_mpc":
+                    done, steps, last_status = self._run_transport_with_motion_pipeline(env, sub)
                 else:
                     steps = 0
                     done = False

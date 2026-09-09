@@ -259,11 +259,12 @@ def infer_drawer_fixtures(env: Any) -> list[dict[str, Any]]:
     if sim is None:
         return []
     try:
-        from .motion.articulation import discover_drawers
+        from .motion.articulation import discover_drawer_support_frames, discover_drawers
         from .motion.scene_query import SceneQuery
 
         scene = SceneQuery.from_robosuite_sim(sim)
         drawers = discover_drawers(scene)
+        support_frames = discover_drawer_support_frames(scene)
     except Exception:
         return []
 
@@ -279,6 +280,15 @@ def infer_drawer_fixtures(env: Any) -> list[dict[str, Any]]:
                 f"{d.level_label} drawer handle",
             }
         )
+        support_frame = support_frames.get(d.drawer_body)
+        support_note = ""
+        if support_frame:
+            support_note = (
+                f" This drawer is physically part of the {normalize_entity_name(support_frame)} "
+                "cabinet frame entity -- when checking rule 15/15a clearance for this drawer's "
+                f"opening path, use {normalize_entity_name(support_frame)}'s own xy/radius in "
+                "scene_context.geometry as the cabinet position to measure distance from."
+            )
         out.append(
             {
                 "name": name,
@@ -286,29 +296,342 @@ def infer_drawer_fixtures(env: Any) -> list[dict[str, Any]]:
                 "aliases": aliases,
                 "notes": (
                     f"Auto-discovered articulated fixture (slide joint {d.joint_name!r}); "
-                    "use skill=\"open\" to grasp its handle and pull it open."
+                    "use skill=\"open\" to grasp its handle and pull it open, or skill=\"close\" "
+                    "to push it shut." + support_note
                 ),
             }
         )
     return out
 
 
+def infer_cabinet_support_entities(env: Any) -> list[dict[str, Any]]:
+    """Discover each drawer cabinet's own static frame body (see
+    ``discover_cabinet_support_bodies`` for why this is a *different* body
+    from any drawer level) and return it as a ``support_object`` scene
+    entity, so "place X on top of the cabinet" has a real name to target --
+    without this, System 2 has nothing to reference but a drawer level
+    itself (already seen hallucinating a drawer's name as a stand-in for
+    "on top of the cabinet", which is wrong: a drawer is the sliding part,
+    not the cabinet's static top surface)."""
+    sim = getattr(env, "sim", None) or getattr(getattr(env, "env", None), "sim", None)
+    if sim is None:
+        return []
+    try:
+        from .motion.articulation import discover_cabinet_support_bodies, discover_drawer_support_frames, discover_drawers
+        from .motion.scene_query import SceneQuery
+
+        scene = SceneQuery.from_robosuite_sim(sim)
+        root_bodies = discover_cabinet_support_bodies(scene)
+        support_frames = discover_drawer_support_frames(scene)
+        drawer_entity_names_by_frame: dict[str, list[str]] = {}
+        for d in discover_drawers(scene):
+            frame = support_frames.get(d.drawer_body)
+            if frame:
+                drawer_entity_names_by_frame.setdefault(frame, []).append(
+                    normalize_entity_name(f"{d.level_label}_drawer")
+                )
+    except Exception:
+        return []
+
+    out: list[dict[str, Any]] = []
+    for body_name in root_bodies:
+        # Register the body's own exact name verbatim -- NOT stripped down
+        # to a shorter/prettier form the way free-body objects normally are
+        # (see resolve_body_name's own "{name}_main" convention). That
+        # stripping is wrong here: this fixture's world-parented root (e.g.
+        # "wooden_cabinet_1_main") is a real body in its own right, just an
+        # empty pass-through frame with none of the actual geometry -- so a
+        # shortened "wooden_cabinet_1" would round-trip straight back to
+        # that *wrong*, empty body via resolve_body_name's own "_main"
+        # convention, not to this (correctly-chosen, geometry-owning) one.
+        # Confirmed directly: this exact collision was the reason "place on
+        # top of the cabinet" kept failing before this was fixed.
+        name = normalize_entity_name(body_name)
+        aliases = sorted({name, name.replace("_", " ")})
+        # Real xy/z geometry, not just a name -- without this, the legacy
+        # transport backend's own SceneResolver.resolve_goal() has nothing
+        # to look up for a fixture-only entity (which normally has none,
+        # see merge_drawer_fixtures_into_scene_context's own docstring) and
+        # silently falls back to a workspace-center placeholder instead of
+        # the cabinet's real position. Confirmed directly: transporting to
+        # this entity before this fix aimed at goal_xy=(0.05, 0.2) -- an
+        # unrelated fallback point, not the cabinet at all. "open" doesn't
+        # need this (it re-measures the live model directly via
+        # resolve_drawer), but transport/place's own resolvers do.
+        pos, _ = scene.body_pose(body_name)
+        extent = scene.body_extent_world(body_name)
+        top_z = float(pos[2] + extent.center_offset[2] + extent.half_extents[2]) if extent is not None else float(pos[2])
+        radius = float(max(extent.half_extents[0], extent.half_extents[1])) if extent is not None else 0.1
+        owned_drawers = drawer_entity_names_by_frame.get(body_name, [])
+        drawer_note = ""
+        if owned_drawers:
+            drawer_note = (
+                f" This is the shared cabinet frame for {', '.join(owned_drawers)} -- when "
+                "checking rule 15/15a clearance for opening any of those drawers, use this "
+                "entity's own xy/radius here as the cabinet position to measure distance from."
+            )
+        out.append(
+            {
+                "name": name,
+                "role": "support_object",
+                "aliases": aliases,
+                "notes": (
+                    "Auto-discovered cabinet/fixture frame body -- use as params.goal_region "
+                    'with params.place_surface="top" to place something on top of it (not '
+                    "inside any of its drawers)." + drawer_note
+                ),
+                "_geometry": {
+                    "xy": [float(pos[0]), float(pos[1])],
+                    "xyz": [float(pos[0]), float(pos[1]), top_z],
+                    "z": top_z,
+                    "radius": radius,
+                },
+                "_owned_drawers": owned_drawers,
+            }
+        )
+    return out
+
+
+def infer_table_support_entity(env: Any) -> list[dict[str, Any]]:
+    """Register the scene's own tabletop as a resolvable ``support_object``
+    entity, so System 2 has a simple, always-available "somewhere clear"
+    destination for temporarily relocating an object -- e.g. moving a bowl
+    out of a drawer's way before opening it (see prompts.py's rule on this).
+
+    Deliberately *not* discovered via ``infer_objects_from_mujoco`` (which
+    explicitly excludes any body name containing "table", since it's scene
+    furniture, not a manipulable/placeable object in the usual sense) --
+    registered here on purpose instead, since placing something *on* the
+    table is exactly the simple, well-tested operation this fixture-move
+    heuristic actually wants, as opposed to placing on top of a specific
+    fixture's own frame (more error-prone, and leaves the object sitting
+    somewhere elevated and awkward to re-grasp from -- confirmed via a real
+    rollout that re-picking a bowl off a cabinet's own top surface is
+    measurably harder than picking it up off the table it started on).
+    """
+    sim = getattr(env, "sim", None) or getattr(getattr(env, "env", None), "sim", None)
+    if sim is None:
+        return []
+    try:
+        from .motion.scene_query import SceneQuery
+
+        scene = SceneQuery.from_robosuite_sim(sim)
+        scene.body_id("table")
+    except Exception:
+        return []
+
+    pos, _ = scene.body_pose("table")
+    extent = scene.body_extent_world("table")
+    top_z = float(pos[2] + extent.center_offset[2] + extent.half_extents[2]) if extent is not None else float(pos[2])
+    radius = float(max(extent.half_extents[0], extent.half_extents[1])) if extent is not None else 0.3
+    return [
+        {
+            "name": "table",
+            "role": "support_object",
+            "aliases": ["table", "tabletop", "the table"],
+            "notes": (
+                "The scene's own tabletop -- use as params.goal_region with "
+                'params.place_surface="top" as a simple, always-available spot '
+                "to temporarily set an object down on (e.g. moving something out "
+                "of a drawer/cabinet's way before opening it)."
+            ),
+            "_geometry": {
+                "xy": [float(pos[0]), float(pos[1])],
+                "xyz": [float(pos[0]), float(pos[1]), top_z],
+                "z": top_z,
+                "radius": radius,
+            },
+        }
+    ]
+
+
 def merge_drawer_fixtures_into_scene_context(scene_context: dict[str, Any], env: Any) -> dict[str, Any]:
-    """Append discovered drawer/cabinet entities (see ``infer_drawer_fixtures``)
-    into ``scene_context["entities"]``, skipping any name already present.
-    Unlike movable objects, fixtures have no meaningful single xyz/geometry
-    entry to add -- their entity record (name/role/aliases) is enough for
-    System 2 to reference them by name and for ``resolve_drawer`` to look
-    them up again from the live model at execution time."""
+    """Append discovered drawer/cabinet entities (see ``infer_drawer_fixtures``),
+    their cabinets' own static frame bodies (see
+    ``infer_cabinet_support_entities``), and the scene's own tabletop (see
+    ``infer_table_support_entity``) into ``scene_context["entities"]``,
+    skipping any name already present. A plain drawer/cabinet-level entity
+    has no meaningful single xyz/geometry entry to add -- its entity record
+    (name/role/aliases) is enough for System 2 to reference it by name and
+    for ``resolve_drawer``/``resolve_body_name`` to look it up again from the
+    live model at execution time. A cabinet/table support entity is
+    different: it also carries a ``_geometry`` entry (popped into
+    ``scene_context["geometry"]`` here, matching
+    ``update_scene_context_from_objects``'s own convention) since the
+    *legacy* transport backend's ``SceneResolver.resolve_goal()`` -- unlike
+    ``open``'s own live re-measurement -- has no other way to find a
+    fixture's position and silently falls back to a workspace-center
+    placeholder without it."""
     updated = copy.deepcopy(scene_context)
     entities = updated.setdefault("entities", [])
+    geometry = updated.setdefault("geometry", {})
     existing_names = {e.get("name") for e in entities if e.get("name")}
-    for entity in infer_drawer_fixtures(env):
+    cabinets_with_drawers: list[tuple[str, list[str]]] = []
+    for entity in infer_drawer_fixtures(env) + infer_cabinet_support_entities(env) + infer_table_support_entity(env):
+        entity = dict(entity)
+        entity_geometry = entity.pop("_geometry", None)
+        owned_drawers = entity.pop("_owned_drawers", None)
         if entity["name"] not in existing_names:
             entities.append(entity)
             existing_names.add(entity["name"])
+        if entity_geometry is not None:
+            geometry.setdefault(entity["name"], entity_geometry)
+        if owned_drawers:
+            cabinets_with_drawers.append((entity["name"], owned_drawers))
+
+    # The robot's own base position, as plain geometry rather than an entity
+    # (it is not a thing to manipulate or place onto). System 2 otherwise has
+    # no way to tell which parts of a large table the arm can comfortably
+    # work in, and "put it somewhere clear of the cabinet" alone pushes
+    # objects to whichever table edge is furthest from the fixture --
+    # confirmed via a real rollout that left a bowl at the far edge where
+    # re-grasping it failed, despite the gripper reaching its target to
+    # within 0.9mm. See prompts.py rule 15's reach band.
+    try:
+        from .motion.scene_query import SceneQuery
+
+        sim = getattr(env, "sim", None) or getattr(getattr(env, "env", None), "sim", None)
+        if sim is not None:
+            base_scene = SceneQuery.from_robosuite_sim(sim)
+            base_pos, _ = base_scene.body_pose("robot0_base")
+            geometry.setdefault(
+                "robot_base",
+                {
+                    "xy": [float(base_pos[0]), float(base_pos[1])],
+                    "xyz": [float(base_pos[0]), float(base_pos[1]), float(base_pos[2])],
+                    "z": float(base_pos[2]),
+                },
+            )
+    except Exception:
+        pass
+
+    _annotate_drawer_clearance_conflicts(entities, geometry, cabinets_with_drawers)
+    _annotate_drawer_approach_corridor(entities, geometry, env)
     return updated
 
+
+DRAWER_BLOCKING_CLEARANCE_M = 0.15
+
+
+def _annotate_drawer_clearance_conflicts(
+    entities: list[dict[str, Any]],
+    geometry: dict[str, Any],
+    cabinets_with_drawers: list[tuple[str, list[str]]],
+) -> None:
+    """Precompute, in code rather than leaving it to System 2's own arithmetic,
+    which other objects sit too close to each drawer cabinet's own footprint
+    to leave room for that drawer to open -- and stamp the verdict directly
+    onto that object's entity ``notes`` (mutated in place).
+
+    This exists because asking the LLM to do this distance/threshold
+    computation itself (rule 15a in prompts.py) turned out unreliable in
+    practice: given the same scene four separate real rollouts wrongly opted
+    to move an object with plenty of clearance (0.22m) while leaving the one
+    actually crowding the cabinet's footprint (0.05m clearance) untouched.
+    Handing System 2 the already-computed verdict per object removes that
+    failure mode -- it only has to read a stamped conclusion, not compute
+    one across several candidates itself."""
+    for cabinet_name, owned_drawers in cabinets_with_drawers:
+        cab_geom = geometry.get(cabinet_name)
+        if cab_geom is None:
+            continue
+        drawers_text = "/".join(owned_drawers)
+        for entity in entities:
+            name = entity.get("name")
+            if not name or name == cabinet_name or name == "table" or name in owned_drawers:
+                continue
+            obj_geom = geometry.get(name)
+            if obj_geom is None:
+                continue
+            dx = obj_geom["xy"][0] - cab_geom["xy"][0]
+            dy = obj_geom["xy"][1] - cab_geom["xy"][1]
+            dist = (dx * dx + dy * dy) ** 0.5
+            clearance = dist - cab_geom.get("radius", 0.0) - obj_geom.get("radius", 0.0)
+            if clearance < DRAWER_BLOCKING_CLEARANCE_M:
+                flag = (
+                    f" [Precomputed clearance to {cabinet_name}: {clearance:.2f}m, below the "
+                    f"{DRAWER_BLOCKING_CLEARANCE_M:.2f}m rule-15 threshold -- this object BLOCKS "
+                    f"{drawers_text} from opening. If it is the object the task places into that "
+                    "fixture, it must be moved aside before the open subtask, per rule 15.]"
+                )
+                entity["notes"] = entity.get("notes", "") + flag
+
+
+
+# The band around the line the hand travels to reach a handle. Half-width is
+# about the hand's own half-width, and the depth covers only the final
+# stretch where the gripper is down at handle height -- further out the arm
+# is still up high and passes over things. Deliberately narrow: an object
+# merely *near* the approach does not have to be relocated, because the arm
+# can nudge a small light one aside at no cost, and every object moved is
+# three more subtasks that can fail. Measured on the middle drawer, this
+# flags the plate (0.043m off-axis, 0.125m out -- a wide flat obstacle right
+# at the handle) while leaving the cream cheese (0.270m out), the bowl
+# (0.098m off-axis) and the wine bottle (0.232m off-axis) alone.
+APPROACH_CORRIDOR_HALF_WIDTH_M = 0.07
+APPROACH_CORRIDOR_DEPTH_M = 0.20
+
+
+def _annotate_drawer_approach_corridor(
+    entities: list[dict[str, Any]],
+    geometry: dict[str, Any],
+    env: Any,
+) -> None:
+    """Flag objects sitting in the straight line the gripper must travel to
+    reach a drawer handle.
+
+    Distinct from ``_annotate_drawer_clearance_conflicts``, which asks whether
+    an object fouls the *drawer's own swing*. That misses the other way a
+    drawer becomes unopenable: the handle stays perfectly clear while the
+    space the *arm* needs to get to it does not. Measured on the middle
+    drawer, whose handle is only ~11.6cm above the table: every reachable
+    approach was blocked, by the tabletop and by a plate and cream cheese
+    parked in front -- and the cream cheese was never flagged by the
+    footprint test at all, being 0.245m clear of the cabinet.
+    """
+    try:
+        from .motion.articulation import discover_drawers, locate_handle_position_world, measure_pull_axis_and_travel
+        from .motion.scene_query import SceneQuery
+
+        sim = getattr(env, "sim", None) or getattr(getattr(env, "env", None), "sim", None)
+        if sim is None:
+            return
+        scene = SceneQuery.from_robosuite_sim(sim)
+        drawers = discover_drawers(scene)
+    except Exception:
+        return
+
+    corridors = []
+    for d in drawers:
+        try:
+            axis, _travel, _lo, _hi = measure_pull_axis_and_travel(scene, d)
+            handle = locate_handle_position_world(scene, d, axis)
+        except Exception:
+            continue
+        corridors.append((normalize_entity_name(f"{d.level_label}_drawer"), np.asarray(axis[:2], dtype=float), np.asarray(handle[:2], dtype=float)))
+    if not corridors:
+        return
+
+    for entity in entities:
+        name = entity.get("name")
+        geom = geometry.get(name) if name else None
+        if not geom or "xy" not in geom or name == "table" or "drawer" in (name or ""):
+            continue
+        xy = np.asarray(geom["xy"], dtype=float)
+        blocked_for = []
+        for drawer_name, axis_xy, handle_xy in corridors:
+            delta = xy - handle_xy
+            along = float(delta @ axis_xy)
+            lateral = float(np.linalg.norm(delta - along * axis_xy))
+            if 0.0 < along < APPROACH_CORRIDOR_DEPTH_M and lateral < APPROACH_CORRIDOR_HALF_WIDTH_M:
+                blocked_for.append(drawer_name)
+        if blocked_for:
+            entity["notes"] = entity.get("notes", "") + (
+                f" [Precomputed: this object stands in the arm's approach path to "
+                f"{'/'.join(blocked_for)} (within {APPROACH_CORRIDOR_HALF_WIDTH_M:.2f}m of the line "
+                "the gripper travels to reach the handle). The handle cannot be reached until it is "
+                "moved, even though the drawer's own swing may be clear.]"
+            )
 
 def _entity_aliases(name: str) -> list[str]:
     base = normalize_entity_name(name)

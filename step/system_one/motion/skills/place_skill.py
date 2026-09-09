@@ -24,7 +24,34 @@ from ..config import MotionConfig
 from ..kinematics import IKSolver
 from ..ompl_planner import MotionPlanner
 from ..scene_query import SceneQuery
-from ..types import AttachedObjectState, MotionPlan, SkillFailureReason, SkillResult
+from ..types import AttachedObjectState, IKResult, MotionPlan, SkillFailureReason, SkillResult
+
+
+def _solve_ik_robust(
+    ik_solver: IKSolver,
+    scene: SceneQuery,
+    target_pos: np.ndarray,
+    target_quat_wxyz: np.ndarray,
+    seed_q: np.ndarray,
+    rng: np.random.Generator,
+    n_restarts: int = 6,
+    perturb_scale: float = 0.6,
+) -> IKResult:
+    """Retry a failed DLS solve from randomly perturbed seeds before giving
+    up -- same reasoning as every other skill in this package (see
+    OpenDrawerSkill/TurnKnobSkill/TransportSkill's own copies of this exact
+    pattern): a local optimizer landing in a bad basin from one arbitrary
+    seed doesn't mean the target is actually unreachable."""
+    result = ik_solver.solve(scene.clone(), target_pos, target_quat_wxyz, seed_q=seed_q)
+    if result.success:
+        return result
+    lo, hi = scene.joint_qpos_range(ik_solver.joint_names)
+    for _ in range(n_restarts):
+        perturbed = np.clip(seed_q + rng.uniform(-perturb_scale, perturb_scale, size=seed_q.shape), lo, hi)
+        result = ik_solver.solve(scene.clone(), target_pos, target_quat_wxyz, seed_q=perturbed)
+        if result.success:
+            return result
+    return result
 
 
 def _container_floor_and_rim_z(scene: SceneQuery, container_body: str) -> tuple[float, float]:
@@ -58,6 +85,20 @@ def _container_floor_and_rim_z(scene: SceneQuery, container_body: str) -> tuple[
     return floor_top_z, rim_top_z
 
 
+def _support_floor_and_rim_z(scene: SceneQuery, support_body: str) -> tuple[float, float]:
+    """Like ``_container_floor_and_rim_z``, but for placing something *on
+    top of* a solid support (e.g. a cabinet's own frame body) rather than
+    *inside* a concave container. There's no separate floor-vs-wall
+    distinction for a solid support -- the "floor" an object rests on and
+    the "rim" clearance is measured above are the same surface: its own
+    highest point (e.g. the cabinet's top slab), found the same
+    per-geom-not-merged-box way as the container case, for the same reason
+    (a merged box's bottom edge sits below the actual resting surface)."""
+    gids = scene.body_collision_geom_ids(support_body)
+    top_z = float(max(scene.geom_world_aabb(g)[0][2] + scene.geom_world_aabb(g)[1][2] for g in gids))
+    return top_z, top_z
+
+
 @dataclass
 class _PlaceCandidateScore:
     object_xyz: np.ndarray
@@ -69,6 +110,81 @@ class _PlaceCandidateScore:
     total_cost: float
     breakdown: dict[str, float] = field(default_factory=dict)
     rejection_reason: str | None = None
+
+
+def escape_start_collision(
+    ik_solver: IKSolver,
+    collision_checker: CollisionChecker,
+    scene: SceneQuery,
+    attached: AttachedObjectState | None,
+    goal_container_body: str | None,
+    start_q: np.ndarray,
+    max_lift_m: float = 0.20,
+    step_m: float = 0.01,
+) -> np.ndarray:
+    """If ``start_q`` is already in collision, retreat in small
+    collision-checked increments until clear (or the retreat budget runs
+    out). Standard "escape from initial contact" practice for a planner
+    that (correctly) refuses to plan from an invalid start state.
+
+    Shared by ``PlaceSkill`` and ``TransportSkill`` (whichever of the two
+    runs first after a pick needs it): a real completed pick leaves the
+    carried object still resting at/near wherever it was grasped -- on the
+    table, or right at a container's rim -- not lifted clear, so the very
+    first attached-object-aware collision check either skill runs can
+    legitimately find `start_q` already touching something. Retreating
+    first, rather than failing outright, means that imprecise handoff
+    doesn't sink the whole subtask.
+
+    Tries straight-up lift *and* a lift-while-moving-toward-the-goal's-own-
+    center direction, not just straight up -- confirmed via a real
+    rollout's per-step contact distances that a purely vertical retreat can
+    leave a penetration depth completely unchanged across the entire lift
+    budget (e.g. a carried object embedded sideways in a basket's wall
+    stays embedded in that same wall at every height, since the overlap is
+    horizontal, not vertical -- lifting straight up just slides along
+    inside the wall instead of escaping it). Moving toward the goal's
+    center pulls a laterally-embedded object back into clear space instead.
+    """
+    check = collision_checker.check(
+        start_q, phase=CollisionPhase.FREE_SPACE, attached=attached, goal_container_body=goal_container_body
+    )
+    if not check.in_collision:
+        return start_q
+
+    joint_names = collision_checker.joint_names
+    ee_site = collision_checker.ee_site
+    scratch = scene.clone()
+    scratch.set_qpos(joint_names, start_q)
+    hand_pos, hand_quat = scratch.site_pose(ee_site)
+
+    directions = {"up": np.array([0.0, 0.0, 1.0])}
+    # "toward the goal's own center" only makes sense when there is a single
+    # known goal body -- PickSkill calls this with none (it's not escaping
+    # toward any one of several candidate objects), so this second retreat
+    # direction is skipped rather than guessing one.
+    if goal_container_body is not None:
+        container_pos, _ = scene.body_pose(goal_container_body)
+        toward_center_xy = container_pos[:2] - hand_pos[:2]
+        norm = float(np.linalg.norm(toward_center_xy))
+        toward_center_xy = toward_center_xy / norm if norm > 1e-6 else np.zeros(2)
+        directions["up_toward_center"] = np.array([toward_center_xy[0], toward_center_xy[1], 1.0])
+    n_steps = max(1, int(round(max_lift_m / step_m)))
+    for direction in directions.values():
+        unit = direction / float(np.linalg.norm(direction))
+        q = start_q
+        for i in range(1, n_steps + 1):
+            target_pos = hand_pos + unit * step_m * i
+            ik = ik_solver.solve(scratch, target_pos, hand_quat, seed_q=q)
+            if not ik.success:
+                continue
+            q = ik.q
+            c = collision_checker.check(
+                q, phase=CollisionPhase.FREE_SPACE, attached=attached, goal_container_body=goal_container_body
+            )
+            if not c.in_collision:
+                return q
+    return start_q  # couldn't escape within budget; planner will report start_in_collision honestly
 
 
 class PlaceSkill:
@@ -83,79 +199,7 @@ class PlaceSkill:
         self.planner = planner
         self.collision_checker = collision_checker
         self.config = config or MotionConfig()
-
-    def _escape_start_collision(
-        self,
-        scene: SceneQuery,
-        attached: AttachedObjectState,
-        goal_container_body: str,
-        start_q: np.ndarray,
-        max_lift_m: float = 0.20,
-        step_m: float = 0.01,
-    ) -> np.ndarray:
-        """If ``start_q`` is already in collision, retreat in small
-        collision-checked increments until clear (or the retreat budget runs
-        out). Standard "escape from initial contact" practice for a planner
-        that (correctly) refuses to plan from an invalid start state.
-
-        Needed at this specific handoff because legacy ``transport`` has no
-        notion of the carried object's real footprint against the goal
-        container -- it aims for "roughly over the goal" using its own 2D
-        keepout logic, which can leave the object still a few centimeters
-        into a container wall by the time ``place`` takes over. Retreating
-        first, rather than failing outright, means an imprecise transport
-        handoff doesn't sink the whole placement.
-
-        Tries straight-up lift *and* a lift-while-moving-toward-the-
-        container's-center direction, not just straight up -- confirmed via a
-        real rollout's per-step contact distances that a purely vertical
-        retreat can leave a penetration depth completely unchanged across the
-        entire lift budget (e.g. a carried object embedded sideways in a
-        basket's wall stays embedded in that same wall at every height, since
-        the overlap is horizontal, not vertical -- lifting straight up just
-        slides along inside the wall instead of escaping it). Moving toward
-        the container's center pulls a laterally-embedded object back into
-        the (collision-free) interior instead.
-        """
-        check = self.collision_checker.check(
-            start_q, phase=CollisionPhase.FREE_SPACE, attached=attached, goal_container_body=goal_container_body
-        )
-        if not check.in_collision:
-            return start_q
-
-        joint_names = self.collision_checker.joint_names
-        ee_site = self.collision_checker.ee_site
-        scratch = scene.clone()
-        scratch.set_qpos(joint_names, start_q)
-        hand_pos, hand_quat = scratch.site_pose(ee_site)
-
-        container_pos, _ = scene.body_pose(goal_container_body)
-        toward_center_xy = container_pos[:2] - hand_pos[:2]
-        norm = float(np.linalg.norm(toward_center_xy))
-        toward_center_xy = toward_center_xy / norm if norm > 1e-6 else np.zeros(2)
-
-        directions = {
-            "up": np.array([0.0, 0.0, 1.0]),
-            "up_toward_center": np.array(
-                [toward_center_xy[0], toward_center_xy[1], 1.0]
-            ),
-        }
-        n_steps = max(1, int(round(max_lift_m / step_m)))
-        for direction in directions.values():
-            unit = direction / float(np.linalg.norm(direction))
-            q = start_q
-            for i in range(1, n_steps + 1):
-                target_pos = hand_pos + unit * step_m * i
-                ik = self.ik_solver.solve(scratch, target_pos, hand_quat, seed_q=q)
-                if not ik.success:
-                    continue
-                q = ik.q
-                c = self.collision_checker.check(
-                    q, phase=CollisionPhase.FREE_SPACE, attached=attached, goal_container_body=goal_container_body
-                )
-                if not c.in_collision:
-                    return q
-        return start_q  # couldn't escape within budget; planner will report start_in_collision honestly
+        self._rng = np.random.default_rng(self.config.planner.seed)
 
     def execute(
         self,
@@ -163,9 +207,11 @@ class PlaceSkill:
         attached: AttachedObjectState,
         goal_container_body: str,
         start_q: np.ndarray,
+        place_surface: str = "inside",
+        goal_point_xyz: np.ndarray | None = None,
     ) -> SkillResult:
-        start_q = self._escape_start_collision(scene, attached, goal_container_body, start_q)
-        candidates = self._generate_candidates(scene, attached, goal_container_body)
+        start_q = escape_start_collision(self.ik_solver, self.collision_checker, scene, attached, goal_container_body, start_q)
+        candidates = self._generate_candidates(scene, attached, goal_container_body, place_surface, goal_point_xyz)
         if not candidates:
             return SkillResult(
                 success=False,
@@ -174,7 +220,7 @@ class PlaceSkill:
             )
 
         scored = [
-            self._score_candidate(scene, obj_xyz, attached, goal_container_body, start_q)
+            self._score_candidate(scene, obj_xyz, attached, goal_container_body, start_q, place_surface)
             for obj_xyz in candidates
         ]
         feasible = [s for s in scored if s.feasible]
@@ -190,6 +236,13 @@ class PlaceSkill:
             )
 
         best = min(feasible, key=lambda s: s.total_cost)
+        # The plan's own first waypoint is the *escaped* start_q above, not
+        # necessarily wherever the real arm currently sits -- see
+        # TransportSkill's own identical comment on why the adapter needs
+        # this explicitly to move the real arm there *first*, before
+        # tracking the reference this plan produces.
+        if best.plan is not None:
+            best.plan.metadata["plan_start_q"] = start_q.tolist()
         return SkillResult(
             success=True,
             selected_object=attached.object_name,
@@ -209,11 +262,19 @@ class PlaceSkill:
         )
 
     def _generate_candidates(
-        self, scene: SceneQuery, attached: AttachedObjectState, goal_container_body: str
+        self,
+        scene: SceneQuery,
+        attached: AttachedObjectState,
+        goal_container_body: str,
+        place_surface: str = "inside",
+        goal_point_xyz: np.ndarray | None = None,
     ) -> list[np.ndarray]:
-        """Candidate object *positions* (XYZ) inside the container: its
-        center plus a shrunk-in ring, mirroring the rim-grasp generator's
-        "center + ring, shrunk inward from the wall" pattern."""
+        """Candidate object *positions* (XYZ) inside/on-top-of the goal
+        body: its center plus a shrunk-in ring, mirroring the rim-grasp
+        generator's "center + ring, shrunk inward from the wall/edge"
+        pattern. ``place_surface="top"`` targets a solid support's own top
+        surface (e.g. a cabinet's frame body) instead of a container's
+        interior floor -- see ``_support_floor_and_rim_z``."""
         cfg = self.config.place
         container_pos, _ = scene.body_pose(goal_container_body)
         container_extent = scene.body_collision_extent_world(goal_container_body)
@@ -222,15 +283,65 @@ class PlaceSkill:
         obj_extent = scene.body_extent_world(attached.object_name)
         obj_half_h = float(obj_extent.half_extents[2]) if obj_extent is not None else 0.02
 
-        floor_z, _ = _container_floor_and_rim_z(scene, goal_container_body)
+        floor_fn = _support_floor_and_rim_z if place_surface == "top" else _container_floor_and_rim_z
+        floor_z, _ = floor_fn(scene, goal_container_body)
         place_z = floor_z + obj_half_h + cfg.drop_clearance_m
-        interior_half_xy = cfg.interior_shrink_fraction * container_extent.half_extents[:2]
+
+        # An explicit point goal names the exact spot to set the object down
+        # on; only its XY is taken, since the resting height is better
+        # measured from the support's own real surface than trusted from the
+        # caller. See TransportSkill's own comment for why the ring search
+        # below is the wrong tool on a large support surface.
+        if goal_point_xyz is not None:
+            goal_point_xyz = np.asarray(goal_point_xyz, dtype=float)
+            # The exact point first, then a tight ring of near-misses around
+            # it. A single candidate makes the whole subtask all-or-nothing
+            # on one IK/collision solve (measured: one rejection, one
+            # candidate tried, subtask failed), which is needlessly brittle
+            # when "a few cm over" is still an entirely faithful reading of
+            # the caller's intent -- unlike the wide ring used for a bare
+            # support entity, this stays close enough to still be the
+            # requested spot.
+            out = [np.array([goal_point_xyz[0], goal_point_xyz[1], place_z])]
+            for ring_m in (0.04, 0.08):
+                for i in range(6):
+                    theta = 2.0 * np.pi * i / 6
+                    out.append(
+                        np.array(
+                            [
+                                goal_point_xyz[0] + ring_m * np.cos(theta),
+                                goal_point_xyz[1] + ring_m * np.sin(theta),
+                                place_z,
+                            ]
+                        )
+                    )
+            return out
 
         offsets = [np.zeros(2)]
-        n = max(0, int(cfg.num_ring_samples))
-        for i in range(n):
-            theta = 2.0 * np.pi * i / n
-            offsets.append(interior_half_xy * np.array([np.cos(theta), np.sin(theta)]))
+        if place_surface == "top":
+            # A large open support (the table): several ring radii, denser
+            # angular sampling -- see top_surface_* fields' own docstring.
+            n = max(0, int(cfg.top_surface_num_ring_samples))
+            for shrink_fraction in cfg.top_surface_shrink_fractions:
+                interior_half_xy = shrink_fraction * container_extent.half_extents[:2]
+                for i in range(n):
+                    theta = 2.0 * np.pi * i / n
+                    offsets.append(interior_half_xy * np.array([np.cos(theta), np.sin(theta)]))
+            # Set the object down where the preceding transport actually
+            # carried it: nearest-to-current-position first, the mirror of
+            # TransportSkill's furthest-first ordering for the same surface.
+            # Without this the two search the same ring independently and
+            # can settle on opposite sides of a large support, turning a
+            # short descent into another full traverse.
+            object_xy_now = scene.body_pose(attached.object_name)[0][:2]
+            anchor_xy = container_pos[:2]
+            offsets.sort(key=lambda off: float(np.linalg.norm(anchor_xy + off - object_xy_now)))
+        else:
+            interior_half_xy = cfg.interior_shrink_fraction * container_extent.half_extents[:2]
+            n = max(0, int(cfg.num_ring_samples))
+            for i in range(n):
+                theta = 2.0 * np.pi * i / n
+                offsets.append(interior_half_xy * np.array([np.cos(theta), np.sin(theta)]))
 
         return [
             np.array([container_pos[0] + off[0], container_pos[1] + off[1], place_z]) for off in offsets
@@ -243,6 +354,7 @@ class PlaceSkill:
         attached: AttachedObjectState,
         goal_container_body: str,
         start_q: np.ndarray,
+        place_surface: str = "inside",
     ) -> _PlaceCandidateScore:
         breakdown: dict[str, float] = {}
         cfg = self.config.place
@@ -252,7 +364,8 @@ class PlaceSkill:
         # attempt to re-orient it in flight.
         object_pos_now, object_quat_now = scene.body_pose(attached.object_name)
         container_pos, _ = scene.body_pose(goal_container_body)
-        _, rim_top_z = _container_floor_and_rim_z(scene, goal_container_body)
+        floor_fn = _support_floor_and_rim_z if place_surface == "top" else _container_floor_and_rim_z
+        _, rim_top_z = floor_fn(scene, goal_container_body)
         hover_xyz = np.array([object_xyz[0], object_xyz[1], rim_top_z + cfg.hover_clearance_m])
 
         hover_hand_pos, hover_hand_quat = required_hand_pose_for_object_pose(
@@ -262,8 +375,10 @@ class PlaceSkill:
             object_xyz, object_quat_now, attached.grasp_transform_hand_from_object
         )
 
-        scratch = scene.clone()
-        hover_ik = self.ik_solver.solve(scratch, hover_hand_pos, hover_hand_quat, seed_q=start_q)
+        hover_ik = _solve_ik_robust(
+            self.ik_solver, scene, hover_hand_pos, hover_hand_quat, start_q, self._rng,
+            n_restarts=self.config.place.pose_selection_attempts,
+        )
         if not hover_ik.success:
             return _PlaceCandidateScore(
                 object_xyz,
@@ -275,8 +390,10 @@ class PlaceSkill:
                 float("inf"),
                 rejection_reason=f"hover_ik_failed:pos_err={hover_ik.position_error:.4f},ori_err={hover_ik.orientation_error:.4f}",
             )
-        scratch2 = scene.clone()
-        place_ik = self.ik_solver.solve(scratch2, place_hand_pos, place_hand_quat, seed_q=hover_ik.q)
+        place_ik = _solve_ik_robust(
+            self.ik_solver, scene, place_hand_pos, place_hand_quat, hover_ik.q, self._rng,
+            n_restarts=self.config.place.pose_selection_attempts,
+        )
         if not place_ik.success:
             return _PlaceCandidateScore(
                 object_xyz,
@@ -289,9 +406,20 @@ class PlaceSkill:
                 rejection_reason=f"place_ik_failed:pos_err={place_ik.position_error:.4f},ori_err={place_ik.orientation_error:.4f}",
             )
 
+        # PLACE_APPROACH, not FREE_SPACE: the hover pose sits directly over
+        # the goal by only `hover_clearance_m`, so the carried object is
+        # necessarily within the attached-sphere safety margin of the very
+        # surface it is about to be set down on -- and FREE_SPACE doesn't
+        # permit the goal body, so that reads as a collision. Placing
+        # *inside* a container hid this (the hover is over the open interior,
+        # with no geom directly underneath), but placing onto a flat top
+        # always trips it: measured on the real table, a candidate rejected
+        # at +2.8mm of actual clearance -- not touching at all, merely inside
+        # the margin. The descent check immediately below already uses this
+        # same phase for the same reason.
         hover_check = self.collision_checker.check(
             hover_ik.q,
-            phase=CollisionPhase.FREE_SPACE,
+            phase=CollisionPhase.PLACE_APPROACH,
             attached=attached,
             goal_container_body=goal_container_body,
         )

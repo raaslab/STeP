@@ -240,6 +240,16 @@ class LiberoPickAdapter(_ServoMixin):
         ``skill.execute()`` (its own ``candidates=`` param) avoids that.
         """
         constraints = constraints or {}
+
+        # Reset to home before planning the grasp, for the same reason the
+        # open-drawer adapter does (see _ServoMixin.servo_to_home): a pick
+        # usually follows a place, which leaves the arm hovering over the
+        # spot it just released something, in a configuration chosen for
+        # that task. Planning a fresh reach from there is where this pipeline
+        # keeps failing -- a NO_PATH_FOUND transporting away from a
+        # just-finished pick, and a re-grasp that closed on nothing.
+        pre_home_steps = self.servo_to_home(self.config.drawer.return_home_steps, step_callback)
+
         scene = self._build_scene()
         skill = self._build_pick_skill(scene)
         start_q = scene.get_qpos(self.joint_names)
@@ -253,7 +263,7 @@ class LiberoPickAdapter(_ServoMixin):
         candidates = skill.grasp_generator.generate(scene, body_names)
         plan_result = skill.execute(scene, body_names, start_q, constraints, candidates=candidates)
 
-        pre_steps = 0
+        pre_steps = pre_home_steps  # the homing move above is real env time too
         needs_closer_look = (
             not plan_result.success
             and plan_result.failure_reason == SkillFailureReason.NO_FEASIBLE_CANDIDATE

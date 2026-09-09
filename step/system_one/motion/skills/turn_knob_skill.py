@@ -105,6 +105,58 @@ def _axis_angle_to_rotmat(axis_world: np.ndarray, angle_rad: float) -> np.ndarra
     return np.eye(3) + np.sin(angle_rad) * k + (1.0 - np.cos(angle_rad)) * (k @ k)
 
 
+def _grip_contact_depth(
+    collision_checker: CollisionChecker,
+    scene: SceneQuery,
+    arm_q: np.ndarray,
+    finger_closed_qpos: np.ndarray,
+    target_body: str,
+) -> float | None:
+    """Does actually closing the fingers here touch real material on
+    ``target_body``, not just "closing doesn't collide with anything else"?
+
+    ``CollisionChecker.check_gripper_closure`` only rejects a *bad* contact
+    (anything outside the permitted fingerpad<->target/small-overlap rules)
+    -- it happily reports "not in collision" for a closure that touches
+    nothing at all, since no contact is trivially not a bad one. That gap is
+    invisible for a drawer handle or a normal pick target (their geometry is
+    simple enough that a collision-clear closure at the intended width
+    reliably means "touching it"), but a real knob's collision mesh is not a
+    simple prism -- confirmed directly against the real flat_stove_1 asset,
+    whose solid cross-section at a plausible grasp radius varies sharply
+    with height (see ``KnobConfig.grasp_height_margins_m``'s own comment):
+    several collision-clear (margin, angle) candidates turned out to close
+    on pure empty air. Verified with a real rollout: accepting those left
+    ``knob_grip_verification.gripped=False`` and the knob barely rotated at
+    all. This check closes that gap directly, the same way
+    ``LiberoOpenDrawerAdapter``'s own post-execution ``gripped_handle``
+    diagnostic already does -- just applied here at *plan* time, as a hard
+    acceptance gate instead of an after-the-fact diagnostic.
+
+    Returns the deepest (most negative) fingerpad<->target penetration
+    found, or ``None`` if there's no real contact at all -- ``None`` is a
+    hard rejection (no material there at all); the actual depth is used
+    only to break ties between candidates that can turn the knob equally
+    far (see ``TurnKnobSkill.execute``'s own selection comment -- turn
+    reach, not raw grip depth, is what actually determined success in a
+    real rollout, since the single deepest-gripping point available turned
+    out to sit right next to an obstacle that capped its usable rotation).
+    """
+    scratch = scene.clone()
+    scratch.set_qpos(collision_checker.joint_names, arm_q)
+    scratch.set_qpos(FINGER_JOINT_NAMES, np.asarray(finger_closed_qpos, dtype=np.float64))
+    target_geom_ids = set(scratch.body_geom_ids(target_body))
+    deepest: float | None = None
+    for g1_name, g2_name, dist in scratch.compute_contacts():
+        g1, g2 = scratch.geom_id(g1_name), scratch.geom_id(g2_name)
+        if (g1 in collision_checker.fingerpad_geom_ids and g2 in target_geom_ids) or (
+            g2 in collision_checker.fingerpad_geom_ids and g1 in target_geom_ids
+        ):
+            if deepest is None or dist < deepest:
+                deepest = dist
+    return deepest
+
+
 def _orientation_for_tangential_grasp(approach_world: np.ndarray, radial_world: np.ndarray) -> np.ndarray:
     """Hand-frame quaternion (WXYZ) whose local +Z is ``approach_world`` and
     whose local +X (closing axis) is tangential -- perpendicular to both the
@@ -159,9 +211,11 @@ class TurnKnobSkill:
         # different knob's joint could be wired the opposite way.
         threshold = cfg.turn_on_qpos_threshold
         if qpos_hi >= threshold:
-            target_qpos = qpos_hi
+            # Stop just past the threshold, not at the joint's full range
+            # end -- see KnobConfig.turn_on_safety_margin_rad's own comment.
+            target_qpos = min(qpos_hi, threshold + cfg.turn_on_safety_margin_rad)
         elif qpos_lo >= threshold:
-            target_qpos = qpos_lo
+            target_qpos = max(qpos_lo, threshold - cfg.turn_on_safety_margin_rad)
         else:
             # Neither endpoint clears the threshold -- shouldn't happen for a
             # correctly configured knob, but turn as far as possible rather
@@ -177,123 +231,148 @@ class TurnKnobSkill:
         radial0 = _arbitrary_perpendicular(axis_world)
         approach_world = -axis_world  # top-down onto the knob, same convention as every other grasp in this package
         finger_half_travel = float(np.clip(target_width / 2.0, 0.0, 0.04))
+        finger_closed_qpos = np.array([finger_half_travel, -finger_half_travel])
 
-        # A knob is rotationally symmetric -- there is no single "correct"
-        # angular grip point the way a drawer handle has one measured
-        # position, only ones that happen to be reachable/collision-clear
-        # given whatever sits around this particular knob (a burner grate,
-        # an adjacent knob). So the search has two dimensions: which angle
-        # around the rim to grip (this loop), and, per angle, which IK seed
-        # (delegated to `_solve_ik_robust`'s own perturbed-restart search).
-        # Measured directly against the real flat_stove asset: a single fixed
-        # angle (any arbitrary perpendicular to the rotation axis) reached
-        # IK fine but its final-descent path clipped the stove body every
-        # time, regardless of how many IK seeds were tried at that same
-        # fixed angle -- retrying seeds alone never fixes a geometric
-        # collision baked into the chosen grasp point itself.
-        best_grasp_ik = best_standoff_ik = None
-        best_distance = float("inf")
+        # A knob's grasp point has two free dimensions a drawer handle's
+        # doesn't: which angle around the rim to grip, and at what height
+        # along the rotation axis (see KnobConfig.grasp_height_margins_m's
+        # own comment -- a knob's real collision mesh is not a simple
+        # prism, so the solid cross-section at a given radius genuinely
+        # varies with height). A point offset along the rotation axis from
+        # `center_world` stays on that same axis, so any margin still
+        # rotates identically to the true center for this skill's turn-angle
+        # math below. Per (margin, angle) pair, IK-seed retries are
+        # delegated to `_solve_ik_robust`'s own perturbed-restart search.
+        #
+        # Grip choice and turn feasibility are coupled, not separable steps:
+        # confirmed directly against the real flat_stove_1 asset, the
+        # (margin, angle) with the single deepest measured grip sat right
+        # next to the surrounding burner grate, tolerating only ~0.2rad of
+        # rotation before the open gripper swept into it -- nowhere near
+        # enough to cross the "on" threshold -- while a shallower-but-still-
+        # real grip elsewhere on the rim allowed a much larger sweep. So
+        # each candidate here is scored by how much of the *turn* it can
+        # actually deliver (checked right here, not deferred to a later,
+        # separate step), with a real (negative) grip-contact depth as a
+        # hard prerequisite -- not the other way around. And collision-clear
+        # alone isn't a sufficient prerequisite either: several (margin,
+        # angle) pairs were collision-clear yet closed on empty air (see
+        # `_grip_contact_depth`'s own docstring) -- confirmed real contact
+        # is required, not just an extra diagnostic.
+        best_grasp_ik = best_standoff_ik = best_turn_ik = None
+        best_turn_fraction = -1.0
+        best_depth = 0.0
+        best_radial = best_grasp_quat = best_grasp_center_world = None
         last_rejection = "no_ik_attempted"
-        for angle_idx in range(cfg.radial_angle_samples):
-            angle = 2.0 * np.pi * angle_idx / cfg.radial_angle_samples
-            radial = _axis_angle_to_rotmat(axis_world, angle) @ radial0
-            grasp_pos = center_world + d * radial
-            grasp_quat = _orientation_for_tangential_grasp(approach_world, radial)
-            candidate_grasp_ik = _solve_ik_robust(
-                self.ik_solver, scene, grasp_pos, grasp_quat, start_q, self._rng, n_restarts=cfg.pose_selection_attempts
-            )
-            if not candidate_grasp_ik.success:
-                last_rejection = "grasp_ik_failed"
-                continue
-            distance = float(np.linalg.norm(candidate_grasp_ik.q - start_q))
-            if distance >= best_distance:
-                continue
-            standoff_pos = grasp_pos + cfg.approach_standoff_m * axis_world
-            candidate_standoff_ik = _solve_ik_robust(
-                self.ik_solver, scene, standoff_pos, grasp_quat, candidate_grasp_ik.q, self._rng
-            )
-            if not candidate_standoff_ik.success:
-                last_rejection = "approach_standoff_ik_failed"
-                continue
-            descent_check = self.collision_checker.check_edge(
-                candidate_standoff_ik.q,
-                candidate_grasp_ik.q,
-                resolution=self.config.planner.validity_resolution
-                * float(np.max(self.planner.joint_limits_hi - self.planner.joint_limits_lo)),
-                phase=CollisionPhase.TERMINAL_APPROACH,
-                target_object_body=knob.knob_body,
-            )
-            if descent_check.in_collision:
-                last_rejection = "final_descent_in_collision"
-                continue
-            closure_check = self.collision_checker.check_gripper_closure(
-                candidate_grasp_ik.q, FINGER_JOINT_NAMES, np.array([finger_half_travel, -finger_half_travel]), knob.knob_body
-            )
-            if closure_check.in_collision:
-                last_rejection = "gripper_closure_in_collision"
-                continue
-            best_grasp_ik, best_standoff_ik, best_distance = candidate_grasp_ik, candidate_standoff_ik, distance
-            best_radial = radial
-            best_grasp_quat = grasp_quat
+        full_delta = target_qpos - current_qpos
+        for margin in cfg.grasp_height_margins_m:
+            grasp_center_world = center_world + margin * axis_world
+            for angle_idx in range(cfg.radial_angle_samples):
+                angle = 2.0 * np.pi * angle_idx / cfg.radial_angle_samples
+                radial = _axis_angle_to_rotmat(axis_world, angle) @ radial0
+                grasp_pos = grasp_center_world + d * radial
+                grasp_quat = _orientation_for_tangential_grasp(approach_world, radial)
+                candidate_grasp_ik = _solve_ik_robust(
+                    self.ik_solver, scene, grasp_pos, grasp_quat, start_q, self._rng, n_restarts=cfg.pose_selection_attempts
+                )
+                if not candidate_grasp_ik.success:
+                    last_rejection = "grasp_ik_failed"
+                    continue
+                standoff_pos = grasp_pos + cfg.approach_standoff_m * axis_world
+                candidate_standoff_ik = _solve_ik_robust(
+                    self.ik_solver, scene, standoff_pos, grasp_quat, candidate_grasp_ik.q, self._rng
+                )
+                if not candidate_standoff_ik.success:
+                    last_rejection = "approach_standoff_ik_failed"
+                    continue
+                descent_check = self.collision_checker.check_edge(
+                    candidate_standoff_ik.q,
+                    candidate_grasp_ik.q,
+                    resolution=self.config.planner.validity_resolution
+                    * float(np.max(self.planner.joint_limits_hi - self.planner.joint_limits_lo)),
+                    phase=CollisionPhase.TERMINAL_APPROACH,
+                    target_object_body=knob.knob_body,
+                )
+                if descent_check.in_collision:
+                    last_rejection = "final_descent_in_collision"
+                    continue
+                closure_check = self.collision_checker.check_gripper_closure(
+                    candidate_grasp_ik.q, FINGER_JOINT_NAMES, finger_closed_qpos, knob.knob_body
+                )
+                if closure_check.in_collision:
+                    last_rejection = "gripper_closure_in_collision"
+                    continue
+                depth = _grip_contact_depth(
+                    self.collision_checker, scene, candidate_grasp_ik.q, finger_closed_qpos, knob.knob_body
+                )
+                if depth is None:
+                    last_rejection = "no_grip_contact"
+                    continue
 
-        grasp_ik, standoff_ik = best_grasp_ik, best_standoff_ik
-        if grasp_ik is None or standoff_ik is None:
+                # How much of the turn can this specific grasp point actually
+                # deliver? Tried largest-first (mirrors
+                # DrawerConfig.pull_fraction_fallbacks); the first
+                # IK-reachable, collision-clear fraction wins for this
+                # candidate.
+                r_grasp = quat_to_rotmat_wxyz(grasp_quat)
+                candidate_turn_ik = None
+                candidate_turn_fraction = -1.0
+                for fraction in cfg.turn_fraction_fallbacks:
+                    delta_angle = float(fraction) * full_delta
+                    r_delta = _axis_angle_to_rotmat(axis_world, delta_angle)
+                    turned_pos = grasp_center_world + r_delta @ (grasp_pos - grasp_center_world)
+                    turned_quat = rotmat_to_quat_wxyz(r_delta @ r_grasp)
+                    turn_ik = _solve_ik_robust(self.ik_solver, scene, turned_pos, turned_quat, candidate_grasp_ik.q, self._rng)
+                    if not turn_ik.success:
+                        continue
+                    turn_check = self.collision_checker.check_edge(
+                        candidate_grasp_ik.q,
+                        turn_ik.q,
+                        resolution=self.config.planner.validity_resolution
+                        * float(np.max(self.planner.joint_limits_hi - self.planner.joint_limits_lo)),
+                        phase=CollisionPhase.TERMINAL_APPROACH,
+                        target_object_body=knob.knob_body,
+                    )
+                    if turn_check.in_collision:
+                        continue
+                    candidate_turn_ik = turn_ik
+                    candidate_turn_fraction = float(fraction)
+                    break
+                if candidate_turn_ik is None:
+                    last_rejection = "no_feasible_turn_target"
+                    continue
+
+                # Largest deliverable turn wins outright; a real grip depth
+                # only breaks ties between candidates that turn equally far
+                # (confirmed with a real rollout: turn reach, not raw grip
+                # depth, is what determined whether the knob actually
+                # crossed the "on" threshold).
+                if candidate_turn_fraction < best_turn_fraction:
+                    continue
+                if candidate_turn_fraction == best_turn_fraction and depth >= best_depth:
+                    continue
+                best_grasp_ik, best_standoff_ik, best_turn_ik = candidate_grasp_ik, candidate_standoff_ik, candidate_turn_ik
+                best_turn_fraction, best_depth = candidate_turn_fraction, depth
+                best_radial, best_grasp_quat, best_grasp_center_world = radial, grasp_quat, grasp_center_world
+
+        grasp_ik, standoff_ik, turn_ik = best_grasp_ik, best_standoff_ik, best_turn_ik
+        if grasp_ik is None or standoff_ik is None or turn_ik is None:
             return SkillResult(
                 success=False,
                 failure_reason=SkillFailureReason.NO_FEASIBLE_CANDIDATE,
                 diagnostics={
                     "detail": last_rejection,
                     "knob": knob.knob_body,
+                    "grasp_height_margins_m": list(cfg.grasp_height_margins_m),
                     "radial_angle_samples": cfg.radial_angle_samples,
                     "pose_selection_attempts": cfg.pose_selection_attempts,
-                },
-            )
-        radial0, grasp_quat = best_radial, best_grasp_quat
-
-        # Turn: rotate the grasped chord's midpoint (and the gripper's own
-        # orientation with it -- the fingers stay rigidly fixed relative to
-        # the knob's surface throughout a real turn) about axis_world by an
-        # angle equal to however much qpos still needs to change, tried
-        # largest-first at decreasing fractions if the full turn isn't
-        # reachable/collision-clear -- same fallback shape as
-        # DrawerConfig.pull_fraction_fallbacks.
-        grasp_pos = center_world + d * radial0
-        full_delta = target_qpos - current_qpos
-        turned_q = None
-        turn_fraction_used = None
-        r_grasp = quat_to_rotmat_wxyz(grasp_quat)
-        for fraction in cfg.turn_fraction_fallbacks:
-            delta_angle = float(fraction) * full_delta
-            r_delta = _axis_angle_to_rotmat(axis_world, delta_angle)
-            turned_pos = center_world + r_delta @ (grasp_pos - center_world)
-            turned_quat = rotmat_to_quat_wxyz(r_delta @ r_grasp)
-            turn_ik = _solve_ik_robust(self.ik_solver, scene, turned_pos, turned_quat, grasp_ik.q, self._rng)
-            if not turn_ik.success:
-                continue
-            turn_check = self.collision_checker.check_edge(
-                grasp_ik.q,
-                turn_ik.q,
-                resolution=self.config.planner.validity_resolution
-                * float(np.max(self.planner.joint_limits_hi - self.planner.joint_limits_lo)),
-                phase=CollisionPhase.TERMINAL_APPROACH,
-                target_object_body=knob.knob_body,
-            )
-            if turn_check.in_collision:
-                continue
-            turned_q = turn_ik.q
-            turn_fraction_used = float(fraction)
-            break
-
-        if turned_q is None:
-            return SkillResult(
-                success=False,
-                failure_reason=SkillFailureReason.NO_FEASIBLE_CANDIDATE,
-                diagnostics={
-                    "detail": "no_feasible_turn_target",
-                    "knob": knob.knob_body,
                     "tried_fractions": list(cfg.turn_fraction_fallbacks),
                 },
             )
+        radial0, grasp_quat, grasp_center_world = best_radial, best_grasp_quat, best_grasp_center_world
+        grasp_pos = grasp_center_world + d * radial0
+        turned_q = turn_ik.q
+        turn_fraction_used = best_turn_fraction
 
         plan = None
         for _ in range(cfg.planning_attempts):
@@ -344,8 +423,6 @@ class TurnKnobSkill:
                 "target_qpos": target_qpos,
                 "turn_on_qpos_threshold": threshold,
                 "turn_fraction_used": turn_fraction_used,
-                "finger_closed_qpos": np.array(
-                    [float(np.clip(target_width / 2.0, 0.0, 0.04)), -float(np.clip(target_width / 2.0, 0.0, 0.04))]
-                ).tolist(),
+                "finger_closed_qpos": finger_closed_qpos.tolist(),
             },
         )

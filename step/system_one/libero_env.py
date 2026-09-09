@@ -71,6 +71,8 @@ class LiberoManipulationEnv(BaseManipulationEnv):
         mpc_timing_window_weight: float = 10.0,
         mpc_timing_early_hold_weight: float = 260.0,
     ) -> None:
+        self._episode_terminated = False
+        self._last_obs: Dict[str, Any] = {}
         self.scene_context = apply_libero_experiment_geometry(scene_context)
         self.platform_cfg = self.scene_context.get("platform", {})
         self.libero_cfg = self.platform_cfg.get("libero", {}) or {}
@@ -194,7 +196,9 @@ class LiberoManipulationEnv(BaseManipulationEnv):
     SETTLING_STEPS: int = 15
 
     def _reset_backend(self) -> Dict[str, Any]:
+        self._episode_terminated = False
         obs = self.env.reset()
+        self._last_obs = obs
         if self._init_state is not None:
             try:
                 obs = self.env.set_init_state(self._init_state)
@@ -218,6 +222,7 @@ class LiberoManipulationEnv(BaseManipulationEnv):
                 break
         self._grasped_latch = False
         self._active_obj_at_grasp = None
+        self._last_obs = obs
         self._refresh_scene_objects(obs)
         if self.scene_objects:
             self._grow_workspace_bounds_to_include(np.stack(list(self.scene_objects.values())))
@@ -227,7 +232,25 @@ class LiberoManipulationEnv(BaseManipulationEnv):
         action = np.asarray(full_action, dtype=np.float32).reshape(-1)
         if action.size > 0:
             self._last_gripper_cmd = float(action[-1])
-        obs, reward, done, info = self.env.step(action)
+        # robosuite raises outright once the episode has terminated (its own
+        # horizon, or the task's success condition firing). A skill in the
+        # middle of a settle/release loop has no way to know that happened
+        # and keeps stepping, which turned the end of an otherwise-complete
+        # run into a hard crash that lost the whole rollout -- including the
+        # summary needed to tell whether the task actually succeeded. Report
+        # the episode as done instead and let callers wind down normally.
+        if bool(getattr(self.env, "done", False)) or self._episode_terminated:
+            self._episode_terminated = True
+            return self._last_obs, 0.0, True, {"episode_already_terminated": True}
+        try:
+            obs, reward, done, info = self.env.step(action)
+        except ValueError as exc:
+            if "terminated episode" not in str(exc):
+                raise
+            self._episode_terminated = True
+            return self._last_obs, 0.0, True, {"episode_already_terminated": True}
+        self._episode_terminated = bool(done)
+        self._last_obs = obs
         self._refresh_scene_objects(obs)
         return obs, reward, done, info
 
