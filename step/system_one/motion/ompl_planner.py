@@ -230,7 +230,7 @@ class MotionPlanner:
                 metadata={"status": str(solved)},
             )
 
-        ss.simplifySolution()
+        ss.simplifySolution(float(self.config.simplify_time_sec))
         path = ss.getSolutionPath()
         path.interpolate(int(self.config.interpolation_density))
         waypoints = np.array(

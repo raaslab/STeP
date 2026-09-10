@@ -82,7 +82,12 @@ def build_developer_prompt(scene_context: dict[str, Any] | None = None) -> str:
         "This one subtask pushes it shut with a closed gripper -- it never grasps anything, so do "
         "not emit separate pick/transport/place subtasks for it. When a task says to place "
         "something into a drawer/microwave \"and close it\", emit the pick/transport/place "
-        "subtasks for the object first, then this close subtask last, naming the same fixture.\n\n"
+        "subtasks for the object first, then this close subtask last, naming the same fixture.\n"
+        "17. MANDATORY CHECK before emitting any pick/transport/place subtask. Look up that "
+        "object's entity notes in the canonical scene entities list below. If its notes contain a "
+        "\"[Precomputed: <object> already satisfies In(...)...]\" flag, its goal is already reached -- "
+        "do NOT emit any pick/transport/place subtask for it. Plan only for the remaining objects "
+        "the task still needs moved, and any other subtasks (e.g. close) the task still requires.\n\n"
         f"{scene_text}"
     )
 

@@ -90,7 +90,7 @@ def main() -> int:
     from step.system_one.motion.collision import CollisionChecker
     from step.system_one.motion.config import MotionConfig
     from step.system_one.motion.skills.grasp_generator import PrivilegedTopDownGraspGenerator
-    from step.system_one.motion.grasp_viz import save_grasp_candidates_image
+    from step.system_one.motion.skills.grasp_viz import save_grasp_candidates_image
     from step.system_one.motion.kinematics import IKSolver
     from step.system_one.motion.ompl_planner import MotionPlanner
     from step.system_one.motion.panda import EE_SITE, GRIPPER_BODIES, JOINT_NAMES, ROBOT_BODIES

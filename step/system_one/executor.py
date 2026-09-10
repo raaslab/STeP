@@ -42,6 +42,17 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
     # _run_open_drawer_with_motion_pipeline for why a miss is safely
     # repeatable and why only this failure mode is retried.
     OPEN_DRAWER_GRIP_ATTEMPTS = 3
+    # Same reasoning, for a pick that failed in a way a fresh candidate
+    # search can plausibly fix on its own -- see
+    # _run_pick_with_motion_pipeline for exactly which failures qualify.
+    # Nothing was ever carried anywhere in either case, so a fresh attempt
+    # starts from a scene barely different from the first. Higher than
+    # OPEN_DRAWER_GRIP_ATTEMPTS: measured per-attempt success against a
+    # cluttered scene (a neighboring object close enough to collide) at
+    # roughly 1-in-2 to 1-in-3, so 3 attempts alone still fails close to a
+    # third of the time -- 5 pushes real cumulative success noticeably
+    # higher for the same "just try again" cost.
+    PICK_GRASP_STABILITY_ATTEMPTS = 5
 
     def __init__(
         self,
@@ -604,6 +615,7 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
     ) -> tuple[bool, int, dict[str, Any]]:
         from .motion.config import MotionConfig
         from .motion.skills.libero_pick_adapter import LiberoPickAdapter
+        from .motion.types import SkillFailureReason
 
         params = sub.get("params", {}) or {}
         object_set = params.get("object_candidates")
@@ -614,13 +626,54 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         motion_config = MotionConfig.from_scene_context(self.scene_context)
         adapter = LiberoPickAdapter(env, motion_config)
         max_steps = int(self.max_subtask_steps) if self.max_subtask_steps is not None else 600
-        result, steps, attached_state = adapter.run(
-            object_set,
-            constraints={},
-            max_steps=max_steps,
-            step_callback=lambda: self._capture_video_frame(env),
-            outdir=outdir,
-        )
+
+        # Point the env's grasp check at THIS pick's object before running,
+        # not just after it succeeds (further down). LiberoManipulationEnv.
+        # _is_grasped() resolves its object geoms from _active_pick_object(),
+        # so while the active object still names whatever a *previous* subtask
+        # picked, every grasp verification during this pick tests contact
+        # against the wrong body -- reporting "gripper closed but
+        # _is_grasped() reported False" for a grasp that is physically fine.
+        # Confirmed directly on the two-object libero_object task: with the
+        # active object left at the first object, picking the second reported
+        # failure with both finger pads visibly in contact with it; setting it
+        # first, the identical pick succeeds and survives the test lift.
+        # Only for an unambiguous single-object pick -- an OR-set ("pick any
+        # cup") has no single answer until PickSkill has chosen one, and the
+        # post-success assignment below still covers that case.
+        if len(object_set) == 1:
+            env.set_active_object(object_set[0])
+
+        # Retry a pick that failed in a way a fresh candidate search can
+        # plausibly do better on next time -- as opposed to a genuine
+        # planning failure (NO_FEASIBLE_CANDIDATE/PLANNER_UNAVAILABLE), which
+        # would just reproduce identically and burn the budget for nothing.
+        # Gated on failure_reason, not a growing list of exact detail
+        # strings: every GRASP_VERIFICATION_FAILED/EXECUTION_FAILED from
+        # this adapter means a candidate WAS found and actually attempted
+        # but didn't hold -- confirmed by real rollouts for three distinct
+        # causes so far (bilateral contact never settling; the grasp
+        # breaking under the post-grasp test lift; the arm ending up wedged
+        # against a real neighboring object, e.g. a milk carton parked next
+        # to the target can, instead of the target itself) -- and nothing
+        # was ever actually carried anywhere in any of them, so a fresh
+        # attempt starts from a scene barely different from the first. A
+        # new failure mode added to that adapter later needs no new case
+        # here as long as it keeps using one of these two reasons.
+        RETRIABLE_REASONS = (SkillFailureReason.GRASP_VERIFICATION_FAILED, SkillFailureReason.EXECUTION_FAILED)
+        steps = 0
+        for attempt in range(self.PICK_GRASP_STABILITY_ATTEMPTS):
+            result, attempt_steps, attached_state = adapter.run(
+                object_set,
+                constraints={},
+                max_steps=max_steps,
+                step_callback=lambda: self._capture_video_frame(env),
+                outdir=outdir,
+            )
+            steps += attempt_steps
+            result.diagnostics["grasp_stability_attempts_used"] = attempt + 1
+            if result.success or result.failure_reason not in RETRIABLE_REASONS:
+                break
         # Persisted across subtasks so a later `place` on the new pipeline
         # knows the grasp-relative transform/collision spheres of whatever
         # this pick actually grabbed -- the attachment lives for the life of

@@ -3,11 +3,12 @@ push plan (drawer or microwave door) into a live ``LiberoManipulationEnv``.
 
 Structurally simpler than ``LiberoOpenDrawerAdapter``: since closing never
 grasps anything, there is no "close the gripper on the handle" event to gate
-a second leg on -- the gripper is closed for the *entire* motion (FREE_SPACE
-approach through the push), so the whole plan tracks as one continuous MPC
-reference (FREE_SPACE up to the standoff, then TERMINAL_APPROACH from there
-through to the closed target), the same single-loop pattern
-``LiberoOpenDrawerAdapter`` uses only for its own pre-grasp leg.
+a second leg on -- the gripper stays open for the *entire* motion (FREE_SPACE
+approach through the push; contact is made by the palm/wrist, not the
+fingers), so the whole plan tracks as one continuous MPC reference
+(FREE_SPACE up to the standoff, then TERMINAL_APPROACH from there through to
+the closed target), the same single-loop pattern ``LiberoOpenDrawerAdapter``
+uses only for its own pre-grasp leg.
 
 No grip-verification gate either (nothing to verify a grip on) -- success is
 purely structural: how far the joint's qpos actually moved toward closed.
@@ -118,11 +119,13 @@ class LiberoCloseAdapter(_ServoMixin):
         tracking_budget = min(max_hold_steps, len(full_reference) + cfg.max_settle_steps)
 
         steps = pre_home_steps
-        # Closed the entire time -- there is nothing to grasp, only to push
-        # against, so the fist stays rigid from the very start of the
-        # approach (unlike open, whose descent needs open fingers to
-        # straddle the handle first).
-        gripper_cmd = self.env.close_gripper_cmd
+        # Open the entire time -- there is nothing to grasp, so there is no
+        # reason to close the fist at all; contact is made by the palm/wrist
+        # structure, same as CloseSkill's own planning-time collision checks
+        # already assume (they never override finger qpos, so they validate
+        # against the default/open posture -- keeping the real gripper open
+        # here keeps execution consistent with what was actually checked).
+        gripper_cmd = self.env.open_gripper_cmd
         pos_err = ori_err = float("inf")
         converged = False
         stalled = False

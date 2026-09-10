@@ -199,6 +199,34 @@ class LiberoPlaceAdapter:
             if step_callback is not None:
                 step_callback()
 
+        # Withdraw before judging the release, not while still parked at the
+        # place pose. _is_grasped() is a *contact* test, so an object that has
+        # genuinely been let go still reads as grasped whenever it stays
+        # touching the open fingers -- which is the normal case when placing
+        # into an already-occupied container, where the object comes to rest
+        # higher than the empty-container floor this pose was aimed at.
+        # Confirmed on the real two-object libero_10 basket task: placing the
+        # second object (onto the first, already in the basket) failed with
+        # "gripper opened but object is still reported grasped" while the
+        # place itself was fine. Lifting the hand clear first makes the test
+        # measure what it is actually trying to measure -- did the object stay
+        # behind -- rather than incidental contact.
+        withdraw_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
+        withdraw_from, withdraw_quat = withdraw_scene.site_pose(self.ee_site)
+        withdraw_R = quat_to_rotmat_wxyz(withdraw_quat)
+        withdraw_to = withdraw_from + np.array([0.0, 0.0, self.config.place.release_withdraw_m])
+        for withdraw_waypoint in np.linspace(withdraw_from, withdraw_to, 16)[1:]:
+            ee_pos = self.env._eef_pos(self.env.last_raw_obs)
+            ee_R = self.env._eef_rotmat(self.env.last_raw_obs)
+            cart_pos = np.clip((withdraw_waypoint - ee_pos) / 0.03, -1.0, 1.0).astype(np.float32)
+            cart_ori = np.clip(
+                2.0 * orientation_error_rotvec(ee_R, withdraw_R), -1.0, 1.0
+            ).astype(np.float32)
+            self._step_env(cart_pos, cart_ori, gripper_cmd)
+            steps += 1
+            if step_callback is not None:
+                step_callback()
+
         released = not bool(self.env._is_grasped())
         if not released:
             result.success = False

@@ -22,6 +22,17 @@ class GraspSampleConfig:
     # landing on angles we already know are worse.
     yaw_search_half_range_rad: float = 0.7853981633974483  # pi/4, i.e. +-45 degrees
     lift_check_m: float = 0.05
+    # Extra height the pick adapter raises the grasped object *after* the
+    # test lift above has already confirmed the grip holds. Purely to leave
+    # the next skill a plannable start pose: the test lift is deliberately
+    # short (it only has to prove the grasp survives being loaded), which
+    # leaves the arm low and table-adjacent, and planning a carry from there
+    # with the object attached leaves RRTConnect almost no free corridor.
+    # Measured on the real libero_object cream-cheese task: transport from
+    # the post-test-lift pose returned NO_PATH_FOUND on all 8 candidate goals
+    # after 85.8s; with this lift applied first the same transport found a
+    # direct path in 1.4s. Set to 0 to disable.
+    post_grasp_carry_lift_m: float = 0.10
     # Standoff distance for the final approach segment (see PickSkill's
     # module docstring): the long-range approach plans under strict
     # FREE_SPACE to a point this far from the grasp pose along the approach
@@ -135,6 +146,16 @@ class PlannerConfig:
     seed: int = 0
     interpolation_density: int = 200
     validity_resolution: float = 0.01  # fraction of state-space extent per OMPL convention
+    # Time budget for OMPL's post-solve path shortening. Called with no
+    # argument (an earlier version's behavior), simplifySolution() uses a
+    # generous internal default and routinely spent 2.5-6.7s per plan call --
+    # measured from real rollout logs, often longer than the search that
+    # produced the path. It's an optimization pass, not a correctness one:
+    # the simplified path is independently re-validated edge-by-edge below
+    # regardless, so a short budget trades a slightly less-shortened path
+    # (the same call still collapsed e.g. 14 states to 5) for seconds back on
+    # every single planning call in a rollout.
+    simplify_time_sec: float = 0.25
 
 
 @dataclass
@@ -199,6 +220,15 @@ class PlaceSampleConfig:
     top_surface_num_ring_samples: int = 10
     hover_clearance_m: float = 0.06  # above the container's rim before descending
     drop_clearance_m: float = 0.02  # above the container's floor (or the next object already in it)
+    # How far the hand lifts away after opening, *before* the release is
+    # verified. _is_grasped() is a contact test, so a genuinely released
+    # object still reads as grasped while it rests against the open fingers --
+    # the normal case when placing into an already-occupied container, where
+    # the object settles higher than the empty-container floor the place pose
+    # aimed at. Confirmed on the real two-object libero_10 basket task: the
+    # second place failed with "gripper opened but object is still reported
+    # grasped" despite placing correctly.
+    release_withdraw_m: float = 0.06
     # IK is not unique -- same reasoning as every other skill in this
     # package (OpenDrawerSkill, TurnKnobSkill, TransportSkill): a single
     # DLS solve from one seed can land in a bad basin even when a feasible
@@ -473,6 +503,16 @@ class CloseConfig:
     # until this tilt search was added. Not used by the door branch, whose
     # approach direction already comes from the arc's own tangent.
     approach_tilts_rad: tuple[float, ...] = (0.0, 0.35, 0.61, 0.87)
+    # Drawer branch only -- mirrors DrawerConfig.pull_fraction_fallbacks
+    # (tried largest/most-closed first): pushing all the way to the joint's
+    # exact closed end can bring the palm into contact with whatever sits
+    # flush around the drawer opening once it's fully shut -- confirmed
+    # directly on a real stacked-cabinet scene, where fully closing the
+    # bottom drawer swept the palm into the middle drawer's own body sitting
+    # just above it. A push that only gets most of the way still counts as
+    # closed (see close_threshold_frac) and avoids the tightest final
+    # clearance entirely instead of trying to thread it.
+    close_fraction_fallbacks: tuple[float, ...] = (1.0, 0.95, 0.9, 0.85, 0.75, 0.6)
     planning_attempts: int = 3
     # Number of Cartesian waypoints FK-sampled along a microwave door's
     # swept closing arc (see articulation.measure_door_close_arc) -- each is

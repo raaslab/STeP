@@ -284,7 +284,7 @@ class PlaceSkill:
         obj_half_h = float(obj_extent.half_extents[2]) if obj_extent is not None else 0.02
 
         floor_fn = _support_floor_and_rim_z if place_surface == "top" else _container_floor_and_rim_z
-        floor_z, _ = floor_fn(scene, goal_container_body)
+        floor_z, rim_z = floor_fn(scene, goal_container_body)
         place_z = floor_z + obj_half_h + cfg.drop_clearance_m
 
         # An explicit point goal names the exact spot to set the object down
@@ -343,9 +343,32 @@ class PlaceSkill:
                 theta = 2.0 * np.pi * i / n
                 offsets.append(interior_half_xy * np.array([np.cos(theta), np.sin(theta)]))
 
-        return [
+        candidates = [
             np.array([container_pos[0] + off[0], container_pos[1] + off[1], place_z]) for off in offsets
         ]
+
+        # Fallback "drop it in" candidates, above the container's own rim
+        # rather than its floor: every candidate above assumes the container
+        # is empty at floor height, which is false the moment something is
+        # already resting inside it -- confirmed via a real two-object
+        # basket task, where a second can's every ring position at floor
+        # height collided with the first can already occupying that same
+        # footprint, and the place subtask failed outright with no fallback.
+        # Rather than nest neatly (which needs knowing exactly how tall
+        # whatever's already inside is, at this exact xy), release from
+        # progressively higher above the rim instead and let gravity settle
+        # it -- these still go through the exact same IK/collision/planning
+        # validation as every candidate above (never a blind release), so
+        # they're only ever selected when genuinely nothing lower is
+        # feasible, and a clean nested placement still always wins on cost
+        # when one exists.
+        if place_surface != "top":
+            obj_height_m = 2.0 * obj_half_h
+            for level in range(1, 4):
+                drop_z = rim_z + obj_half_h + cfg.drop_clearance_m + (level - 1) * obj_height_m
+                candidates.append(np.array([container_pos[0], container_pos[1], drop_z]))
+
+        return candidates
 
     def _score_candidate(
         self,
@@ -366,7 +389,17 @@ class PlaceSkill:
         container_pos, _ = scene.body_pose(goal_container_body)
         floor_fn = _support_floor_and_rim_z if place_surface == "top" else _container_floor_and_rim_z
         _, rim_top_z = floor_fn(scene, goal_container_body)
-        hover_xyz = np.array([object_xyz[0], object_xyz[1], rim_top_z + cfg.hover_clearance_m])
+        # max(), not the rim height alone: a normal floor-level candidate is
+        # always well below the rim, so this is the same fixed
+        # rim-plus-clearance hover it's always been -- but one of the
+        # "drop it in" fallback candidates (_generate_candidates, for a
+        # container with no room left at floor height) can itself sit at or
+        # above that fixed hover height, which would otherwise make the
+        # "descent" from hover to place go *up* instead of down. Anchoring
+        # hover to whichever is higher keeps the approach a real descent for
+        # every candidate this method is ever called with.
+        hover_z = max(rim_top_z + cfg.hover_clearance_m, float(object_xyz[2]) + cfg.hover_clearance_m)
+        hover_xyz = np.array([object_xyz[0], object_xyz[1], hover_z])
 
         hover_hand_pos, hover_hand_quat = required_hand_pose_for_object_pose(
             hover_xyz, object_quat_now, attached.grasp_transform_hand_from_object

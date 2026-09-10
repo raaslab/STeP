@@ -45,7 +45,6 @@ from .standoff_search import standoff_candidates
 from ..types import (
     CandidateScore,
     GraspCandidate,
-    PlannerFailureReason,
     SkillFailureReason,
     SkillResult,
 )
@@ -353,17 +352,25 @@ class PickSkill:
                 )
 
         # --- plan the long-range approach to the standoff point, scored by path + reachability + clearance --
-        plan = None
-        for _ in range(self.config.grasp.planning_attempts):
-            plan = self.planner.plan(
-                start_q, [standoff_ik.q], phase=CollisionPhase.FREE_SPACE, target_object_body=cand.object_name
-            )
-            if plan.success or plan.failure_reason not in (
-                PlannerFailureReason.NO_PATH_FOUND,
-                PlannerFailureReason.APPROXIMATE_SOLUTION_ONLY,
-                PlannerFailureReason.TIMEOUT,
-            ):
-                break
+        # A single call, not a "planning_attempts times" retry loop: this is
+        # one fixed (start_q, standoff_ik.q) pair, and MotionPlanner.plan()'s
+        # own docstring documents why retrying it is pure waste -- OMPL seeds
+        # its RNG once per process and refuses reseeding, so a failed
+        # RRTConnect search returns the identical result every time (measured
+        # there: 8 back-to-back retries, byte-identical). An earlier version
+        # of this method retried anyway, which meant any candidate whose
+        # planning genuinely failed (NO_PATH_FOUND/TIMEOUT) burned up to
+        # planning_attempts * timeout_sec seconds for zero benefit --
+        # confirmed against a real cream_cheese_1 rollout: two separate
+        # fallback stages each spent ~100s here alone (6 retries x ~17s
+        # average before timing out), the overwhelming majority of a 223s
+        # total pick. Retrying only ever helps when the goal itself changes
+        # between attempts (see TransportSkill's nearest-configuration
+        # hover-IK selection for that pattern) -- not applicable here, since
+        # the standoff search above already committed to one fixed goal.
+        plan = self.planner.plan(
+            start_q, [standoff_ik.q], phase=CollisionPhase.FREE_SPACE, target_object_body=cand.object_name
+        )
         if not plan.success:
             return CandidateScore(
                 cand.object_name, cand, None, False, float("inf"), rejection_reason=f"planning_failed:{plan.failure_reason}"
@@ -385,6 +392,42 @@ class PickSkill:
         breakdown["reachability"] = float(standoff_ik.position_error + standoff_ik.orientation_error)
         breakdown["generator_score_penalty"] = float(1.0 - cand.generator_score)
 
+        # --- depth preference: bias top-down grasps toward the deepest safe height ----------
+        # Both generators already clamp a candidate's height to never go
+        # *past* the palm/floor-clearance-safe band (see grasp_generator.py's
+        # and contact_graspnet_generator.py's own min_safe_z clamp, which
+        # shares this exact formula) -- but that clamp is a floor, not an
+        # attractor: a shallow, near-the-rim candidate that never hits the
+        # clamp passes through untouched. Confirmed via a real rollout
+        # (alphabet_soup_1_main, a can): ContactGraspNet's 32 candidates spanned
+        # the full safe band (79%-105% up the can) with essentially zero
+        # correlation between height and the network's own confidence score
+        # (r=-0.05) -- the network has no notion of "grip margin", so its
+        # top-scoring candidate landed at 101% up (right at the rim, a shallow
+        # pinch prone to slipping) purely by chance, even though a
+        # near-identical-score deep candidate at 79% up (matching a real,
+        # reliable can grasp) was sitting right next to it in the pool. This
+        # term breaks that tie toward the deep end without touching either
+        # generator, so it applies uniformly to CGN and heuristic candidates
+        # alike. Gated to near-vertical approaches only: the "grasp near
+        # object_top_z minus palm clearance" reasoning only describes a
+        # top-down grasp -- a side/rim-pinch candidate's z is set by object
+        # geometry, not palm depth, and penalizing it here would just add
+        # noise to a strategy this formula doesn't describe.
+        extent = scene.body_extent_world(cand.object_name)
+        if extent is not None and float(np.dot(cand.approach_direction_world, [0.0, 0.0, -1.0])) > 0.9:
+            obj_pos, _ = scene.body_pose(cand.object_name)
+            margin = self.config.grasp.grasp_height_margin_m
+            object_center_z = float(obj_pos[2] + extent.center_offset[2])
+            object_top_z = object_center_z + float(extent.half_extents[2])
+            object_bottom_z = object_center_z - float(extent.half_extents[2])
+            min_safe_for_palm = object_top_z - scene.palm_clearance_above_tcp_m() + margin
+            min_safe_for_floor = object_bottom_z + scene.finger_reach_below_tcp_m() + margin
+            ideal_deep_z = min(max(min_safe_for_palm, min_safe_for_floor), object_top_z - margin)
+            breakdown["grasp_depth_penalty"] = max(0.0, float(cand.grasp_position[2]) - ideal_deep_z)
+        else:
+            breakdown["grasp_depth_penalty"] = 0.0
+
         # Weight 8.0, not 1.0: generator_score_penalty is bounded to [0, 1],
         # but path_cost/joint_quality routinely land in the 2-12+ range for a
         # real arm trajectory -- at weight 1.0 the network's own confidence
@@ -398,11 +441,21 @@ class PickSkill:
         # contact with the object) despite tracking to that target with
         # near-zero error. It had 15 other feasible candidates to choose
         # from; this scoring is why it picked the one that missed.
+        # Weight 300.0: grasp_depth_penalty is a raw distance in meters, and
+        # the real-world gap between a shallow rim candidate and the deep
+        # target is small in absolute terms (~1-2cm, confirmed against the
+        # alphabet-soup-can pool above) -- at weight 1.0 that's a rounding
+        # error next to path_cost/reachability. 300.0 puts a 2cm gap
+        # (0.02 * 300 = 6.0) on the same order as generator_score_penalty's
+        # own max contribution (8.0), enough to flip the ranking between two
+        # otherwise-similar candidates without letting depth alone override a
+        # large path-cost or reachability difference.
         total_cost = (
             1.0 * path_cost
             + 2.0 * breakdown["joint_quality"]
             + 5.0 * breakdown["reachability"]
             + 8.0 * breakdown["generator_score_penalty"]
+            + 300.0 * breakdown["grasp_depth_penalty"]
         )
 
         return CandidateScore(

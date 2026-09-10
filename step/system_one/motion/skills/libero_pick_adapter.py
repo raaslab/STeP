@@ -33,16 +33,27 @@ import numpy as np
 from ..attached_object import AttachedObjectManager
 from ..collision import CollisionChecker, CollisionPhase
 from ..config import MotionConfig
-from .grasp_generator import GraspGenerator, PrivilegedTopDownGraspGenerator
+from .grasp_generator import (
+    GraspGenerator,
+    ManualDeepCenterGraspGenerator,
+    PrivilegedTopDownGraspGenerator,
+    _is_rim_graspable_object_class,
+)
 from ..kinematics import IKSolver
 from ..mpc import JointSpaceMPC, MPCContext
 from ..ompl_planner import MotionPlanner
 from ..panda import EE_SITE, GRIPPER_BODIES, HAND_SITE, JOINT_NAMES, ROBOT_BODIES
 from .pick_skill import PickSkill
 from ..scene_query import SceneQuery, quat_to_rotmat_wxyz, resolve_body_name
-from ..servo import _ServoMixin, is_settle_stalled
+from ..servo import _ServoMixin, is_settle_stalled, real_nonpermitted_contacts
 from ..time_parameterize import TimeParameterizer
 from ..types import AttachedObjectState, MPCCostConfig, SkillFailureReason, SkillResult
+
+# Matches CollisionConfig.self_margin_m (0.005) -- the smallest margin
+# already tolerated elsewhere in this pipeline's own collision checks. A
+# contact against an unrelated neighbor closer than this is real; anything
+# shallower is sub-mm meshing/numerical noise, not a genuine obstruction.
+WRONG_OBSTACLE_GRAZE_TOLERANCE_M = 0.005
 
 
 class LiberoPickAdapter(_ServoMixin):
@@ -260,14 +271,67 @@ class LiberoPickAdapter(_ServoMixin):
         body_names = [resolve_body_name(scene, name) for name in object_set]
         canonical_by_body = dict(zip(body_names, object_set))
 
-        candidates = skill.grasp_generator.generate(scene, body_names)
-        plan_result = skill.execute(scene, body_names, start_q, constraints, candidates=candidates)
+        # Object classification, not a per-call heuristic: a rim-graspable
+        # object (bowl/mug/cup, see _is_rim_graspable_object_class) has no
+        # solid material at its center for the manual pose to close on, so it
+        # always needs GraspNet's real antipodal-contact search -- everything
+        # else (a can, a box like cream_cheese_1/butter_1) is assigned to the
+        # manual pose exclusively, no GraspNet fallback at all.
+        #
+        # This is a deliberate speed/robustness tradeoff, not an oversight:
+        # GraspNet's own "closer look" recapture + the heuristic's
+        # exhaustive 75-candidate standoff search (see PickSkill's own
+        # standoff_candidates call) are what make a failed pick on a small,
+        # oddly-placed object slow -- confirmed against a real
+        # cream_cheese_1 rollout, ~200s dominated by exactly those two
+        # fallback stages. Skipping them entirely for the object classes the
+        # manual pose already covers well trades a small amount of
+        # robustness (a manual-only object with a genuinely infeasible fixed
+        # pose just fails fast instead of exhausting every fallback) for a
+        # large, predictable speed win on the common case.
+        manual_only = bool(body_names) and all(not _is_rim_graspable_object_class(b) for b in body_names)
+
+        manual_plan_result = None
+        manual_candidates: list = []
+        if self.config.contact_graspnet.enabled:
+            manual_candidates = ManualDeepCenterGraspGenerator(
+                skill.grasp_generator.gripper_max_opening_m
+            ).generate(scene, body_names)
+            if manual_candidates:
+                manual_plan_result = skill.execute(
+                    scene, body_names, start_q, constraints, candidates=manual_candidates
+                )
+
+        if manual_plan_result is not None and (manual_plan_result.success or manual_only):
+            candidates, plan_result = manual_candidates, manual_plan_result
+        else:
+            candidates = skill.grasp_generator.generate(scene, body_names)
+            plan_result = skill.execute(scene, body_names, start_q, constraints, candidates=candidates)
+
+        if manual_only and not plan_result.success and plan_result.failure_reason == SkillFailureReason.NO_FEASIBLE_CANDIDATE:
+            # The one fallback a manual-only object still gets: the same
+            # widened-tolerance retry the heuristic path below uses as its
+            # own absolute last resort, applied directly to the manual
+            # candidate instead of falling through to GraspNet/heuristic.
+            # Real, not hypothetical -- confirmed against the actual
+            # butter_1/cream_cheese_1 meshes: a specific real protrusion
+            # penetrates a finger by ~1.1-1.3mm at the correct (short-axis)
+            # grasp, nearly double the default 6mm compliance margin. This
+            # single retry is cheap (one candidate, not GraspNet's inference
+            # or the heuristic's multi-yaw search) so it doesn't undermine
+            # the whole point of skipping those for this object class.
+            relaxed_skill = self._build_pick_skill(scene, finger_overlap_tolerance_m=0.02)
+            relaxed_plan_result = relaxed_skill.execute(
+                scene, body_names, start_q, constraints, candidates=manual_candidates
+            )
+            candidates, plan_result = manual_candidates, relaxed_plan_result
 
         pre_steps = pre_home_steps  # the homing move above is real env time too
         needs_closer_look = (
             not plan_result.success
             and plan_result.failure_reason == SkillFailureReason.NO_FEASIBLE_CANDIDATE
             and len(body_names) == 1
+            and not manual_only
         )
         if needs_closer_look:
             # The single-shot capture (from wherever the arm started, e.g.
@@ -297,7 +361,7 @@ class LiberoPickAdapter(_ServoMixin):
                     if new_plan_result.success or len(new_candidates) > len(candidates):
                         scene, start_q, candidates, plan_result = new_scene, new_start_q, new_candidates, new_plan_result
 
-        if not plan_result.success and plan_result.failure_reason == SkillFailureReason.NO_FEASIBLE_CANDIDATE:
+        if not plan_result.success and plan_result.failure_reason == SkillFailureReason.NO_FEASIBLE_CANDIDATE and not manual_only:
             # Last resort: GraspNet found nothing usable even after the
             # closer look above. Rare for well-shaped objects, but real and
             # hard to fully eliminate for very small/thin ones (confirmed on
@@ -469,6 +533,46 @@ class LiberoPickAdapter(_ServoMixin):
                     # pointless and visibly looks like the gripper
                     # repeatedly bumping and retrying.
                     stalled = True
+                    # But *which* boundary it stalled against matters: this
+                    # check was written assuming that boundary is always the
+                    # intended grasp target, and unconditionally proceeds to
+                    # close the gripper either way. Confirmed via a real
+                    # rollout it is not always true -- a stalled settle can
+                    # be resting against a *neighboring* object instead (the
+                    # milk carton next to this exact can), sustained contact
+                    # (100+ steps, several mm of real penetration) the whole
+                    # time, not the can at all. Closing the gripper there
+                    # doesn't produce a grasp; it just holds that position
+                    # until _is_grasped() reports the obvious False --
+                    # cheaper and clearer to catch here, by name, than to
+                    # let the close-dwell run first and report a generic
+                    # "gripper closed but _is_grasped() reported False".
+                    stall_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
+                    target_geom_ids = set(stall_scene.body_geom_ids(object_body_name))
+                    bad_contacts = real_nonpermitted_contacts(stall_scene, checker, phase, object_body_name)
+                    # Ignore grazes smaller than WRONG_OBSTACLE_GRAZE_TOLERANCE_M:
+                    # this check is about a *sustained, real* contact against
+                    # a neighbor (confirmed against the milk-carton case --
+                    # several mm of penetration, 100+ steps), not sub-mm
+                    # meshing noise. Confirmed against a real butter_1
+                    # rollout: a -0.00015m (0.15mm) palm graze against
+                    # tomato_sauce_1 -- 30x smaller than this pipeline's own
+                    # self_margin_m (0.005) -- was tripping this exact check
+                    # and failing an otherwise-clean pick outright.
+                    wrong_obstacle_contacts = [
+                        c for c in bad_contacts
+                        if stall_scene.geom_id(c[0]) not in target_geom_ids
+                        and stall_scene.geom_id(c[1]) not in target_geom_ids
+                        and c[2] < -WRONG_OBSTACLE_GRAZE_TOLERANCE_M
+                    ]
+                    if wrong_obstacle_contacts:
+                        plan_result.success = False
+                        plan_result.failure_reason = SkillFailureReason.EXECUTION_FAILED
+                        plan_result.diagnostics["detail"] = (
+                            "settle stalled against a different object, not the intended grasp target"
+                        )
+                        plan_result.diagnostics["wrong_obstacle_contacts"] = wrong_obstacle_contacts[:10]
+                        return plan_result, steps, None
                     break
 
         settle_steps = max(0, t0 - len(full_reference))
@@ -515,6 +619,76 @@ class LiberoPickAdapter(_ServoMixin):
             plan_result.failure_reason = SkillFailureReason.GRASP_VERIFICATION_FAILED
             plan_result.diagnostics["detail"] = "gripper closed but _is_grasped() reported False"
             return plan_result, steps, None
+
+        # Static contact at the exact grasp pose is not the same as a grasp
+        # that survives being moved -- confirmed by a real rollout where
+        # _is_grasped() read True immediately after closing, only for the
+        # very next subtask (transport, which starts with a few-cm lift) to
+        # report the object gone 2 steps in, with _is_grasped() flickering
+        # True/False/True as the fingers "closed" without ever settling on a
+        # stable bilateral grip. That failure is far more useful caught here
+        # -- where PickSkill's own OR-set search could in principle pick a
+        # different candidate next time -- than discovered downstream in
+        # transport, which has no candidate to fall back to and simply
+        # drops the object. Reuses `lift_check_m` (already used at plan time
+        # to confirm a lift target is IK-reachable, see PickSkill's own
+        # `post_grasp_lift_infeasible` check) as the real, physically
+        # simulated version of that same question.
+        # A dense ramp, not a single fixed target repeated every step: with
+        # a fixed target 5cm away, _servo_toward_cartesian_pose's own
+        # pos_err/pos_scale_m (0.03) saturates the very first commanded
+        # step at maximum Cartesian velocity -- a sudden jerk, not a gentle
+        # lift. Measured directly against the deterministic heuristic-
+        # generator candidate for this exact can: a marginal grip that held
+        # a stable, unmoving 37-step static contact (real contacts, gap
+        # plateaued under load) lost all contact within a single sim step
+        # of that first saturated command, and by the time it grasped-
+        # checked at the end had fallen back to its original resting
+        # height. Interpolating the target itself, not just clipping the
+        # commanded velocity (already 0.03 m/step max via pos_scale_m),
+        # keeps each step's position error small throughout, not just
+        # capped-but-still-large on step one.
+        lift_target = cand.grasp_position + np.array([0.0, 0.0, self.config.grasp.lift_check_m])
+        ee_pos_before_lift, _ = SceneQuery.from_robosuite_sim(self.env.env.sim).site_pose(self.ee_site)
+        n_lift_steps = 20
+        for lift_waypoint in np.linspace(ee_pos_before_lift, lift_target, n_lift_steps + 1)[1:]:
+            lift_pos, lift_ori, _, _ = self._servo_toward_cartesian_pose(lift_waypoint, cand.grasp_quat_wxyz)
+            self._step_env(lift_pos, lift_ori, gripper_cmd)
+            steps += 1
+            if step_callback is not None:
+                step_callback()
+        grasped_after_lift = bool(self.env._is_grasped())
+        plan_result.diagnostics["grasp_verification"]["grasped_after_test_lift"] = grasped_after_lift
+        if not grasped_after_lift:
+            plan_result.success = False
+            plan_result.failure_reason = SkillFailureReason.GRASP_VERIFICATION_FAILED
+            plan_result.diagnostics["detail"] = "grasp did not survive test lift"
+            return plan_result, steps, None
+
+        # Carry lift: leave the arm high enough that the *next* skill has room
+        # to plan, rather than wherever the (deliberately shallow) test lift
+        # above happened to stop. Not cosmetic -- measured on the real
+        # libero_object task: transporting from the post-test-lift pose
+        # (~6cm off the table, object attached) had RRTConnect thrash and
+        # return NO_PATH_FOUND for all 8 candidate goals, 85.8s to fail;
+        # lifting 10cm first, the identical transport found a direct path and
+        # succeeded in 1.4s. The attached object's own collision spheres are
+        # tight (2 x 2.3cm radius, measured) -- it's the low, table-adjacent
+        # start pose that leaves the planner almost no free corridor to
+        # expand into, not an inflated object model.
+        carry_lift_m = float(self.config.grasp.post_grasp_carry_lift_m)
+        if carry_lift_m > 0.0:
+            ee_now, _ = SceneQuery.from_robosuite_sim(self.env.env.sim).site_pose(self.ee_site)
+            carry_target = ee_now + np.array([0.0, 0.0, carry_lift_m])
+            for carry_waypoint in np.linspace(ee_now, carry_target, n_lift_steps + 1)[1:]:
+                carry_pos, carry_ori, _, _ = self._servo_toward_cartesian_pose(
+                    carry_waypoint, cand.grasp_quat_wxyz
+                )
+                self._step_env(carry_pos, carry_ori, gripper_cmd)
+                steps += 1
+                if step_callback is not None:
+                    step_callback()
+            plan_result.diagnostics["grasp_verification"]["carry_lift_m"] = carry_lift_m
 
         attached_mgr = AttachedObjectManager()
         attach_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)

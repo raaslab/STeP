@@ -98,6 +98,49 @@ def resolve_body_name(scene: "SceneQuery", canonical_name: str) -> str:
     )
 
 
+def object_within_container_footprint(
+    scene: "SceneQuery", object_body: str, container_body: str, z_margin_m: float = 0.10
+) -> bool | None:
+    """Is ``object_body`` currently resting inside ``container_body``'s own
+    footprint -- the same XY-AABB proxy ``libero_place_adapter.py`` already
+    uses for its own ``within_goal_footprint_xy`` place-verification (reused,
+    not reimplemented), plus a Z-height sanity check so an object merely
+    transiting *over* the container at the instant of a live snapshot isn't
+    mistaken for one already resting inside it.
+
+    Used by the pipeline-recall retry loop (``libero_runner.py``) to decide
+    whether a place goal is already satisfied before recalling System 2 --
+    without this, a recall after an unrelated failure (e.g. a second object's
+    dropped transport) has no way to know the first object is already done,
+    and re-plans a redundant pick/place for it. Returns ``None`` (not a
+    guess) if either body or the container's own collision geometry can't be
+    resolved -- the caller should then treat the goal state as unknown, not
+    assume it's unsatisfied.
+    """
+    try:
+        object_pos, _ = scene.body_pose(object_body)
+        container_pos, _ = scene.body_pose(container_body)
+    except KeyError:
+        return None
+    container_extent = scene.body_collision_extent_world(container_body)
+    if container_extent is None:
+        return None
+    half_xy = np.asarray(container_extent.half_extents[:2], dtype=np.float64)
+    centre_xy = np.asarray(container_pos[:2], dtype=np.float64) + np.asarray(
+        container_extent.center_offset[:2], dtype=np.float64
+    )
+    object_xy = np.asarray(object_pos[:2], dtype=np.float64)
+    if not bool(np.all(np.abs(object_xy - centre_xy) <= half_xy)):
+        return False
+    container_bottom_z = float(
+        container_pos[2] + container_extent.center_offset[2] - container_extent.half_extents[2]
+    )
+    container_top_z = float(
+        container_pos[2] + container_extent.center_offset[2] + container_extent.half_extents[2]
+    )
+    return bool(container_bottom_z - z_margin_m <= float(object_pos[2]) <= container_top_z + z_margin_m)
+
+
 def rotmat_to_quat_wxyz(mat: np.ndarray) -> np.ndarray:
     quat = np.zeros(4, dtype=np.float64)
     mujoco.mju_mat2Quat(quat, np.asarray(mat, dtype=np.float64).reshape(9))
@@ -214,6 +257,26 @@ class SceneQuery:
             alt = self._gripper_name_alt(name)
             if alt is not None:
                 gid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, alt)
+        if gid < 0 and name.startswith("geom_"):
+            # Exact inverse of geom_name()'s own fallback for a geom with no
+            # real MJCF name (common for simple collision primitives, e.g.
+            # unnamed box/plane geoms robosuite/LIBERO assets add for
+            # collision-only purposes) -- geom_name() synthesizes f"geom_{gid}"
+            # for those, and any caller that round-trips a name straight out
+            # of compute_contacts()/geom_name() back through geom_id() (every
+            # CollisionChecker.check()/check_edge() call does exactly this)
+            # needs that fallback to resolve, not raise. A real bug this
+            # fixes: PickSkill's escape_start_collision crashed outright the
+            # first time an escape check's contact list included one of
+            # these unnamed geoms, with no prior indication anything was
+            # wrong (the geom's real id was always fine -- only its string
+            # round-trip through this method was broken).
+            try:
+                candidate = int(name[len("geom_"):])
+            except ValueError:
+                candidate = -1
+            if 0 <= candidate < self.model.ngeom:
+                gid = candidate
         if gid < 0:
             raise KeyError(f"No geom named {name!r} in model.")
         return gid
@@ -307,18 +370,45 @@ class SceneQuery:
 
     def _geom_far_local_z(self, geom_name: str, hand_site: str) -> float:
         """A geom's own farthest extent along the hand frame's local +Z axis
-        (its own position/half-extent rotated into the hand's frame) --
-        shared by ``palm_clearance_above_tcp_m`` (the palm sits *before* the
-        TCP, so this is its near face) and ``finger_reach_below_tcp_m`` (the
-        fingers extend *past* the TCP, so this is their far reach); which
-        side of the TCP a geom ends up on falls out of the arithmetic, not
-        out of which of the two callers asks."""
+        -- shared by ``palm_clearance_above_tcp_m`` (the palm sits *before*
+        the TCP, so this is its near face) and ``finger_reach_below_tcp_m``
+        (the fingers extend *past* the TCP, so this is their far reach);
+        which side of the TCP a geom ends up on falls out of the
+        arithmetic, not out of which of the two callers asks.
+
+        For a mesh geom, uses the real vertices transformed directly into
+        the hand's local frame rather than rotating the geom's own
+        (already-axis-aligned-to-the-geom) AABB half-extent into that frame
+        and re-bounding it there -- double-bounding a box through an
+        arbitrary (non-90-degree-permutation) rotation always grows it, and
+        the stock Panda hand's palm mesh sits at just such an angle (~1.5
+        degrees off-axis to ``gripper0_right_ft_frame``) relative to this
+        model's own hand-to-TCP frame. Measured directly against that real
+        mesh: the AABB-rotation approach overstates the palm's near-face
+        reach by ~9mm versus the vertices' own true extent -- not a
+        rounding error, a real ~9mm of grasp depth (see
+        ``grasp_generator.py``'s ``min_safe_for_palm``) given away to a
+        bounding box the palm doesn't actually fill in that direction.
+        Other geom types keep the cheaper AABB-rotation bound: a box *is*
+        its own AABB in its local frame, so there is nothing to gain there,
+        and the primitives used elsewhere for this (finger geoms) are
+        capsules/boxes, not meshes.
+        """
         hand_pos, hand_quat = self.site_pose(hand_site)
         hand_R = quat_to_rotmat_wxyz(hand_quat)
         gid = self.geom_id(geom_name)
         gpos = self.data.geom_xpos[gid]
         gmat = self.data.geom_xmat[gid].reshape(3, 3)
-        local_half = self._geom_local_half_extent(self.model.geom_type[gid], self.model.geom_size[gid])
+        gtype = self.model.geom_type[gid]
+        if gtype == mujoco.mjtGeom.mjGEOM_MESH:
+            mesh_id = self.model.geom_dataid[gid]
+            vert_adr = self.model.mesh_vertadr[mesh_id]
+            vert_num = self.model.mesh_vertnum[mesh_id]
+            verts_local = self.model.mesh_vert[vert_adr : vert_adr + vert_num].reshape(-1, 3)
+            verts_world = (gmat @ verts_local.T).T + gpos
+            verts_hand_local_z = (hand_R.T @ (verts_world - hand_pos).T).T[:, 2]
+            return float(np.max(verts_hand_local_z))
+        local_half = self._geom_local_half_extent(gtype, self.model.geom_size[gid])
         rel_mat = hand_R.T @ gmat
         rel_pos = hand_R.T @ (gpos - hand_pos)
         return float(rel_pos[2] + (np.abs(rel_mat) @ local_half)[2])

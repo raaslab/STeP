@@ -3,11 +3,14 @@ door shut, never grasping it.
 
 Closing completes on contact -- unlike opening a drawer (which must hook a
 handle to pull it) or turning a knob (which must grip its rim to rotate it),
-there is nothing to catch and nothing to miss. A closed gripper (a rigid
-fist) commanded straight through the fixture's closing path does the job, so
+there is nothing to catch and nothing to miss. The gripper stays open the
+whole time (see ``LiberoCloseAdapter``): contact is made by the palm/wrist
+pushing straight through the fixture's closing path, not by the fingers, so
 this skill carries none of ``OpenDrawerSkill``'s grasp-precision machinery
 (approach tilts/rolls, per-candidate finger width, the "handle captured
-between fingers" gate) -- there is no handle to capture.
+between fingers" gate) -- there is no handle to capture. Collision checks
+below never override finger qpos, so they validate the same open posture
+that actually gets executed.
 
 Dispatches on the target's own joint type, discovered via
 ``articulation.py``:
@@ -131,19 +134,32 @@ class CloseSkill:
         # contact against the fixture's face.
         target_geom_ids = set(scene.body_geom_ids(drawer.drawer_body))
 
-        contact_pos, _flat_contact_quat, pull_axis_world, _travel_m, _closing_axis = handle_grasp_pose(scene, drawer)
+        contact_pos, _flat_contact_quat, pull_axis_world, travel_m, _closing_axis = handle_grasp_pose(scene, drawer)
         _, _, qpos_closed, qpos_open = measure_pull_axis_and_travel(scene, drawer)
         qpos_current = float(scene.get_qpos([drawer.joint_name])[0])
-        # A slide joint's qpos IS its linear displacement in meters (a MuJoCo
-        # invariant, not an asset-specific assumption) -- so how far the
-        # handle still has to travel to reach fully closed is exactly
-        # (qpos_current - qpos_closed) along the measured pull axis, valid
-        # regardless of how far open the drawer currently is.
-        remaining_m = qpos_current - qpos_closed
-        push_target_pos = contact_pos - remaining_m * pull_axis_world
+        # NOT simply (qpos_current - qpos_closed): a slide joint's qpos is
+        # metric, but `qpos_open` is not guaranteed to be *greater than*
+        # `qpos_closed` -- this exact drawer has qpos_open=-0.16 <
+        # qpos_closed=0.01, i.e. its local joint axis points opposite to the
+        # world-measured `pull_axis_world` (pos_open - pos_closed). A first
+        # version used the raw qpos delta directly here and it silently
+        # pushed the drawer further OPEN instead of closed on this exact
+        # drawer -- caught by comparing the computed push_target_pos against
+        # contact_pos and pull_axis_world's sign directly, not just by the
+        # skill reporting success. The qpos delta must instead be
+        # *normalized* into a fraction of the full (qpos_open-qpos_closed)
+        # range before scaling by the world-measured travel_m/pull_axis_world,
+        # exactly mirroring how position is linear in qpos for any slide
+        # joint regardless of which endpoint is numerically larger.
+        frac_open = (
+            (qpos_current - qpos_closed) / (qpos_open - qpos_closed)
+            if abs(qpos_open - qpos_closed) > 1e-9
+            else 0.0
+        )
         reference_axis_world = _unit(np.cross(np.array([0.0, 0.0, 1.0]), pull_axis_world))
 
         best = None
+        best_fallback = None  # (open_frac_reached, standoff_ik, contact_ik, push_ik, contact_quat)
         last_rejection = "no_ik_attempted"
         for tilt_rad in cfg.approach_tilts_rad:
             # Same direction the grasp approach already uses (see
@@ -189,25 +205,47 @@ class CloseSkill:
                 if descent_check.in_collision:
                     last_rejection = "approach_descent_in_collision"
                     continue
-                push_ik = _solve_ik_robust(
-                    self.ik_solver, scene, push_target_pos, contact_quat, contact_ik.q, self._rng,
-                    n_restarts=cfg.pose_selection_attempts,
-                )
-                if not push_ik.success:
-                    last_rejection = "push_target_ik_failed"
-                    continue
-                push_check = self.collision_checker.check_edge(
-                    contact_ik.q, push_ik.q, resolution=edge_resolution,
-                    phase=CollisionPhase.TERMINAL_APPROACH, target_object_body=drawer.drawer_body,
-                    permitted_contact_geom_ids=target_geom_ids,
-                )
-                if push_check.in_collision:
-                    last_rejection = "push_path_in_collision"
-                    continue
-                best = (standoff_ik, contact_ik, push_ik, contact_quat)
-                break
+                # Tried largest (most-closed) fraction first -- see
+                # CloseConfig.close_fraction_fallbacks's own comment for why
+                # a full push isn't always the reachable one.
+                push_found = False
+                for fraction in cfg.close_fraction_fallbacks:
+                    push_target_frac = contact_pos - fraction * frac_open * travel_m * pull_axis_world
+                    push_ik = _solve_ik_robust(
+                        self.ik_solver, scene, push_target_frac, contact_quat, contact_ik.q, self._rng,
+                        n_restarts=cfg.pose_selection_attempts,
+                    )
+                    if not push_ik.success:
+                        last_rejection = "push_target_ik_failed"
+                        continue
+                    push_check = self.collision_checker.check_edge(
+                        contact_ik.q, push_ik.q, resolution=edge_resolution,
+                        phase=CollisionPhase.TERMINAL_APPROACH, target_object_body=drawer.drawer_body,
+                        permitted_contact_geom_ids=target_geom_ids,
+                    )
+                    if push_check.in_collision:
+                        last_rejection = "push_path_in_collision"
+                        continue
+                    open_frac_reached = frac_open * (1.0 - fraction)
+                    if best_fallback is None or open_frac_reached < best_fallback[0]:
+                        best_fallback = (
+                            open_frac_reached, standoff_ik, contact_ik, push_ik, contact_quat, push_target_frac,
+                        )
+                    if open_frac_reached <= cfg.close_threshold_frac:
+                        best = (standoff_ik, contact_ik, push_ik, contact_quat, push_target_frac)
+                        push_found = True
+                    break
+                if push_found:
+                    break
             if best is not None:
                 break
+
+        if best is None and best_fallback is not None:
+            # Same "best feasible wins" fallback as the door branch -- the
+            # adapter's own post-execution structural check still gates on
+            # close_threshold_frac, so this never ships a false "success".
+            _, standoff_ik, contact_ik, push_ik, contact_quat, push_target_frac = best_fallback
+            best = (standoff_ik, contact_ik, push_ik, contact_quat, push_target_frac)
 
         if best is None:
             return SkillResult(
@@ -215,7 +253,7 @@ class CloseSkill:
                 failure_reason=SkillFailureReason.NO_FEASIBLE_CANDIDATE,
                 diagnostics={"detail": last_rejection, "drawer": drawer.drawer_body},
             )
-        standoff_ik, contact_ik, push_ik, contact_quat = best
+        standoff_ik, contact_ik, push_ik, contact_quat, push_target_pos = best
 
         plan = self._plan_free_space(start_q, standoff_ik.q, drawer.drawer_body, cfg.planning_attempts)
         if not plan.success:
@@ -366,6 +404,16 @@ class CloseSkill:
                 continue
             best = (standoff_ik, contact_ik, arc_qs)
             break
+
+        if best is None and best_fallback is not None:
+            # No candidate reached the close threshold outright, but some
+            # candidate's chain got partway there -- same "best feasible
+            # wins" fallback DrawerConfig.pull_fraction_fallbacks uses, not
+            # a silent downgrade: the adapter's own structural success check
+            # still gates on close_threshold_frac after execution, so this
+            # only ever ships a plan, never a false "success".
+            _, standoff_ik, contact_ik, arc_qs = best_fallback
+            best = (standoff_ik, contact_ik, arc_qs)
 
         if best is None:
             return SkillResult(
