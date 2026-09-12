@@ -27,6 +27,40 @@ from .scene_query import BodyExtent, SceneQuery, quat_to_rotmat_wxyz
 from .types import AttachedObjectState
 
 
+def attached_sphere_infeasible_for_goal(attached: AttachedObjectState, goal_radius_m: float | None) -> bool:
+    """Whether the attached object's own sphere approximation is provably
+    too large to ever fit within a goal region of radius ``goal_radius_m``,
+    regardless of how the arm approaches it.
+
+    The sphere fit (see ``fit_spheres_from_geoms``'s own docstring) bins the
+    object along its *longest* local axis -- correct for an elongated
+    object (a can, a box lying flat) but structurally unable to shrink for
+    a flat, plate-shaped one resting on its edge (a book standing upright):
+    every cross-section perpendicular to its own height stays close to its
+    full face, so no number of bins tightens it. Confirmed on a real
+    STUDY_SCENE1 rollout: a real, successfully grasped book (radius 5.7cm
+    per sphere) was carried toward a caddy compartment (radius 2.2cm) --
+    geometrically impossible for the sphere to ever clear, so the MPC's own
+    clearance cost fought it for the entire transport (repeated replanning,
+    a final settle 76cm/156 degrees off target) and the book was shaken
+    loose, even though the real, thin book would likely have fit the actual
+    slot fine.
+
+    Conservative in the safe direction: if every one of the object's own
+    fitted spheres already exceeds the goal's radius, no sphere among them
+    could ever satisfy a clearance test there, so continuing to weigh
+    sphere-vs-goal distance in the motion cost only fights a fight that
+    cannot be won -- better to stop treating the (over-approximated) carried
+    object as an obstacle for the rest of this leg and let the arm actually
+    reach the goal, than to keep contorting the plan away from a conflict
+    the real object may not even have.
+    """
+    if goal_radius_m is None or not attached.collision_spheres_object_frame:
+        return False
+    smallest_sphere_radius = min(radius for _offset, radius in attached.collision_spheres_object_frame)
+    return smallest_sphere_radius > float(goal_radius_m)
+
+
 def fit_spheres_to_extent(extent: BodyExtent, n_spheres: int = 3) -> list[tuple[np.ndarray, float]]:
     """Approximate a body's AABB as ``n_spheres`` spheres spread along its
     longest axis, each sized to circumscribe the cross-section rectangle

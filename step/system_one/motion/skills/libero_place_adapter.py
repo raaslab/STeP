@@ -1,13 +1,21 @@
-"""Executor-facing adapter for the ``place`` skill: wires ``PlaceSkill``
-(grasp-aware OMPL planning that treats the carried object as part of the
-robot, via its sphere approximation) into a live ``LiberoManipulationEnv``.
+"""Executor-facing adapter for the ``place`` skill.
 
-Shares its low-level stepping/servo pattern with ``libero_pick_adapter.py``
-(same Cartesian-delta bridge, same reasons -- see that module's docstring);
-duplicated here rather than factored into a shared base class to keep this
-integration slice small and independently reviewable. Consolidating the two
-adapters' shared plumbing is a reasonable follow-up cleanup once both are
-proven out.
+Deliberately simple: compute the object's desired final pose (goal surface
+height + how far the carried object's own collision geometry sits below its
+reference point), convert that to a hand target via the fixed grasp
+transform, and servo straight there in small steps. No OMPL plan, no
+MPC-tracked reference, no separate raw-proportional "settle" phase.
+
+This replaces an earlier OMPL-planned/MPC-tracked/settle pipeline that hit a
+real, repeated bug: the carried object separating from the gripper mid-
+descent with zero contacts recorded anywhere -- not a collision, not a weak
+grip, some kind of abrupt commanded discontinuity buried in that machinery
+that resisted several targeted fixes (widening the settle loop's speed cap,
+etc.). Going straight to the target in small, bounded steps (the same dense-
+ramp pattern already proven safe for PickSkill's post-grasp carry lift) is a
+much smaller surface area for that class of bug, at the cost of not routing
+around obstacles the way a real motion plan would -- acceptable since
+transport already leaves the arm hovering clear above the goal first.
 """
 
 from __future__ import annotations
@@ -15,16 +23,12 @@ from __future__ import annotations
 import numpy as np
 
 from ...orientation_utils import orientation_error_rotvec
-from ..collision import CollisionChecker, CollisionPhase
+from ..collision import required_hand_pose_for_object_pose
 from ..config import MotionConfig
-from ..kinematics import IKSolver
-from ..mpc import JointSpaceMPC, MPCContext
-from ..ompl_planner import MotionPlanner
-from ..panda import EE_SITE, GRIPPER_BODIES, JOINT_NAMES, ROBOT_BODIES
-from .place_skill import PlaceSkill
+from ..panda import EE_SITE, JOINT_NAMES
+from .place_skill import _container_floor_and_rim_z, _support_floor_and_rim_z
 from ..scene_query import SceneQuery, quat_to_rotmat_wxyz, resolve_body_name
-from ..time_parameterize import TimeParameterizer
-from ..types import AttachedObjectState, MPCCostConfig, SkillFailureReason, SkillResult
+from ..types import AttachedObjectState, SkillFailureReason, SkillResult
 
 
 class LiberoPlaceAdapter:
@@ -37,40 +41,22 @@ class LiberoPlaceAdapter:
     def _build_scene(self) -> SceneQuery:
         return SceneQuery.from_robosuite_sim(self.env.env.sim)
 
-    def _servo_toward_joint_target(
-        self, scene: SceneQuery, target_q: np.ndarray, pos_scale_m: float = 0.03, ori_gain: float = 2.0
-    ) -> tuple[np.ndarray, np.ndarray]:
-        scratch = scene.clone()
-        scratch.set_qpos(self.joint_names, target_q)
-        target_pos, target_quat = scratch.site_pose(self.ee_site)
-        target_R = quat_to_rotmat_wxyz(target_quat)
-        ee_pos = self.env._eef_pos(self.env.last_raw_obs)
-        ee_R = self.env._eef_rotmat(self.env.last_raw_obs)
-        cart_pos = np.clip((target_pos - ee_pos) / pos_scale_m, -1.0, 1.0).astype(np.float32)
-        ori_err = orientation_error_rotvec(ee_R, target_R)
-        cart_ori = np.clip(ori_gain * ori_err, -1.0, 1.0).astype(np.float32)
-        return cart_pos, cart_ori
-
-    def _servo_toward_joint_target_with_error(
-        self, scene: SceneQuery, target_q: np.ndarray
-    ) -> tuple[np.ndarray, np.ndarray, float, float]:
-        scratch = scene.clone()
-        scratch.set_qpos(self.joint_names, target_q)
-        target_pos, target_quat = scratch.site_pose(self.ee_site)
-        target_R = quat_to_rotmat_wxyz(target_quat)
-        ee_pos = self.env._eef_pos(self.env.last_raw_obs)
-        ee_R = self.env._eef_rotmat(self.env.last_raw_obs)
-        pos_err = target_pos - ee_pos
-        cart_pos = np.clip(pos_err / 0.03, -1.0, 1.0).astype(np.float32)
-        ori_err_vec = orientation_error_rotvec(ee_R, target_R)
-        cart_ori = np.clip(2.0 * ori_err_vec, -1.0, 1.0).astype(np.float32)
-        return cart_pos, cart_ori, float(np.linalg.norm(pos_err)), float(np.linalg.norm(ori_err_vec))
-
     def _step_env(self, cart_pos: np.ndarray, cart_ori: np.ndarray, gripper_cmd: float) -> dict:
         full_action = self.env._compose_full_action(cart_pos, cart_ori, gripper_cmd)
         obs, _reward, _terminated, info = self.env._step_backend(full_action)
         self.env.last_raw_obs = obs
         return info
+
+    def _servo_toward_cartesian_target(
+        self, target_pos: np.ndarray, target_R: np.ndarray, pos_scale_m: float
+    ) -> tuple[np.ndarray, np.ndarray, float, float]:
+        ee_pos = self.env._eef_pos(self.env.last_raw_obs)
+        ee_R = self.env._eef_rotmat(self.env.last_raw_obs)
+        pos_err_vec = target_pos - ee_pos
+        ori_err_vec = orientation_error_rotvec(ee_R, target_R)
+        cart_pos = np.clip(pos_err_vec / pos_scale_m, -1.0, 1.0).astype(np.float32)
+        cart_ori = np.clip(2.0 * ori_err_vec, -1.0, 1.0).astype(np.float32)
+        return cart_pos, cart_ori, float(np.linalg.norm(pos_err_vec)), float(np.linalg.norm(ori_err_vec))
 
     def run(
         self,
@@ -83,98 +69,80 @@ class LiberoPlaceAdapter:
     ) -> tuple[SkillResult, int]:
         scene = self._build_scene()
         goal_container_body = resolve_body_name(scene, goal_container_name)
-
-        checker = CollisionChecker(scene, self.joint_names, self.ee_site, ROBOT_BODIES, GRIPPER_BODIES, self.config.collision)
-        lo, hi = scene.joint_qpos_range(self.joint_names)
-        ik = IKSolver(joint_names=self.joint_names, site_name=self.ee_site)
-        planner = MotionPlanner(self.joint_names, lo, hi, checker, self.config.planner)
-        skill = PlaceSkill(ik, planner, checker, self.config)
-
-        start_q = scene.get_qpos(self.joint_names)
-        result = skill.execute(
-            scene, attached, goal_container_body, start_q, place_surface=place_surface, goal_point_xyz=goal_point_xyz
-        )
-        if not result.success:
-            return result, 0
-
-        traj = TimeParameterizer(self.config.time_param).parameterize(result.planned_trajectory)
-        if traj.positions is None:
-            result.success = False
-            result.failure_reason = SkillFailureReason.EXECUTION_FAILED
-            result.diagnostics["detail"] = "time parameterization produced no reference"
-            return result, 0
-
-        hover_q = np.asarray(result.diagnostics["hover_q"])
-        place_q = np.asarray(result.diagnostics["place_q"])
-        approach_positions = np.asarray(result.diagnostics["approach_positions"])
-        full_reference = np.concatenate([traj.positions, approach_positions[1:]], axis=0)
-        approach_start_idx = len(traj.positions)
-
+        pcfg = self.config.place
         steps = 0
-        # The plan's reference starts from the *escaped* start_q PlaceSkill
-        # computed (see escape_start_collision's own docstring), which can
-        # differ from wherever the real arm currently sits. Move there
-        # directly first -- see LiberoTransportAdapter's own identical
-        # comment for why skipping this can leave the MPC reconciling a gap
-        # between "where the plan assumes it starts" and "where the arm
-        # actually is" via a large, uncontrolled tracking error instead of
-        # smoothly following the validated collision-free path.
-        plan_start_q = np.asarray(result.planned_trajectory.metadata.get("plan_start_q", start_q))
-        if float(np.linalg.norm(plan_start_q - start_q)) > 1e-6:
-            escape_reference = np.linspace(start_q, plan_start_q, 20)
-            for target_q in escape_reference:
-                live_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
-                cart_pos, cart_ori = self._servo_toward_joint_target(live_scene, target_q)
-                self._step_env(cart_pos, cart_ori, self.env.close_gripper_cmd)
-                steps += 1
-                if step_callback is not None:
-                    step_callback()
 
-        mpc = JointSpaceMPC(
-            self.joint_names,
-            self.ee_site,
-            horizon=int(self.config.mpc.get("horizon", 16)),
-            cost_config=MPCCostConfig(**{k: v for k, v in self.config.mpc.items() if k in MPCCostConfig.__dataclass_fields__}),
+        # Desired final object pose: goal XY (or an explicit point) at the
+        # target surface's real height, raised by however far the carried
+        # object's own collision geometry (not its visual mesh -- see
+        # config.py's settle_pos_scale_m comment for why that distinction
+        # keeps recurring) extends below its own reference point.
+        container_pos, _ = scene.body_pose(goal_container_body)
+        floor_fn = _support_floor_and_rim_z if place_surface == "top" else _container_floor_and_rim_z
+        floor_z, _rim_z = floor_fn(scene, goal_container_body)
+        obj_extent = scene.body_collision_extent_world(attached.object_name)
+        obj_bottom_local_z = (
+            float(obj_extent.center_offset[2] - obj_extent.half_extents[2]) if obj_extent is not None else -0.02
         )
-        ctx = MPCContext(reference=full_reference)
-        mpc.reset()
+        place_z = floor_z - obj_bottom_local_z + pcfg.drop_clearance_m
 
-        gripper_cmd = self.env.close_gripper_cmd  # still holding the object throughout transport/descent
-        for t0 in range(len(full_reference)):
-            phase = CollisionPhase.FREE_SPACE if t0 < approach_start_idx else CollisionPhase.PLACE_APPROACH
-            live_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
-            q_current = live_scene.get_qpos(self.joint_names)
-            mpc_result = mpc.step(
-                live_scene,
-                q_current,
-                ctx,
-                t0_step=t0,
-                collision_checker=checker,
-                collision_phase=phase,
-                goal_container_body=goal_container_body,
-                attached=attached,
-                replan_config=self.config.replan,
+        if goal_point_xyz is not None:
+            target_xy = np.asarray(goal_point_xyz, dtype=float)[:2]
+        else:
+            target_xy = container_pos[:2]
+        object_xyz = np.array([target_xy[0], target_xy[1], place_z])
+
+        object_quat_now = scene.body_pose(attached.object_name)[1]
+        place_hand_pos, place_hand_quat = required_hand_pose_for_object_pose(
+            object_xyz, object_quat_now, attached.grasp_transform_hand_from_object
+        )
+        place_R = quat_to_rotmat_wxyz(place_hand_quat)
+
+        result = SkillResult(success=True, selected_object=attached.object_name, diagnostics={})
+        result.diagnostics["object_xyz"] = object_xyz.tolist()
+        result.diagnostics["place_hand_pos"] = place_hand_pos.tolist()
+
+        # Bounded-step descent straight to the target -- see module
+        # docstring. Deliberately closed-loop, not a precomputed linspace: a
+        # fixed schedule of waypoints assumes the arm covers ~1cm per control
+        # step, which it often doesn't (measured real per-step motion as low
+        # as 1-2mm under load) -- advancing through the schedule regardless
+        # of how far the arm actually got left the *next* waypoint further
+        # and further ahead of the real position, compounding into the exact
+        # same large, sustained-high-speed residual error (and resulting
+        # zero-contact grasp separation) this rewrite was meant to avoid.
+        # Recomputing a small step from wherever the arm *actually* is, every
+        # iteration, means the commanded action is always small regardless of
+        # how slowly or unevenly the real motion tracks it.
+        gripper_cmd = self.env.close_gripper_cmd
+        max_step_m = 0.01
+        descent_tol_m = 0.002
+        while steps < max_steps:
+            ee_pos = self.env._eef_pos(self.env.last_raw_obs)
+            to_target = place_hand_pos - ee_pos
+            dist = float(np.linalg.norm(to_target))
+            if dist <= descent_tol_m:
+                break
+            step_target = ee_pos + to_target * (min(max_step_m, dist) / dist)
+            cart_pos, cart_ori, _pos_err, _ori_err = self._servo_toward_cartesian_target(
+                step_target, place_R, pos_scale_m=0.03
             )
-            cart_pos, cart_ori = self._servo_toward_joint_target(live_scene, mpc_result.joint_command)
             self._step_env(cart_pos, cart_ori, gripper_cmd)
             steps += 1
             if step_callback is not None:
                 step_callback()
-            if steps >= max_steps:
-                break
 
-        # Settle at the true place pose before releasing -- same reasoning as
-        # the pick adapter's settle phase: the MPC's steady-state tracking lag
-        # means the reference trajectory running out doesn't guarantee the
-        # arm has actually arrived, and releasing early can drop the object
-        # short of (or outside) the intended spot.
-        cfg = self.config.execution
+        # Settle briefly at the true target before releasing -- the dense
+        # ramp above ends with a final waypoint equal to the target, but the
+        # arm can still be a few mm off from steady-state tracking lag.
+        exec_cfg = self.config.execution
         settle_steps = 0
         pos_err = ori_err = float("inf")
-        for _ in range(cfg.max_settle_steps):
-            live_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
-            cart_pos, cart_ori, pos_err, ori_err = self._servo_toward_joint_target_with_error(live_scene, place_q)
-            if pos_err <= cfg.settle_position_tol_m and ori_err <= cfg.settle_orientation_tol_rad:
+        for _ in range(exec_cfg.max_settle_steps):
+            cart_pos, cart_ori, pos_err, ori_err = self._servo_toward_cartesian_target(
+                place_hand_pos, place_R, pos_scale_m=exec_cfg.settle_pos_scale_m
+            )
+            if pos_err <= exec_cfg.settle_position_tol_m and ori_err <= exec_cfg.settle_orientation_tol_rad:
                 break
             self._step_env(cart_pos, cart_ori, gripper_cmd)
             steps += 1
@@ -183,7 +151,7 @@ class LiberoPlaceAdapter:
                 step_callback()
         result.diagnostics["settle"] = {
             "steps": settle_steps,
-            "converged": pos_err <= cfg.settle_position_tol_m and ori_err <= cfg.settle_orientation_tol_rad,
+            "converged": pos_err <= exec_cfg.settle_position_tol_m and ori_err <= exec_cfg.settle_orientation_tol_rad,
             "position_error_m": pos_err,
             "orientation_error_rad": ori_err,
         }
@@ -192,8 +160,9 @@ class LiberoPlaceAdapter:
         # anything downstream reads its resting pose.
         gripper_cmd = self.env.open_gripper_cmd
         for _ in range(int(self.env.close_steps) * 2):
-            live_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
-            cart_pos, cart_ori = self._servo_toward_joint_target(live_scene, place_q)
+            cart_pos, cart_ori, _pos_err, _ori_err = self._servo_toward_cartesian_target(
+                place_hand_pos, place_R, pos_scale_m=0.03
+            )
             self._step_env(cart_pos, cart_ori, gripper_cmd)
             steps += 1
             if step_callback is not None:

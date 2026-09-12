@@ -89,6 +89,7 @@ class MotionPlanner:
         target_object_body: str | None = None,
         attached: AttachedObjectState | None = None,
         goal_container_body: str | None = None,
+        permitted_contact_geom_ids: set[int] | None = None,
     ) -> MotionPlan:
         """Plan from ``start_q`` to the best-reachable of ``goal_qs`` (already
         IK-filtered by the caller -- e.g. ``PickSkill`` tries several grasp
@@ -119,6 +120,7 @@ class MotionPlanner:
                 target_object_body=target_object_body,
                 attached=attached,
                 goal_container_body=goal_container_body,
+                permitted_contact_geom_ids=permitted_contact_geom_ids,
             )
 
         start_result = _check(start_q)
@@ -164,6 +166,7 @@ class MotionPlanner:
                 target_object_body=target_object_body,
                 attached=attached,
                 goal_container_body=goal_container_body,
+                permitted_contact_geom_ids=permitted_contact_geom_ids,
             )
             if not direct.in_collision:
                 return MotionPlan(
@@ -250,6 +253,7 @@ class MotionPlanner:
                 target_object_body=target_object_body,
                 attached=attached,
                 goal_container_body=goal_container_body,
+                permitted_contact_geom_ids=permitted_contact_geom_ids,
             )
             if edge.in_collision:
                 return MotionPlan(

@@ -787,6 +787,15 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                 "detail": "transport (ompl_mpc backend) subtask has no resolvable params.goal_region",
             }
         place_surface = params.get("place_surface", "inside")
+        # For the same reason _resolve_point_goal itself needs the radius
+        # (measuring goal-clearance feasibility, see LiberoTransportAdapter's
+        # own comment on attached_sphere_infeasible_for_goal) -- re-parsed
+        # here rather than threaded through _resolve_point_goal's own return
+        # value, which intentionally only returns (surface_name, xyz).
+        point_target = self._point_target_from_goal_region(raw_goal_region)
+        goal_radius_m = params.get("goal_radius")
+        if goal_radius_m is None and point_target is not None:
+            goal_radius_m = point_target[2]
 
         motion_config = MotionConfig.from_scene_context(self.scene_context)
         adapter = LiberoTransportAdapter(env, motion_config)
@@ -798,6 +807,7 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
             step_callback=lambda: self._capture_video_frame(env),
             place_surface=place_surface,
             goal_point_xyz=goal_point_xyz,
+            goal_radius_m=goal_radius_m,
         )
         # Unlike place, transport never detaches on success -- it's still
         # holding the object at the hover pose, waiting for the following

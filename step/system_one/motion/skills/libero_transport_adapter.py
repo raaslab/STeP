@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from ..attached_object import attached_sphere_infeasible_for_goal
 from ..collision import CollisionChecker, CollisionPhase
 from ..config import MotionConfig
 from ..kinematics import IKSolver
@@ -56,14 +57,35 @@ class LiberoTransportAdapter(_ServoMixin):
         step_callback=None,
         place_surface: str = "inside",
         goal_point_xyz=None,
+        goal_radius_m: float | None = None,
     ) -> tuple[SkillResult, int]:
         scene = self._build_scene()
         goal_container_body = resolve_body_name(scene, goal_container_name)
         skill = self._build_skill(scene)
         start_q = scene.get_qpos(self.joint_names)
+        # If the carried object's own sphere approximation can never fit
+        # within the goal's own radius regardless of approach (see
+        # attached_sphere_infeasible_for_goal's own docstring for the real
+        # rollout this was measured on -- a book whose fitted spheres,
+        # ~5.7cm, can't satisfy a ~2.2cm goal clearance no matter what),
+        # stop weighing that sphere in the motion cost for this transport:
+        # continuing to fight a conflict the approximation can never resolve
+        # only produces worse tracking (a wildly wrong final settle) and
+        # risks shaking the object loose, for a conflict the real object
+        # may not even have. The real robot/gripper geometry is still
+        # checked normally either way -- only the carried object's own
+        # approximate sphere stops being treated as an obstacle.
+        ignore_attached_sphere = attached_sphere_infeasible_for_goal(attached, goal_radius_m)
+        mpc_attached = None if ignore_attached_sphere else attached
 
+        # NOTE: always the real `attached`, never `mpc_attached` -- unlike
+        # the MPC's own clearance cost below (a pure avoidance detail, safe
+        # to disable), TransportSkill.execute() needs the object's real
+        # identity/grasp transform throughout (escape_start_collision,
+        # hover-pose computation, etc.), not just for sphere-avoidance.
         plan_result = skill.execute(
-            scene, attached, goal_container_body, start_q, place_surface=place_surface, goal_point_xyz=goal_point_xyz
+            scene, attached, goal_container_body, start_q,
+            place_surface=place_surface, goal_point_xyz=goal_point_xyz,
         )
         if not plan_result.success:
             return plan_result, 0
@@ -132,7 +154,7 @@ class LiberoTransportAdapter(_ServoMixin):
                 collision_checker=checker,
                 collision_phase=CollisionPhase.FREE_SPACE,
                 goal_container_body=goal_container_body,
-                attached=attached,
+                attached=mpc_attached,
                 replan_config=self.config.replan,
             )
             cart_pos, cart_ori = self._servo_toward_joint_target(live_scene, mpc_result.joint_command)

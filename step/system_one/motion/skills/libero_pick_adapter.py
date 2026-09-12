@@ -37,7 +37,9 @@ from .grasp_generator import (
     GraspGenerator,
     ManualDeepCenterGraspGenerator,
     PrivilegedTopDownGraspGenerator,
+    _is_forced_manual_object_class,
     _is_rim_graspable_object_class,
+    manual_pose_width_feasible,
 )
 from ..kinematics import IKSolver
 from ..mpc import JointSpaceMPC, MPCContext
@@ -276,7 +278,31 @@ class LiberoPickAdapter(_ServoMixin):
         # solid material at its center for the manual pose to close on, so it
         # always needs GraspNet's real antipodal-contact search -- everything
         # else (a can, a box like cream_cheese_1/butter_1) is assigned to the
-        # manual pose exclusively, no GraspNet fallback at all.
+        # manual pose exclusively, no GraspNet fallback at all -- *unless*
+        # the manual pose's own fixed axis (non-negotiable, see
+        # ManualDeepCenterGraspGenerator's docstring) can't even physically
+        # span the object's real width at that axis (manual_pose_width_
+        # feasible), the same "elongated object grasped along its long, not
+        # short, axis" failure already documented for cream_cheese_1/
+        # butter_1, just checked here before ever committing to manual-only
+        # instead of discovered only after every manual candidate is
+        # rejected. Confirmed on a real book (STUDY_SCENE1's black_book_1,
+        # ~9.3cm at the fixed axis against an 8cm gripper): without this
+        # check it fell to manual_only, exhausted 5 manual candidates all
+        # rejected as gripper_width_incompatible, and never tried GraspNet
+        # at all -- the pick failed having never actually attempted a real
+        # grasp. Once fixed, GraspNet DID run for that book and STILL only
+        # found wider candidates (11-17cm) than the manual pose's own
+        # 9.3cm -- confirmed against a real screenshot that this book rests
+        # standing upright, not flat, so its one genuinely narrow axis (page
+        # thickness) is vertical, not horizontal, and no top-down close can
+        # ever span it. _is_forced_manual_object_class (FORCE_MANUAL_
+        # KEYWORDS) routes that object class back to manual-only despite
+        # failing the width check -- fails fast and predictably rather than
+        # burning a real GraspNet inference pass on a pose nothing currently
+        # solves; still an open problem, not a fix, for the underlying
+        # "grasp an upright book" case (a side approach, not top-down, is
+        # what it actually needs).
         #
         # This is a deliberate speed/robustness tradeoff, not an oversight:
         # GraspNet's own "closer look" recapture + the heuristic's
@@ -289,7 +315,14 @@ class LiberoPickAdapter(_ServoMixin):
         # robustness (a manual-only object with a genuinely infeasible fixed
         # pose just fails fast instead of exhausting every fallback) for a
         # large, predictable speed win on the common case.
-        manual_only = bool(body_names) and all(not _is_rim_graspable_object_class(b) for b in body_names)
+        manual_only = bool(body_names) and all(
+            not _is_rim_graspable_object_class(b)
+            and (
+                manual_pose_width_feasible(scene, b, skill.grasp_generator.gripper_max_opening_m)
+                or _is_forced_manual_object_class(b)
+            )
+            for b in body_names
+        )
 
         manual_plan_result = None
         manual_candidates: list = []
@@ -438,9 +471,31 @@ class LiberoPickAdapter(_ServoMixin):
         # see its module docstring) a short final descent from the standoff
         # point to the grasp pose; append it here, same as the OMPL-planned
         # standoff leg, at the same control rate.
+        #
+        # Two separate references, not one, and tracked as two separate MPC
+        # phases below (see _track_reference's own call sites): PickSkill's
+        # own plan is already correctly vertical for the final descent (its
+        # standoff_q/above_q/grasp_q metadata share identical XY, verified
+        # directly), but a single continuous reference handed to one
+        # continuously-running MPC does not execute that faithfully. The
+        # MPC's lookahead horizon (mpc.step's own `horizon` steps) blends
+        # across whatever boundary happens to fall within it -- confirmed via
+        # a real rollout's Cartesian trace: with one combined reference, the
+        # arm was still correcting XY toward the grasp target while Z had
+        # already dropped down to the "above" checkpoint's height, i.e. it
+        # was moving diagonally through the exact airspace directly over the
+        # object this waypoint exists to protect. A fresh mpc.reset() plus a
+        # real settle-to-convergence checkpoint between phases is what
+        # actually enforces "get square above the object, then drop
+        # straight down" -- not just handing the controller a reference that
+        # happens to visit those points in order.
         approach_positions = np.asarray(plan_result.planned_trajectory.metadata["approach_positions"])
-        full_reference = np.concatenate([traj.positions, approach_positions[1:]], axis=0)
-        approach_start_idx = len(traj.positions)
+        to_above_count = int(plan_result.planned_trajectory.metadata.get("to_above_count", 8))
+        above_q = np.asarray(plan_result.planned_trajectory.metadata["above_q"])
+        to_above_positions = approach_positions[:to_above_count]
+        above_to_grasp_positions = approach_positions[to_above_count - 1 :]
+        phase1_reference = np.concatenate([traj.positions, to_above_positions[1:]], axis=0)
+        phase1_approach_start_idx = len(traj.positions)
 
         checker = skill.collision_checker
         # NOTE: real obstacle spheres (build_static_obstacle_spheres in
@@ -456,133 +511,206 @@ class LiberoPickAdapter(_ServoMixin):
         # specifically, but the mechanism and risk are identical, so this
         # stays off until the handoff itself is made robust to it (e.g. an
         # explicit settle-to-standoff checkpoint before the final descent).
-        mpc = JointSpaceMPC(
-            self.joint_names,
-            self.ee_site,
-            horizon=int(self.config.mpc.get("horizon", 16)),
-            cost_config=MPCCostConfig(**{k: v for k, v in self.config.mpc.items() if k in MPCCostConfig.__dataclass_fields__}),
-        )
-        ctx = MPCContext(reference=full_reference)
-        mpc.reset()
-
-        # Track the planned reference, then -- still under the *same*
-        # collision-aware MPC, not a separate blind servo -- keep holding at
-        # its final waypoint (mpc.py clamps t0_step past the reference's end,
-        # see JointSpaceMPC._cost_and_grad's `ridx`) until the arm actually
-        # converges on the true grasp pose.
-        #
-        # An earlier version stopped calling the MPC the moment the nominal
-        # reference was exhausted and handed the rest of the job to a
-        # separate `_settle_toward_grasp_pose` helper: a plain Cartesian
-        # P-servo with *no collision awareness at all*. That was fine as long
-        # as the reference's time-parameterized duration closely matched how
-        # fast the real Cartesian-delta controller could actually track it --
-        # but measured on a real run, the arm was still 4.7cm / 16 degrees
-        # from the grasp pose the moment the reference ran out (the
-        # time-parameterizer's velocity-limit-based duration estimate doesn't
-        # account for the real controller's tracking dynamics). Handing a gap
-        # that large to a collision-blind servo is exactly what let the
-        # gripper collide with the object while still mid-rotation instead of
-        # cleanly finishing its approach. Continuing the same MPC loop keeps
-        # every remaining step collision-checked.
         cfg = self.config.execution
-        max_hold_steps = max_steps if max_steps is not None else len(full_reference) + cfg.max_settle_steps
-        tracking_budget = min(max_hold_steps, len(full_reference) + cfg.max_settle_steps)
-
         steps = pre_steps
         gripper_cmd = self.env.open_gripper_cmd
-        pos_err = ori_err = float("inf")
-        converged = False
-        stalled = False
-        recent_pos_errs: list[float] = []
-        t0 = 0
-        while t0 < tracking_budget:
-            phase = CollisionPhase.FREE_SPACE if t0 < approach_start_idx else CollisionPhase.TERMINAL_APPROACH
-            live_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
-            q_current = live_scene.get_qpos(self.joint_names)
-            mpc_result = mpc.step(
-                live_scene,
-                q_current,
-                ctx,
-                t0_step=t0,
-                collision_checker=checker,
-                collision_phase=phase,
-                target_object_body=object_body_name,
-                replan_config=self.config.replan,
+
+        def _track_and_settle(reference, approach_start_idx, target_pos, target_quat, phase_label, abort_on_stall=True):
+            # Track `reference` via a *fresh* MPC (its own mpc.reset(), its
+            # own lookahead window that starts at index 0 of this segment
+            # only), then -- still under the same collision-aware MPC, not a
+            # separate blind servo -- keep holding at the final waypoint
+            # (mpc.py clamps t0_step past the reference's end, see
+            # JointSpaceMPC._cost_and_grad's `ridx`) until the arm actually
+            # converges on `target_pos`/`target_quat`.
+            #
+            # An earlier version stopped calling the MPC the moment the
+            # nominal reference was exhausted and handed the rest of the job
+            # to a separate `_settle_toward_grasp_pose` helper: a plain
+            # Cartesian P-servo with *no collision awareness at all*. That was
+            # fine as long as the reference's time-parameterized duration
+            # closely matched how fast the real Cartesian-delta controller
+            # could actually track it -- but measured on a real run, the arm
+            # was still 4.7cm / 16 degrees from the grasp pose the moment the
+            # reference ran out (the time-parameterizer's velocity-limit-based
+            # duration estimate doesn't account for the real controller's
+            # tracking dynamics). Handing a gap that large to a
+            # collision-blind servo is exactly what let the gripper collide
+            # with the object while still mid-rotation instead of cleanly
+            # finishing its approach. Continuing the same MPC loop keeps every
+            # remaining step collision-checked.
+            nonlocal steps
+            mpc = JointSpaceMPC(
+                self.joint_names,
+                self.ee_site,
+                horizon=int(self.config.mpc.get("horizon", 16)),
+                cost_config=MPCCostConfig(
+                    **{k: v for k, v in self.config.mpc.items() if k in MPCCostConfig.__dataclass_fields__}
+                ),
             )
-            cart_pos, cart_ori = self._servo_toward_joint_target(live_scene, mpc_result.joint_command)
-            self._step_env(cart_pos, cart_ori, gripper_cmd)
-            steps += 1
-            t0 += 1
-            if step_callback is not None:
-                step_callback()
-            if steps >= max_steps:
-                break
+            ctx = MPCContext(reference=reference)
+            mpc.reset()
+            max_hold_steps = max_steps if max_steps is not None else len(reference) + cfg.max_settle_steps
+            tracking_budget = min(max_hold_steps, len(reference) + cfg.max_settle_steps)
 
-            if t0 >= len(full_reference):
-                _, _, pos_err, ori_err = self._servo_toward_cartesian_pose(cand.grasp_position, cand.grasp_quat_wxyz)
-                if pos_err <= cfg.settle_position_tol_m and ori_err <= cfg.settle_orientation_tol_rad:
-                    converged = True
-                    break
-                recent_pos_errs.append(pos_err)
-                if is_settle_stalled(recent_pos_errs, cfg.stall_window_steps, cfg.stall_position_tol_m):
-                    # Not getting any closer -- see LiberoOpenDrawerAdapter's
-                    # identical check for why continuing to hunt at full
-                    # reactive gain against a target it can't reach any
-                    # closer to (almost always a real contact boundary) is
-                    # pointless and visibly looks like the gripper
-                    # repeatedly bumping and retrying.
-                    stalled = True
-                    # But *which* boundary it stalled against matters: this
-                    # check was written assuming that boundary is always the
-                    # intended grasp target, and unconditionally proceeds to
-                    # close the gripper either way. Confirmed via a real
-                    # rollout it is not always true -- a stalled settle can
-                    # be resting against a *neighboring* object instead (the
-                    # milk carton next to this exact can), sustained contact
-                    # (100+ steps, several mm of real penetration) the whole
-                    # time, not the can at all. Closing the gripper there
-                    # doesn't produce a grasp; it just holds that position
-                    # until _is_grasped() reports the obvious False --
-                    # cheaper and clearer to catch here, by name, than to
-                    # let the close-dwell run first and report a generic
-                    # "gripper closed but _is_grasped() reported False".
-                    stall_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
-                    target_geom_ids = set(stall_scene.body_geom_ids(object_body_name))
-                    bad_contacts = real_nonpermitted_contacts(stall_scene, checker, phase, object_body_name)
-                    # Ignore grazes smaller than WRONG_OBSTACLE_GRAZE_TOLERANCE_M:
-                    # this check is about a *sustained, real* contact against
-                    # a neighbor (confirmed against the milk-carton case --
-                    # several mm of penetration, 100+ steps), not sub-mm
-                    # meshing noise. Confirmed against a real butter_1
-                    # rollout: a -0.00015m (0.15mm) palm graze against
-                    # tomato_sauce_1 -- 30x smaller than this pipeline's own
-                    # self_margin_m (0.005) -- was tripping this exact check
-                    # and failing an otherwise-clean pick outright.
-                    wrong_obstacle_contacts = [
-                        c for c in bad_contacts
-                        if stall_scene.geom_id(c[0]) not in target_geom_ids
-                        and stall_scene.geom_id(c[1]) not in target_geom_ids
-                        and c[2] < -WRONG_OBSTACLE_GRAZE_TOLERANCE_M
-                    ]
-                    if wrong_obstacle_contacts:
-                        plan_result.success = False
-                        plan_result.failure_reason = SkillFailureReason.EXECUTION_FAILED
-                        plan_result.diagnostics["detail"] = (
-                            "settle stalled against a different object, not the intended grasp target"
-                        )
-                        plan_result.diagnostics["wrong_obstacle_contacts"] = wrong_obstacle_contacts[:10]
-                        return plan_result, steps, None
+            pos_err = ori_err = float("inf")
+            converged = False
+            stalled = False
+            wrong_obstacle_contacts = None
+            recent_pos_errs: list[float] = []
+            t0 = 0
+            phase = CollisionPhase.FREE_SPACE
+            while t0 < tracking_budget:
+                phase = CollisionPhase.FREE_SPACE if t0 < approach_start_idx else CollisionPhase.TERMINAL_APPROACH
+                live_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
+                q_current = live_scene.get_qpos(self.joint_names)
+                mpc_result = mpc.step(
+                    live_scene,
+                    q_current,
+                    ctx,
+                    t0_step=t0,
+                    collision_checker=checker,
+                    collision_phase=phase,
+                    target_object_body=object_body_name,
+                    replan_config=self.config.replan,
+                )
+                cart_pos, cart_ori = self._servo_toward_joint_target(live_scene, mpc_result.joint_command)
+                self._step_env(cart_pos, cart_ori, gripper_cmd)
+                steps += 1
+                t0 += 1
+                if step_callback is not None:
+                    step_callback()
+                if steps >= max_steps:
                     break
 
-        settle_steps = max(0, t0 - len(full_reference))
-        plan_result.diagnostics["settle"] = {
-            "steps": settle_steps,
-            "stalled": stalled,
-            "converged": converged,
-            "position_error_m": pos_err,
-            "orientation_error_rad": ori_err,
-        }
+                if t0 >= len(reference):
+                    _, _, pos_err, ori_err = self._servo_toward_cartesian_pose(target_pos, target_quat)
+                    if pos_err <= cfg.settle_position_tol_m and ori_err <= cfg.settle_orientation_tol_rad:
+                        converged = True
+                        break
+                    recent_pos_errs.append(pos_err)
+                    if is_settle_stalled(recent_pos_errs, cfg.stall_window_steps, cfg.stall_position_tol_m):
+                        # Not getting any closer -- see LiberoOpenDrawerAdapter's
+                        # identical check for why continuing to hunt at full
+                        # reactive gain against a target it can't reach any
+                        # closer to (almost always a real contact boundary) is
+                        # pointless and visibly looks like the gripper
+                        # repeatedly bumping and retrying. Still checked (and
+                        # still aborts) even when abort_on_stall=False: a real
+                        # obstacle is dangerous regardless of which phase hit
+                        # it. What abort_on_stall=False actually skips is only
+                        # the "no wrong-obstacle contact, so just give up
+                        # anyway" branch further below -- see there for why.
+                        stalled = True
+                        # But *which* boundary it stalled against matters: this
+                        # check was written assuming that boundary is always the
+                        # intended grasp target, and unconditionally proceeds to
+                        # close the gripper either way. Confirmed via a real
+                        # rollout it is not always true -- a stalled settle can
+                        # be resting against a *neighboring* object instead (the
+                        # milk carton next to this exact can), sustained contact
+                        # (100+ steps, several mm of real penetration) the whole
+                        # time, not the can at all. Closing the gripper there
+                        # doesn't produce a grasp; it just holds that position
+                        # until _is_grasped() reports the obvious False --
+                        # cheaper and clearer to catch here, by name, than to
+                        # let the close-dwell run first and report a generic
+                        # "gripper closed but _is_grasped() reported False".
+                        stall_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
+                        target_geom_ids = set(stall_scene.body_geom_ids(object_body_name))
+                        bad_contacts = real_nonpermitted_contacts(stall_scene, checker, phase, object_body_name)
+                        # Ignore grazes smaller than WRONG_OBSTACLE_GRAZE_TOLERANCE_M:
+                        # this check is about a *sustained, real* contact against
+                        # a neighbor (confirmed against the milk-carton case --
+                        # several mm of penetration, 100+ steps), not sub-mm
+                        # meshing noise. Confirmed against a real butter_1
+                        # rollout: a -0.00015m (0.15mm) palm graze against
+                        # tomato_sauce_1 -- 30x smaller than this pipeline's own
+                        # self_margin_m (0.005) -- was tripping this exact check
+                        # and failing an otherwise-clean pick outright.
+                        wrong_obstacle_contacts = [
+                            c for c in bad_contacts
+                            if stall_scene.geom_id(c[0]) not in target_geom_ids
+                            and stall_scene.geom_id(c[1]) not in target_geom_ids
+                            and c[2] < -WRONG_OBSTACLE_GRAZE_TOLERANCE_M
+                        ]
+                        if wrong_obstacle_contacts or abort_on_stall:
+                            break
+                        # abort_on_stall=False and nothing's actually in the
+                        # way: this is phase 1 (settling to the "above"
+                        # checkpoint, open air, nothing to contact) plateauing
+                        # on ordinary tracking lag, not a real obstacle --
+                        # confirmed on a real butter_1 rollout, stalling
+                        # ~3.2cm short with zero wrong-obstacle contacts and
+                        # never closing that gap even given the full
+                        # max_settle_steps budget. Bailing out there just
+                        # handed phase 2 a wrong starting XY with no way to
+                        # correct it (its own reference is a fixed joint-space
+                        # interpolation, not a re-plan) -- confirmed by the
+                        # same rollout's descent ending measurably off-center.
+                        # Letting the loop keep running instead costs nothing
+                        # dangerous (every step remains collision-checked by
+                        # the same MPC) and phase 2's own settle-to-convergence
+                        # step, later, is what actually recovers full
+                        # precision -- confirmed: 3.16cm short here still
+                        # finished at 0.17mm from the true grasp target.
+
+            return {
+                "phase": phase_label,
+                "steps": max(0, t0 - len(reference)),
+                "stalled": stalled,
+                "converged": converged,
+                "position_error_m": pos_err,
+                "orientation_error_rad": ori_err,
+                "wrong_obstacle_contacts": wrong_obstacle_contacts,
+            }
+
+        # Phase 1: get square above the object. Pure FREE_SPACE the whole way
+        # -- no target contact expected or permitted yet -- ending with a real
+        # settle-to-convergence check against the "above" waypoint itself, not
+        # just running out of reference. This is the checkpoint that actually
+        # enforces the vertical drop below: phase 2 only ever starts once the
+        # arm is verified to be at the right XY, not merely handed a reference
+        # that visits it.
+        above_position = (
+            cand.grasp_position - self.config.grasp.approach_standoff_m * cand.approach_direction_world
+        )
+        above_settle = _track_and_settle(
+            phase1_reference,
+            phase1_approach_start_idx,
+            above_position,
+            cand.grasp_quat_wxyz,
+            "to_above",
+            abort_on_stall=False,
+        )
+        if above_settle["wrong_obstacle_contacts"]:
+            plan_result.success = False
+            plan_result.failure_reason = SkillFailureReason.EXECUTION_FAILED
+            plan_result.diagnostics["detail"] = (
+                "settle stalled against a different object, not the intended grasp target"
+            )
+            plan_result.diagnostics["wrong_obstacle_contacts"] = above_settle["wrong_obstacle_contacts"][:10]
+            plan_result.diagnostics["settle_to_above"] = above_settle
+            return plan_result, steps, None
+        plan_result.diagnostics["settle_to_above"] = above_settle
+
+        # Phase 2: the actual descent, always TERMINAL_APPROACH (contact with
+        # the target is now expected) -- and, because phase 1 just verified
+        # the arm is directly above the grasp XY, this is genuinely a
+        # straight vertical drop, not a diagonal one.
+        settle = _track_and_settle(
+            above_to_grasp_positions, 0, cand.grasp_position, cand.grasp_quat_wxyz, "to_grasp"
+        )
+        if settle["wrong_obstacle_contacts"]:
+            plan_result.success = False
+            plan_result.failure_reason = SkillFailureReason.EXECUTION_FAILED
+            plan_result.diagnostics["detail"] = (
+                "settle stalled against a different object, not the intended grasp target"
+            )
+            plan_result.diagnostics["wrong_obstacle_contacts"] = settle["wrong_obstacle_contacts"][:10]
+            plan_result.diagnostics["settle"] = settle
+            return plan_result, steps, None
+        plan_result.diagnostics["settle"] = settle
 
         # Close the gripper and dwell, continuing to servo toward the grasp
         # pose every step (not a single stale action) since the arm may still

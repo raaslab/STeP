@@ -259,7 +259,8 @@ def infer_drawer_fixtures(env: Any) -> list[dict[str, Any]]:
     if sim is None:
         return []
     try:
-        from .motion.articulation import discover_drawer_support_frames, discover_drawers
+        from .motion.articulation import discover_drawer_support_frames, discover_drawers, measure_pull_axis_and_travel
+        from .motion.config import MotionConfig
         from .motion.scene_query import SceneQuery
 
         scene = SceneQuery.from_robosuite_sim(sim)
@@ -268,6 +269,7 @@ def infer_drawer_fixtures(env: Any) -> list[dict[str, Any]]:
     except Exception:
         return []
 
+    motion_cfg = MotionConfig()
     out: list[dict[str, Any]] = []
     for d in drawers:
         name = normalize_entity_name(f"{d.level_label}_drawer")
@@ -289,6 +291,38 @@ def infer_drawer_fixtures(env: Any) -> list[dict[str, Any]]:
                 f"opening path, use {normalize_entity_name(support_frame)}'s own xy/radius in "
                 "scene_context.geometry as the cabinet position to measure distance from."
             )
+        # Live open/closed state, computed the same way OpenDrawerSkill/
+        # CloseSkill themselves judge success (DrawerConfig.
+        # open_threshold_frac / CloseConfig.close_threshold_frac) -- not
+        # just captured once at scene-authoring time, since this reads the
+        # *current* sim state, whatever task/reset left it at. Plans were
+        # measured emitting a spurious "open" subtask against a drawer that
+        # started ~91% open already (a real libero_10 task's own initial
+        # condition, not an authoring quirk) -- with nothing in the prompt
+        # ever saying so, System 2 had no way to know not to. Mirrors rule
+        # 17's existing "[Precomputed: already satisfies In(...)]" pattern,
+        # just for Opened/Closed on a fixture instead of In(...) on an
+        # object.
+        state_note = ""
+        try:
+            _, _, qpos_closed, qpos_open = measure_pull_axis_and_travel(scene, d)
+            qpos_now = float(scene.get_qpos([d.joint_name])[0])
+            denom = qpos_open - qpos_closed
+            frac_open = (qpos_now - qpos_closed) / denom if abs(denom) > 1e-9 else 0.0
+            if frac_open >= motion_cfg.drawer.open_threshold_frac:
+                state_note = (
+                    f" [Precomputed: this drawer is already {frac_open * 100:.0f}% open, which "
+                    "already satisfies Opened(...) -- do NOT emit an \"open\" subtask for it; if "
+                    "the task needs it opened, treat that as already done.]"
+                )
+            elif frac_open <= motion_cfg.close.close_threshold_frac:
+                state_note = (
+                    f" [Precomputed: this drawer is already {frac_open * 100:.0f}% open (i.e. "
+                    "closed), which already satisfies Closed(...) -- do NOT emit a \"close\" "
+                    "subtask for it; if the task needs it closed, treat that as already done.]"
+                )
+        except Exception:
+            state_note = ""
         out.append(
             {
                 "name": name,
@@ -297,7 +331,163 @@ def infer_drawer_fixtures(env: Any) -> list[dict[str, Any]]:
                 "notes": (
                     f"Auto-discovered articulated fixture (slide joint {d.joint_name!r}); "
                     "use skill=\"open\" to grasp its handle and pull it open, or skill=\"close\" "
-                    "to push it shut." + support_note
+                    "to push it shut." + support_note + state_note
+                ),
+            }
+        )
+    return out
+
+
+# Suffix convention several LIBERO turbosquid assets use for named,
+# functionally-distinct sub-regions of a container -- confirmed against
+# desk_caddy's own MJCF (assets/turbosquid_objects/desk_caddy/
+# desk_caddy_site.xml): real box-type sites named "back_contain_region",
+# "front_contain_region", "left_contain_region", "right_contain_region",
+# each with its own local pos/quat/size -- and the BDDL goal for a real
+# task (STUDY_SCENE1's "back compartment of the caddy") targets
+# "desk_caddy_1_back_contain_region" directly by that exact name.
+_NAMED_REGION_SITE_SUFFIX = "_contain_region"
+
+
+def infer_named_region_entities(env: Any) -> list[dict[str, Any]]:
+    """Discover every "_contain_region" site on every free-body object in
+    the scene and register each as its own scene entity, carrying its live,
+    exactly-measured world position and a usable placement radius in its
+    notes -- as a point-target hint (rule 6), not a resolvable body (no
+    plumbing anywhere resolves a goal_region to a site, only to a body).
+
+    Exists because these regions were previously invisible to System 2
+    entirely: nothing scanned for them, so a task like "put the book in the
+    back compartment of the caddy" left System 2 to either eyeball a point
+    target from the image (imprecise) or, worse, invent a plausible-sounding
+    but nonexistent body name for it -- confirmed via a real rollout, a
+    recalled plan referencing goal_region="back_compartment_of_caddy" (no
+    such body exists under any name) crashed the pipeline outright wherever
+    that string later reached resolve_body_name uncaught. Supplying the
+    real, precomputed coordinates removes the reason to guess or invent one.
+    """
+    sim = getattr(env, "sim", None) or getattr(getattr(env, "env", None), "sim", None)
+    if sim is None:
+        return []
+    try:
+        import mujoco
+
+        from .motion.scene_query import SceneQuery, quat_to_rotmat_wxyz
+
+        scene = SceneQuery.from_robosuite_sim(sim)
+    except Exception:
+        return []
+
+    model = scene.model
+    out: list[dict[str, Any]] = []
+    for sid in range(model.nsite):
+        site_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_SITE, sid) or ""
+        if not site_name.endswith(_NAMED_REGION_SITE_SUFFIX):
+            continue
+        bid = model.site_bodyid[sid]
+        body_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, bid) or ""
+        # The body this site sits on is an internal child frame (e.g.
+        # desk_caddy_1's own "object" sub-body, per its MJCF), not the
+        # canonical free-joint body scene_context/params refer to
+        # ("desk_caddy_1_main") -- walk up to the nearest ancestor whose own
+        # name looks like a real registered LIBERO object (ends in "_main"
+        # or has a free joint of its own) so the entity name this produces
+        # matches what the rest of the scene context already calls it.
+        root_bid = bid
+        seen = set()
+        while root_bid != 0 and root_bid not in seen:
+            seen.add(root_bid)
+            name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, root_bid) or ""
+            if name.endswith("_main"):
+                body_name = name
+                break
+            parent = int(model.body_parentid[root_bid])
+            if parent == root_bid:
+                break
+            root_bid = parent
+        canonical_object = body_name[: -len("_main")] if body_name.endswith("_main") else body_name
+        if not canonical_object:
+            continue
+
+        pos = scene.data.site_xpos[sid].copy()
+        R = scene.data.site_xmat[sid].reshape(3, 3)
+        local_half = np.asarray(model.site_size[sid], dtype=np.float64)
+        # World-frame AABB half-extent under an arbitrary rotation: standard
+        # re-projection (world_half[i] = sum_j |R[i,j]| * local_half[j]) --
+        # needed because these sites are not all axis-aligned with their
+        # parent (front_contain_region's own quat swaps its local X/Y into
+        # world Y/Z), so just reading local_half directly would silently
+        # report the wrong two axes' extents for that one.
+        world_half = np.abs(R) @ local_half
+        radius = float(min(world_half[0], world_half[1])) * 0.8
+
+        # `site_name` is already fully namespaced by robosuite's own
+        # instance-prefixing when it merges the asset into the scene (the
+        # source XML just declares name="back_contain_region"; the compiled
+        # model's real name is "desk_caddy_1_back_contain_region") -- use it
+        # directly as the entity name rather than prefixing canonical_object
+        # a second time. This also happens to exactly match the BDDL goal's
+        # own predicate naming for this region, a useful (if not load-
+        # bearing) coincidence.
+        entity_name = site_name
+        region_label = entity_name
+        if canonical_object and region_label.startswith(canonical_object + "_"):
+            region_label = region_label[len(canonical_object) + 1 :]
+        # Two cases after the prefix strip above: a genuinely distinct
+        # compartment still has its own connecting underscore before the
+        # suffix ("back_contain_region"), but a site with *no* distinguishing
+        # label at all is left as the bare suffix alone ("contain_region") --
+        # its own underscore was already consumed stripping the object
+        # prefix, so `.endswith(_NAMED_REGION_SITE_SUFFIX)` (which requires
+        # a leading "_") silently fails to match and never reduces it to ""
+        # the way it should. Strip the bare suffix too, then any leftover
+        # trailing "_", so both cases correctly converge on "" for a
+        # single/generic region.
+        if region_label.endswith(_NAMED_REGION_SITE_SUFFIX):
+            region_label = region_label[: -len(_NAMED_REGION_SITE_SUFFIX)]
+        elif region_label.endswith(_NAMED_REGION_SITE_SUFFIX.lstrip("_")):
+            region_label = region_label[: -len(_NAMED_REGION_SITE_SUFFIX.lstrip("_"))]
+        region_label = region_label.rstrip("_")
+        if not region_label:
+            # A container with one single, unnamed "contain_region" site --
+            # its own generic default interior, not one of several distinct
+            # named compartments the way desk_caddy has "front"/"back"/
+            # "left"/"right" -- isn't what this point-target hint is for.
+            # Routing every object placed into it through the exact same
+            # fixed point is fine for exactly one object, but wrong the
+            # moment a second needs to go in alongside the first: confirmed
+            # via a real libero_10 rollout (alphabet_soup_1 then
+            # tomato_sauce_1, both told to target the identical
+            # basket_1_contain_region point) -- the second transport failed
+            # outright, every hover candidate near that point colliding with
+            # the first object already resting there. The plain container
+            # body (already registered as its own "basket_1"-style entity)
+            # plus System 1's own interior-ring-search candidate generation
+            # already finds a different, unoccupied spot for each object
+            # without this -- only skip straight to the fixed point when the
+            # site name actually distinguishes a specific sub-compartment.
+            continue
+        out.append(
+            {
+                "name": entity_name,
+                "role": "support_object",
+                "aliases": sorted({entity_name, f"{canonical_object} {region_label} compartment"}),
+                "notes": (
+                    f"Auto-discovered named sub-region ({region_label!r} compartment) of "
+                    f"{canonical_object}, from its own asset's named site -- not a body, so it "
+                    "cannot be used as params.goal_region directly. To target it precisely, use "
+                    "params.goal_region={\"type\":\"point\",\"xy\":["
+                    f"{pos[0]:.4f}, {pos[1]:.4f}],\"z\":{pos[2]:.4f},\"radius\":{radius:.4f}}} "
+                    "on both transport and place -- these are the region's own real, measured "
+                    "coordinates; do not estimate your own or invent a body name for this region. "
+                    f"ALSO set params.goal_surface=\"{canonical_object}\" on both subtasks -- a point "
+                    "target on its own defaults to resting on the bare table (System 1's own "
+                    "fallback when goal_surface is unset), which is wrong here: this point sits "
+                    "well above the table, inside a compartment on top of it, so place needs "
+                    f"{canonical_object}'s own geometry, not the table's, to know how far down to "
+                    "actually lower the object -- confirmed by a real rollout that omitting this "
+                    "released the object ~20cm above where it should have settled, catching on the "
+                    "compartment's own divider wall instead of descending into the slot."
                 ),
             }
         )
@@ -413,15 +603,23 @@ def infer_table_support_entity(env: Any) -> list[dict[str, Any]]:
     if sim is None:
         return []
     try:
-        from .motion.scene_query import SceneQuery
+        from .motion.scene_query import SceneQuery, resolve_body_name
 
         scene = SceneQuery.from_robosuite_sim(sim)
-        scene.body_id("table")
+        # Not always literally named "table" -- a kitchen scene's arena
+        # does use that exact body name, but a living-room scene's is
+        # "living_room_table", a study scene's "study_table", etc. (see
+        # resolve_body_name's own "table" fallback for why/how). Resolving
+        # through it here, instead of a bare scene.body_id("table"), is
+        # what makes this entity -- and every point-target place that
+        # defaults to it as a supporting surface -- actually exist outside
+        # kitchen scenes at all.
+        table_body = resolve_body_name(scene, "table")
     except Exception:
         return []
 
-    pos, _ = scene.body_pose("table")
-    extent = scene.body_extent_world("table")
+    pos, _ = scene.body_pose(table_body)
+    extent = scene.body_extent_world(table_body)
     top_z = float(pos[2] + extent.center_offset[2] + extent.half_extents[2]) if extent is not None else float(pos[2])
     radius = float(max(extent.half_extents[0], extent.half_extents[1])) if extent is not None else 0.3
     return [
@@ -445,12 +643,112 @@ def infer_table_support_entity(env: Any) -> list[dict[str, Any]]:
     ]
 
 
+def infer_stove_fixtures(env: Any) -> list[dict[str, Any]]:
+    """Register each stove/burner fixture (discovered the same way
+    ``discover_knobs`` finds its turn-on target -- by hinge joint, not by
+    name) as a resolvable ``support_object`` entity, so "turn on the stove
+    and put the moka pot on it" has one real name to reference for *both*
+    the turn_on target and the place/transport goal.
+
+    Without this, a stove is invisible to System 2 -- it never appears in
+    ``infer_objects_from_obs`` (LIBERO only emits `<name>_pos`/`_quat` obs
+    keys for movable ``env.objects_dict`` members, never fixtures) and
+    ``infer_objects_from_mujoco``'s own body-name filter excludes it too
+    (``flat_stove_1_base`` matches the "base" exclusion). Confirmed directly
+    on a real libero_10 rollout: with no stove entity to reference, System 2
+    picked the only other object in the scene wide of the mark instead
+    (`chefmate_8_frypan_1`, a frypan sharing the table) for *both*
+    params.object on the turn_on subtask and params.goal_region on the
+    place -- turn_on still worked by luck (resolve_knob falls back to "the
+    only knob available" when a name doesn't match anything), but the moka
+    pot ended up placed on the frypan instead of the stove, which has no
+    equivalent silent-fallback rescue.
+    """
+    sim = getattr(env, "sim", None) or getattr(getattr(env, "env", None), "sim", None)
+    if sim is None:
+        return []
+    try:
+        from .motion.articulation import discover_knobs
+        from .motion.scene_query import SceneQuery, resolve_body_name
+
+        scene = SceneQuery.from_robosuite_sim(sim)
+        knobs = discover_knobs(scene)
+    except Exception:
+        return []
+
+    out: list[dict[str, Any]] = []
+    seen_names: set[str] = set()
+    for knob in knobs:
+        # The knob body itself (LIBERO names it "button") is a small part
+        # deep in the fixture, not representative of the stove's own
+        # footprint/top surface -- strip the known knob-part suffix to get
+        # back to the fixture's own canonical name (e.g.
+        # "flat_stove_1_button" -> "flat_stove_1"), then resolve *that*
+        # to its real geometry-owning body the same way any other object
+        # would be (the "_main" convention), rather than trusting the
+        # knob's own position as a stand-in for the whole fixture.
+        base = normalize_entity_name(knob.knob_body)
+        for suffix in ("_button", "_knob", "_dial", "_switch"):
+            if base.endswith(suffix):
+                base = base[: -len(suffix)]
+                break
+        if base in seen_names:
+            continue
+        # resolve_body_name already prefers "_burner" over "_main" for
+        # exactly this reason: the burner's own collision top (0.9305) sits
+        # *below* the outer frame's (0.955) -- a burner recessed slightly
+        # into the stovetop, not level with it. Using the frame's height (or
+        # its xy -- confirmed 0.15m away from the burner's, a completely
+        # different local position) as "where a pot rests" aimed the
+        # hover/place pose at the wrong spot entirely, and every candidate
+        # near it collided with the real burner/frame geometry (confirmed:
+        # hover_pose_in_collision at nearly every one of 124 tried offsets).
+        try:
+            surface_body = resolve_body_name(scene, base)
+        except KeyError:
+            surface_body = knob.knob_body
+        pos, _ = scene.body_pose(surface_body)
+        # Collision-only, not the merged visual+collision extent: the two
+        # can disagree (confirmed elsewhere this session for both
+        # ContactGraspNetGenerator's height clamp and this same asset's own
+        # main/frame body, whose visual mesh top sits ~1cm above its real
+        # collision top) -- and it's the collision geometry a placed object
+        # actually rests against.
+        extent = scene.body_collision_extent_world(surface_body)
+        top_z = float(pos[2] + extent.center_offset[2] + extent.half_extents[2]) if extent is not None else float(pos[2])
+        radius = float(max(extent.half_extents[0], extent.half_extents[1])) if extent is not None else 0.15
+        seen_names.add(base)
+        out.append(
+            {
+                "name": base,
+                "role": "support_object",
+                "aliases": sorted({base, base.replace("_", " ")}),
+                "notes": (
+                    "Auto-discovered stove/burner fixture. Use this same entity for both: "
+                    "(1) skill=\"turn_on\" with params.object naming it, to rotate its knob; "
+                    'and (2) params.goal_region on transport/place with params.place_surface='
+                    '"top", to set something down on its cooking surface. Do not substitute '
+                    "any other object in the scene for either use."
+                ),
+                "_geometry": {
+                    "xy": [float(pos[0]), float(pos[1])],
+                    "xyz": [float(pos[0]), float(pos[1]), top_z],
+                    "z": top_z,
+                    "radius": radius,
+                },
+            }
+        )
+    return out
+
+
 def merge_drawer_fixtures_into_scene_context(scene_context: dict[str, Any], env: Any) -> dict[str, Any]:
     """Append discovered drawer/cabinet entities (see ``infer_drawer_fixtures``),
     their cabinets' own static frame bodies (see
-    ``infer_cabinet_support_entities``), and the scene's own tabletop (see
-    ``infer_table_support_entity``) into ``scene_context["entities"]``,
-    skipping any name already present. A plain drawer/cabinet-level entity
+    ``infer_cabinet_support_entities``), the scene's own tabletop (see
+    ``infer_table_support_entity``), and any named sub-region sites like a
+    caddy's own compartments (see ``infer_named_region_entities``) into
+    ``scene_context["entities"]``, skipping any name already present. A
+    plain drawer/cabinet-level entity
     has no meaningful single xyz/geometry entry to add -- its entity record
     (name/role/aliases) is enough for System 2 to reference it by name and
     for ``resolve_drawer``/``resolve_body_name`` to look it up again from the
@@ -467,7 +765,13 @@ def merge_drawer_fixtures_into_scene_context(scene_context: dict[str, Any], env:
     geometry = updated.setdefault("geometry", {})
     existing_names = {e.get("name") for e in entities if e.get("name")}
     cabinets_with_drawers: list[tuple[str, list[str]]] = []
-    for entity in infer_drawer_fixtures(env) + infer_cabinet_support_entities(env) + infer_table_support_entity(env):
+    for entity in (
+        infer_drawer_fixtures(env)
+        + infer_cabinet_support_entities(env)
+        + infer_table_support_entity(env)
+        + infer_stove_fixtures(env)
+        + infer_named_region_entities(env)
+    ):
         entity = dict(entity)
         entity_geometry = entity.pop("_geometry", None)
         owned_drawers = entity.pop("_owned_drawers", None)
@@ -704,10 +1008,21 @@ def update_scene_context_from_objects(
     )
     updated.setdefault("coordinate_convention", {})
     updated["coordinate_convention"].setdefault("frame", "LIBERO/robosuite world xy")
-    updated["coordinate_convention"].setdefault("left", "-x")
-    updated["coordinate_convention"].setdefault("right", "+x")
-    updated["coordinate_convention"].setdefault("front", "+y")
-    updated["coordinate_convention"].setdefault("back", "-y")
+    # Derived from the "agentview" camera's own real extrinsics (the camera
+    # System 2's scene image is rendered from), not assumed -- its image-
+    # "right" direction is exactly world +y, and its image-"up"/away-from-
+    # camera direction is mostly world -x (cam_xmat columns: local x = image
+    # right, local y = image up, -local z = viewing direction). Previously
+    # had x and y's roles swapped (claimed left/right = x, front/back = y),
+    # which silently sent every "place it to the right of X" a quarter-turn
+    # off -- confirmed on a real rollout: told to put the chocolate pudding
+    # "to the right of the plate", the LLM correctly followed the (wrong)
+    # convention and moved +x relative to the plate, which the real camera
+    # geometry above shows lands *in front of* the plate, not to its side.
+    updated["coordinate_convention"].setdefault("left", "-y")
+    updated["coordinate_convention"].setdefault("right", "+y")
+    updated["coordinate_convention"].setdefault("front", "+x")
+    updated["coordinate_convention"].setdefault("back", "-x")
     updated["coordinate_convention"].setdefault("offset_units", "meters")
     return updated
 

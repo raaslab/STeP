@@ -280,12 +280,33 @@ class PlaceSkill:
         container_extent = scene.body_collision_extent_world(goal_container_body)
         if container_extent is None:
             return []
-        obj_extent = scene.body_extent_world(attached.object_name)
+        obj_extent = scene.body_collision_extent_world(attached.object_name)
         obj_half_h = float(obj_extent.half_extents[2]) if obj_extent is not None else 0.02
+        # How far the object's real collision geometry extends below its own
+        # reference point (body origin). half_extents alone is wrong here
+        # whenever the collision box's center_offset isn't zero (true for
+        # moka_pot_1: its box center sits 0.98cm above the body origin),
+        # since it silently assumes the origin is at the object's vertical
+        # center. Confirmed against moka_pot_1: this assumption alone
+        # accounted for essentially the entire 11.45cm "released too high"
+        # gap the user reported (predicted target 1.0449m vs. the real
+        # burner top 0.9305m, matching the observed bug almost exactly).
+        #
+        # Deliberately the tight AABB bound here, not the fitted-sphere
+        # bound _score_candidate's hover fix uses: a sphere's radius mixes
+        # in lateral (XY) spread, so for a laterally-asymmetric shape like
+        # a handled pot, center_z - radius overshoots well past the box's
+        # true bottom (measured 10.85cm below origin for moka_pot_1, vs.
+        # the AABB's exact 6.61cm) -- fine for a hover margin that should
+        # err generous, but it makes the release itself even higher than
+        # this bug already was. The AABB's Z-extent is exact (not a
+        # conservative approximation), which is what a tight release height
+        # needs.
+        obj_bottom_local_z = float(obj_extent.center_offset[2] - obj_extent.half_extents[2]) if obj_extent is not None else -obj_half_h
 
         floor_fn = _support_floor_and_rim_z if place_surface == "top" else _container_floor_and_rim_z
         floor_z, rim_z = floor_fn(scene, goal_container_body)
-        place_z = floor_z + obj_half_h + cfg.drop_clearance_m
+        place_z = floor_z - obj_bottom_local_z + cfg.drop_clearance_m
 
         # An explicit point goal names the exact spot to set the object down
         # on; only its XY is taken, since the resting height is better
@@ -365,7 +386,7 @@ class PlaceSkill:
         if place_surface != "top":
             obj_height_m = 2.0 * obj_half_h
             for level in range(1, 4):
-                drop_z = rim_z + obj_half_h + cfg.drop_clearance_m + (level - 1) * obj_height_m
+                drop_z = rim_z - obj_bottom_local_z + cfg.drop_clearance_m + (level - 1) * obj_height_m
                 candidates.append(np.array([container_pos[0], container_pos[1], drop_z]))
 
         return candidates
@@ -398,7 +419,30 @@ class PlaceSkill:
         # "descent" from hover to place go *up* instead of down. Anchoring
         # hover to whichever is higher keeps the approach a real descent for
         # every candidate this method is ever called with.
-        hover_z = max(rim_top_z + cfg.hover_clearance_m, float(object_xyz[2]) + cfg.hover_clearance_m)
+        # hover_clearance_m alone measures from the object's own reference
+        # point (its body origin), not from whichever part of its real
+        # collision geometry actually hangs lowest below that point -- wrong
+        # whenever the two aren't close, which is common for a handle-grasped
+        # object whose body origin sits well above its own base. Confirmed
+        # against the real moka_pot_1 asset: its lowest fitted collision
+        # sphere reaches 10.85cm below the body origin, so a flat 6cm
+        # clearance above the target surface still left the pot's real base
+        # ~1.8cm *below* the table -- rejected every hover candidate as
+        # hover_pose_in_collision against the table, even though the
+        # candidate's own xy was correctly centered on the goal. Extending
+        # clearance by however far the object's own geometry overhangs its
+        # reference point fixes this without touching the reference point
+        # itself (used unchanged everywhere else -- IK, the final place pose,
+        # the descent path).
+        lowest_local_z = min(
+            (float(center[2]) - float(radius) for center, radius in attached.collision_spheres_object_frame),
+            default=0.0,
+        )
+        overhang_m = max(0.0, -lowest_local_z)
+        hover_z = max(
+            rim_top_z + cfg.hover_clearance_m + overhang_m,
+            float(object_xyz[2]) + cfg.hover_clearance_m + overhang_m,
+        )
         hover_xyz = np.array([object_xyz[0], object_xyz[1], hover_z])
 
         hover_hand_pos, hover_hand_quat = required_hand_pose_for_object_pose(

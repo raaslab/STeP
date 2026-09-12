@@ -50,7 +50,7 @@ class LiberoManipulationEnv(BaseManipulationEnv):
         *,
         scene_context: dict[str, Any],
         mode: str = "top",
-        horizon: int = 600,
+        horizon: int | None = None,
         has_renderer: bool = False,
         camera_name: str = "agentview",
         camera_height: int = 128,
@@ -80,7 +80,26 @@ class LiberoManipulationEnv(BaseManipulationEnv):
         self.camera_name = str(self.libero_cfg.get("camera_name", camera_name))
         self.camera_height = int(self.libero_cfg.get("camera_height", self.libero_cfg.get("camera_heights", camera_height)))
         self.camera_width = int(self.libero_cfg.get("camera_width", self.libero_cfg.get("camera_widths", camera_width)))
-        self.horizon = int(self.libero_cfg.get("horizon", horizon))
+        # Constructor argument wins, not scene_context's stored value -- unlike
+        # camera_name/camera_height/width just above, which really are fixed
+        # properties of how this scene was captured, "horizon" is an
+        # execution-time resource budget that depends on how many subtasks are
+        # about to run, computed fresh per invocation by
+        # System1Executor._computed_env_horizon and passed in explicitly via
+        # env_factory.make_env_from_scene_context. Confirmed as a real bug on
+        # a 6-subtask libero_10 task: scene_context had a stale
+        # platform.libero.horizon=600 baked in from scene capture (a value
+        # meaningless for execution), which silently overrode a freshly
+        # computed horizon of 1600 -- the env's internal step limit hit midway
+        # through the task, after which every further env.step() silently
+        # no-oped (info={"episode_already_terminated": True}) while success
+        # checks based on latched/cached state kept reporting the *following*
+        # transport/place subtasks as succeeding, even though nothing physical
+        # was happening anymore. Falls back to the scene_context value only
+        # for callers that never computed one -- e.g. this class's own
+        # snapshot_scene_context/capture_initial_scene_image, which construct
+        # a throwaway env for a single reset and don't pass horizon at all.
+        self.horizon = int(horizon if horizon is not None else self.libero_cfg.get("horizon", 600))
         self._task_info = load_libero_task_from_scene_context(self.scene_context)
         if not self._task_info.bddl_file:
             raise ValueError(
@@ -95,6 +114,21 @@ class LiberoManipulationEnv(BaseManipulationEnv):
             "bddl_file_name": self._task_info.bddl_file,
             "camera_heights": self.camera_height,
             "camera_widths": self.camera_width,
+            # self.horizon above is otherwise pure bookkeeping: LIBERO's own
+            # bddl_base_domain.py takes its own "horizon" kwarg (default
+            # 1000) and enforces it independently inside the underlying
+            # robosuite env, with no knowledge of this wrapper's value at all.
+            # Never passing it through here meant every multi-subtask task
+            # was actually bounded by LIBERO's fixed default, not whatever
+            # System1Executor._computed_env_horizon decided was needed --
+            # confirmed on a real 6-subtask libero_10 run, where the
+            # underlying env silently began no-oping every step
+            # (info={"episode_already_terminated": True}) right around
+            # cumulative step 1000, mid-way through the second object's pick.
+            # Every env.step() after that point still returns without error,
+            # so downstream code kept reporting later subtasks as succeeding
+            # from stale/latched state while nothing physical was happening.
+            "horizon": self.horizon,
         }
         camera_names = self.libero_cfg.get("camera_names")
         if camera_names is not None:

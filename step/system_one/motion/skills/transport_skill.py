@@ -174,6 +174,29 @@ class TransportSkill:
                     theta = 2.0 * np.pi * i / n_ring
                     xy_offsets.append(interior_half_xy * np.array([np.cos(theta), np.sin(theta)]))
 
+        # hover_clearance_m alone measures from the object's own reference
+        # point (its body origin), not from whichever part of its real
+        # collision geometry hangs lowest below that point -- wrong whenever
+        # the two aren't close, which is common for a handle-grasped object
+        # whose body origin sits well above its own base. Confirmed against
+        # the real moka_pot_1 asset: its lowest fitted collision sphere
+        # reaches 10.85cm below the body origin, so a flat 6cm clearance
+        # above the goal surface still left the pot's real base ~1.8cm
+        # *below* the table -- rejected every hover candidate as
+        # in_collision:table, even ones correctly centered in xy on the
+        # actual goal. Extending clearance by however far the object's own
+        # geometry overhangs its reference point fixes this without
+        # touching the reference point itself (used unchanged for the final
+        # place pose and everything else). See PlaceSkill's identical fix
+        # for the same reasoning in more detail.
+        overhang_m = max(
+            0.0,
+            -min(
+                (float(center[2]) - float(radius) for center, radius in attached.collision_spheres_object_frame),
+                default=0.0,
+            ),
+        )
+
         lo, hi = scene.joint_qpos_range(self.ik_solver.joint_names)
         hover_ik = None
         hover_xyz = hover_hand_pos = hover_hand_quat = None
@@ -195,7 +218,11 @@ class TransportSkill:
             for offset in xy_offsets:
                 n_offsets_tried += 1
                 candidate_hover_xyz = np.array(
-                    [container_pos[0] + offset[0], container_pos[1] + offset[1], rim_top_z + pcfg.hover_clearance_m]
+                    [
+                        container_pos[0] + offset[0],
+                        container_pos[1] + offset[1],
+                        rim_top_z + pcfg.hover_clearance_m + overhang_m,
+                    ]
                 )
                 candidate_hover_hand_pos, candidate_hover_hand_quat = required_hand_pose_for_object_pose(
                     candidate_hover_xyz, object_quat_now, attached.grasp_transform_hand_from_object
@@ -281,7 +308,7 @@ class TransportSkill:
                         sorted(rejection_counts.items(), key=lambda kv: -kv[1])[:8]
                     ),
                     "hover_target_xy": [float(container_pos[0]), float(container_pos[1])],
-                    "hover_target_z": float(rim_top_z + pcfg.hover_clearance_m),
+                    "hover_target_z": float(rim_top_z + pcfg.hover_clearance_m + overhang_m),
                 },
             )
 

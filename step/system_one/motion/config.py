@@ -513,6 +513,31 @@ class CloseConfig:
     # closed (see close_threshold_frac) and avoids the tightest final
     # clearance entirely instead of trying to thread it.
     close_fraction_fallbacks: tuple[float, ...] = (1.0, 0.95, 0.9, 0.85, 0.75, 0.6)
+    # ``_execute_drawer_linear`` only: a fixed orientation (built from three
+    # independent rotations applied to the arm's home pose -- yaw about
+    # world +Z, then roll about the resulting local +Z/approach axis, then
+    # tilt about the resulting local +X, perpendicular to both; these three,
+    # in this order, span the full orientation space) plus a fixed height
+    # offset relative to the handle's own z. All four pinned rather than
+    # swept, tuned by hand against real physics rollouts on a real scene
+    # where an object placed inside the drawer sits at almost exactly handle
+    # height -- not the static collision check, which is measurably too
+    # conservative for this leg (see close_fraction_fallbacks's own
+    # comment). Progression (open_frac after the push; lower = more closed):
+    # yaw=0/roll=0/tilt=0/height=+2cm -> 0.456; yaw=90 -> 0.420; height=0cm
+    # (right at the handle, pushing lower than that plateaus/doesn't help
+    # further) -> 0.341; roll=270 on top of that -> 0.147 (first time under
+    # this struct's own close_threshold_frac); tilt=-30 with roll back at 0
+    # -> **0.049** -- the first value to cross LIBERO's *own* success bar
+    # (WhiteCabinet.is_close needs qpos > 0.0, i.e. open_frac < 0.0588 for
+    # this cabinet) rather than just this codebase's own more lenient
+    # threshold. scripts/tune_close_drawer.py exposes all four as CLI flags
+    # (--yaw/--roll/--tilt/--height) for exploring further without editing
+    # this file at all.
+    linear_yaws_deg: tuple[float, ...] = (90.0,)
+    linear_roll_deg: float = 0.0
+    linear_tilt_deg: float = -30.0
+    linear_height_offsets_m: tuple[float, ...] = (0.0,)
     planning_attempts: int = 3
     # Number of Cartesian waypoints FK-sampled along a microwave door's
     # swept closing arc (see articulation.measure_door_close_arc) -- each is
@@ -604,6 +629,23 @@ class ExecutionConfig:
     settle_position_tol_m: float = 0.004
     settle_orientation_tol_rad: float = 0.05
     max_settle_steps: int = 150
+    # cart_pos = clip(pos_err / settle_pos_scale_m, -1, 1): with the old
+    # hardcoded 0.03, any residual gap over 3cm saturates to a sustained
+    # max-speed command for every step until it drops below 3cm -- fine for
+    # the few-mm steady-state MPC lag this loop was designed for, but the
+    # actual residual gap handed to place's settle phase (whatever's left
+    # after the reference-tracked descent runs out) isn't reliably that
+    # small -- measured up to ~15cm in a real libero_10 moka-pot run.
+    # Sustained full-speed motion over that large a gap, while still
+    # carrying a friction-only-held, off-center (handle) grasp, was enough
+    # to physically separate the object from the gripper mid-air with zero
+    # other contact recorded -- not a weak grasp, an abrupt, uncushioned
+    # yank. A larger divisor here only widens the proportional band (it
+    # still saturates for genuinely large gaps, just fewer of them, and
+    # ramps down earlier/more gradually approaching the target); it doesn't
+    # change the converged endpoint, and max_settle_steps=150 leaves ample
+    # room to cover a larger gap at a gentler pace instead.
+    settle_pos_scale_m: float = 0.15
     # If the settle loop's position error stops improving by more than this
     # much over `stall_window_steps` consecutive steps, it's stopped
     # converging further and is instead hunting in place -- almost always

@@ -206,16 +206,48 @@ def _annotate_already_satisfied_objects(
     for object_name, goal_region in place_targets:
         if not object_name or not goal_region:
             continue
-        try:
-            object_body = resolve_body_name(scene, object_name)
-            container_body = resolve_body_name(scene, goal_region)
-        except KeyError:
-            continue
-        if object_within_container_footprint(scene, object_body, container_body) is not True:
+        # `goal_region` is not always a named entity string -- rule 6 also
+        # allows an explicit point target ({"type": "point", "xy": [...],
+        # "z": ..., "radius": ...}, e.g. "the back compartment of the
+        # caddy", which has no body of its own to resolve). Confirmed via a
+        # real recall on exactly that task: resolve_body_name got the dict
+        # itself as its `name` argument and crashed inside mujoco's own
+        # mj_name2id (a TypeError, not the KeyError already handled below)
+        # rather than just reporting this object's goal as unresolvable.
+        if isinstance(goal_region, dict):
+            try:
+                object_body = resolve_body_name(scene, object_name)
+                object_pos, _ = scene.body_pose(object_body)
+            except KeyError:
+                continue
+            xy = goal_region.get("xy")
+            z = goal_region.get("z")
+            radius = goal_region.get("radius")
+            if not isinstance(xy, (list, tuple)) or len(xy) != 2 or z is None or radius is None:
+                continue
+            dx, dy = object_pos[0] - float(xy[0]), object_pos[1] - float(xy[1])
+            within_xy = (dx * dx + dy * dy) ** 0.5 <= float(radius)
+            within_z = abs(object_pos[2] - float(z)) <= 0.10
+            if not (within_xy and within_z):
+                continue
+        elif isinstance(goal_region, str):
+            try:
+                object_body = resolve_body_name(scene, object_name)
+                container_body = resolve_body_name(scene, goal_region)
+            except KeyError:
+                continue
+            if object_within_container_footprint(scene, object_body, container_body) is not True:
+                continue
+        else:
             continue
         satisfied.append(object_name)
+        goal_desc = (
+            goal_region
+            if isinstance(goal_region, str)
+            else f"point(xy={goal_region.get('xy')}, z={goal_region.get('z')}, r={goal_region.get('radius')})"
+        )
         flag = (
-            f" [Precomputed: {object_name} already satisfies In({object_name}, {goal_region}) -- "
+            f" [Precomputed: {object_name} already satisfies In({object_name}, {goal_desc}) -- "
             "its goal is already reached. Do NOT emit any pick/transport/place subtasks for it; "
             "plan only for the remaining, not-yet-satisfied objects/subtasks.]"
         )

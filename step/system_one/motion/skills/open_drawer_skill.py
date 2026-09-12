@@ -22,6 +22,8 @@ fingers must straddle, so it must map to the *non*-closing axis).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from ..articulation import (
@@ -133,6 +135,181 @@ def handle_grasp_pose(
     return handle_pos, grasp_quat, pull_axis_world, travel_m, closing_axis_world
 
 
+@dataclass
+class DrawerHandleGraspCandidate:
+    """One accepted candidate from ``find_drawer_handle_grasp``: a reachable,
+    collision-free, closure-safe standoff->grasp pair for this drawer's
+    handle, plus the per-candidate finger/orientation parameters that varied
+    with the tilt/roll/offset that won. Shared by ``OpenDrawerSkill`` (pulls
+    +``pull_axis_world`` afterward) and ``CloseSkill``'s grasp-based drawer
+    closing (retracts -``pull_axis_world`` instead) -- identical search,
+    opposite post-grasp motion."""
+
+    standoff_ik: IKResult
+    grasp_ik: IKResult
+    tilt_rad: float
+    roll_rad: float
+    grasp_pos: np.ndarray
+    grasp_quat: np.ndarray
+    closing_axis_world: np.ndarray
+    handle_width_m: float
+    finger_closed_qpos: np.ndarray
+    approach_finger_qpos: np.ndarray
+
+
+def find_drawer_handle_grasp(
+    scene: SceneQuery,
+    drawer: DrawerHandle,
+    grasp_pos: np.ndarray,
+    pull_axis_world: np.ndarray,
+    start_q: np.ndarray,
+    ik_solver: IKSolver,
+    collision_checker: CollisionChecker,
+    cfg: "DrawerConfig",
+    edge_resolution: float,
+    rng: np.random.Generator,
+) -> tuple[DrawerHandleGraspCandidate | None, str]:
+    """Search ``cfg``'s tilt x roll x offset x standoff grid (``DrawerConfig``,
+    the same one ``OpenDrawerSkill`` tunes) for a candidate approach to this
+    drawer's handle that is IK-reachable, has a collision-free descent, and
+    survives the fingers actually closing on it. Accepts the first candidate
+    that passes all three checks (not an exhaustive best-of-all-candidates
+    search) -- extracted verbatim from ``OpenDrawerSkill.execute`` so both
+    callers search identically; see the loop body's own comments for why
+    standoff-first IK ordering, tilted approaches, and narrowed fingers all
+    matter here.
+
+    Returns ``(candidate, last_rejection)`` -- ``candidate`` is ``None`` on
+    failure, with ``last_rejection`` naming the last rejection reason seen.
+    """
+    reference_axis_world = _unit(np.cross(np.array([0.0, 0.0, 1.0]), pull_axis_world))
+    approach_plan: list[tuple] = []
+    for tilt_rad, roll_rad, (depth_off, vert_off) in (
+        (t, r, o)
+        for t in cfg.approach_tilts_rad
+        for r in cfg.approach_rolls_rad
+        for o in cfg.grasp_offsets_m
+    ):
+        approach_world = _unit(
+            -pull_axis_world * float(np.cos(tilt_rad))
+            + np.array([0.0, 0.0, -1.0]) * float(np.sin(tilt_rad))
+        )
+        tilt_quat, tilt_closing_axis = _orientation_from_approach_and_reference(
+            approach_world, _roll_about(reference_axis_world, approach_world, roll_rad)
+        )
+        tilt_width_m = estimate_handle_closing_width_m(
+            scene, drawer, pull_axis_world, tilt_closing_axis
+        )
+        tilt_half_travel = float(np.clip(tilt_width_m / 2.0, 0.0, 0.04))
+        tilt_finger_qpos = np.array([tilt_half_travel, -tilt_half_travel])
+        # Offset the aim point off the bar's exact centre: `depth_off` runs
+        # along the pull axis (negative = deeper, toward the drawer front),
+        # `vert_off` straight up/down.
+        tilt_grasp_pos = (
+            grasp_pos + pull_axis_world * float(depth_off) + np.array([0.0, 0.0, float(vert_off)])
+        )
+        # Approach with the fingers already narrowed to just wider than the
+        # handle, rather than fully open -- see OpenDrawerSkill's own module
+        # docstring/comment history for why (measured on the middle drawer:
+        # only 4.0cm of clear space above the handle, which an open gripper
+        # cannot enter).
+        tilt_approach_half = float(
+            np.clip(tilt_width_m / 2.0 + cfg.approach_finger_clearance_m, 0.0, 0.04)
+        )
+        tilt_approach_finger_qpos = np.array([tilt_approach_half, -tilt_approach_half])
+        for standoff_position in standoff_candidates(
+            tilt_grasp_pos,
+            approach_world,  # standoff_candidates wants gripper->target (see handle_grasp_pose)
+            cfg.approach_standoff_m,
+            cfg.standoff_distance_multipliers,
+            cfg.standoff_lateral_offsets_m,
+            cfg.standoff_lateral_directions,
+        ):
+            approach_plan.append(
+                (
+                    float(tilt_rad),
+                    float(roll_rad),
+                    tilt_grasp_pos,
+                    tilt_quat,
+                    tilt_closing_axis,
+                    tilt_width_m,
+                    tilt_finger_qpos,
+                    tilt_approach_finger_qpos,
+                    standoff_position,
+                )
+            )
+
+    last_rejection = "no_ik_attempted"
+    for (
+        tilt_rad,
+        roll_rad,
+        grasp_pos_candidate,
+        grasp_quat,
+        closing_axis_world,
+        handle_width_m,
+        finger_closed_qpos,
+        approach_finger_qpos,
+        standoff_position,
+    ) in approach_plan:
+        # Robust solve, not a single seed from start_q -- see
+        # OpenDrawerSkill's own comment history: solving each from start_q
+        # alone found none of 14/75 genuinely reachable+collision-free
+        # candidates, reporting "approach_standoff_ik_failed" as though the
+        # drawer were unreachable.
+        candidate_standoff_ik = _solve_ik_robust(
+            ik_solver, scene, standoff_position, grasp_quat, start_q, rng,
+            n_restarts=cfg.pose_selection_attempts,
+        )
+        if not candidate_standoff_ik.success:
+            last_rejection = "approach_standoff_ik_failed"
+            continue
+        candidate_grasp_ik = _solve_ik_robust(
+            ik_solver, scene, grasp_pos_candidate, grasp_quat, candidate_standoff_ik.q, rng,
+            n_restarts=cfg.pose_selection_attempts,
+        )
+        if not candidate_grasp_ik.success:
+            last_rejection = "grasp_ik_failed"
+            continue
+        descent_check = collision_checker.check_edge(
+            candidate_standoff_ik.q,
+            candidate_grasp_ik.q,
+            resolution=edge_resolution,
+            phase=CollisionPhase.TERMINAL_APPROACH,
+            target_object_body=drawer.drawer_body,
+        )
+        if descent_check.in_collision:
+            last_rejection = "final_descent_in_collision"
+            continue
+        # Neither the IK solve above nor `descent_check` ever move the
+        # finger joints -- they simulate the *open* gripper reaching this
+        # pose, not what happens when it actually closes. Validate that
+        # transition explicitly before accepting the candidate, rather than
+        # only ever finding out from the real gripper closing on a bad pose
+        # during execution.
+        closure_check = collision_checker.check_gripper_closure(
+            candidate_grasp_ik.q, FINGER_JOINT_NAMES, finger_closed_qpos, drawer.drawer_body
+        )
+        if closure_check.in_collision:
+            last_rejection = "gripper_closure_in_collision"
+            continue
+        return (
+            DrawerHandleGraspCandidate(
+                standoff_ik=candidate_standoff_ik,
+                grasp_ik=candidate_grasp_ik,
+                tilt_rad=tilt_rad,
+                roll_rad=roll_rad,
+                grasp_pos=grasp_pos_candidate,
+                grasp_quat=grasp_quat,
+                closing_axis_world=closing_axis_world,
+                handle_width_m=handle_width_m,
+                finger_closed_qpos=finger_closed_qpos,
+                approach_finger_qpos=approach_finger_qpos,
+            ),
+            "",
+        )
+    return None, last_rejection
+
+
 class OpenDrawerSkill:
     def __init__(
         self,
@@ -224,157 +401,24 @@ class OpenDrawerSkill:
         # descends onto the handle instead of driving through the clutter.
         # The pull afterwards is unaffected: it always follows the drawer
         # joint's own measured axis, not however the hand arrived.
-        best_grasp_ik = best_standoff_ik = None
-        last_rejection = "no_ik_attempted"
-        reference_axis_world = _unit(np.cross(np.array([0.0, 0.0, 1.0]), pull_axis_world))
-        approach_plan: list[tuple] = []
-        for tilt_rad, roll_rad, (depth_off, vert_off) in (
-            (t, r, o)
-            for t in cfg.approach_tilts_rad
-            for r in cfg.approach_rolls_rad
-            for o in cfg.grasp_offsets_m
-        ):
-            approach_world = _unit(
-                -pull_axis_world * float(np.cos(tilt_rad))
-                + np.array([0.0, 0.0, -1.0]) * float(np.sin(tilt_rad))
-            )
-            tilt_quat, tilt_closing_axis = _orientation_from_approach_and_reference(
-                approach_world, _roll_about(reference_axis_world, approach_world, roll_rad)
-            )
-            tilt_width_m = estimate_handle_closing_width_m(
-                scene, drawer, pull_axis_world, tilt_closing_axis
-            )
-            tilt_half_travel = float(np.clip(tilt_width_m / 2.0, 0.0, 0.04))
-            tilt_finger_qpos = np.array([tilt_half_travel, -tilt_half_travel])
-            # Offset the aim point off the bar's exact centre: `depth_off`
-            # runs along the pull axis (negative = deeper, toward the drawer
-            # front), `vert_off` straight up/down.
-            tilt_grasp_pos = (
-                grasp_pos + pull_axis_world * float(depth_off) + np.array([0.0, 0.0, float(vert_off)])
-            )
-            # Approach with the fingers already narrowed to just wider than
-            # the handle, rather than fully open. Opening a drawer only needs
-            # the handle to end up *between* the fingers -- the pull hooks it
-            # -- so there is nothing to gain from carrying a full 8cm span
-            # into a gap that may not have 8cm. The middle drawer's handle
-            # has a measured 4.0cm of clear space above it, which the open
-            # gripper simply cannot enter; narrowed to the handle's own
-            # thickness plus clearance it fits with room left over.
-            tilt_approach_half = float(
-                np.clip(tilt_width_m / 2.0 + cfg.approach_finger_clearance_m, 0.0, 0.04)
-            )
-            tilt_approach_finger_qpos = np.array([tilt_approach_half, -tilt_approach_half])
-            for standoff_position in standoff_candidates(
-                tilt_grasp_pos,
-                approach_world,  # standoff_candidates wants gripper->target (see handle_grasp_pose)
-                cfg.approach_standoff_m,
-                cfg.standoff_distance_multipliers,
-                cfg.standoff_lateral_offsets_m,
-                cfg.standoff_lateral_directions,
-            ):
-                approach_plan.append(
-                    (
-                        float(tilt_rad),
-                        float(roll_rad),
-                        tilt_grasp_pos,
-                        tilt_quat,
-                        tilt_closing_axis,
-                        tilt_width_m,
-                        tilt_finger_qpos,
-                        tilt_approach_finger_qpos,
-                        standoff_position,
-                    )
-                )
-
-        for (
-            tilt_rad,
-            roll_rad,
-            grasp_pos_candidate,
-            grasp_quat,
-            closing_axis_world,
-            handle_width_m,
-            finger_closed_qpos,
-            approach_finger_qpos,
-            standoff_position,
-        ) in approach_plan:
-            # Robust solve, not a single seed from start_q. This was the last
-            # place in the skill still trusting one arbitrary seed (the grasp
-            # solve below already retries), and it silently gated everything
-            # behind it: measured on the middle drawer, 14 of 75 standoff
-            # candidates are genuinely reachable *and* collision-free, but
-            # solving each from start_q alone found none of them and the
-            # skill reported "approach_standoff_ik_failed" as though the
-            # drawer were unreachable. The horizontal handle approach sits in
-            # a part of configuration space one seed reaches unreliably --
-            # the same reason the grasp solve here, and every other skill in
-            # this package, retries.
-            candidate_standoff_ik = _solve_ik_robust(
-                self.ik_solver, scene, standoff_position, grasp_quat, start_q, self._rng,
-                n_restarts=cfg.pose_selection_attempts,
-            )
-            if not candidate_standoff_ik.success:
-                last_rejection = "approach_standoff_ik_failed"
-                continue
-            candidate_grasp_ik = _solve_ik_robust(
-                self.ik_solver, scene, grasp_pos_candidate, grasp_quat, candidate_standoff_ik.q, self._rng,
-                n_restarts=cfg.pose_selection_attempts,
-            )
-            if not candidate_grasp_ik.success:
-                last_rejection = "grasp_ik_failed"
-                continue
-            descent_check = self.collision_checker.check_edge(
-                candidate_standoff_ik.q,
-                candidate_grasp_ik.q,
-                resolution=edge_resolution,
-                phase=CollisionPhase.TERMINAL_APPROACH,
-                target_object_body=drawer.drawer_body,
-            )
-            if descent_check.in_collision:
-                last_rejection = "final_descent_in_collision"
-                continue
-            # Neither the IK solve above nor `descent_check` ever move the
-            # finger joints -- they simulate the *open* gripper reaching
-            # this pose, not what happens when it actually closes. A
-            # configuration whose open-finger geometry clears the handle can
-            # still have its rigid finger segment (which reaches further
-            # than the pad) catch a neighboring part of the handle assembly
-            # (a mounting stud, say) as the fingers close. Validate that
-            # transition explicitly before accepting the candidate, rather
-            # than only ever finding out from the real gripper closing on a
-            # bad pose during execution.
-            closure_check = self.collision_checker.check_gripper_closure(
-                candidate_grasp_ik.q, FINGER_JOINT_NAMES, finger_closed_qpos, drawer.drawer_body
-            )
-            if closure_check.in_collision:
-                last_rejection = "gripper_closure_in_collision"
-                continue
-            best_grasp_ik, best_standoff_ik = candidate_grasp_ik, candidate_standoff_ik
-            # Keep the winning approach's own parameters: these vary per
-            # tilt, so the loop variables would otherwise report whichever
-            # candidate was tried last rather than the one accepted.
-            best_tilt_rad = tilt_rad
-            best_roll_rad = roll_rad
-            best_grasp_pos = grasp_pos_candidate
-            best_approach_finger_qpos = approach_finger_qpos
-            best_grasp_quat = grasp_quat
-            best_closing_axis_world = closing_axis_world
-            best_handle_width_m = handle_width_m
-            best_finger_closed_qpos = finger_closed_qpos
-            break
-
-        grasp_ik, standoff_ik = best_grasp_ik, best_standoff_ik
-        if grasp_ik is not None and standoff_ik is not None:
-            tilt_rad = best_tilt_rad
-            roll_rad = best_roll_rad
+        candidate, last_rejection = find_drawer_handle_grasp(
+            scene, drawer, grasp_pos, pull_axis_world, start_q,
+            self.ik_solver, self.collision_checker, cfg, edge_resolution, self._rng,
+        )
+        grasp_ik = standoff_ik = None
+        if candidate is not None:
+            grasp_ik, standoff_ik = candidate.grasp_ik, candidate.standoff_ik
+            tilt_rad = candidate.tilt_rad
+            roll_rad = candidate.roll_rad
             # Everything downstream -- the pull reference, the diagnostics the
             # adapter tracks -- must use the aim point that actually passed,
             # not the handle's raw centre.
-            grasp_pos = best_grasp_pos
-            approach_finger_qpos = best_approach_finger_qpos
-            grasp_quat = best_grasp_quat
-            closing_axis_world = best_closing_axis_world
-            handle_width_m = best_handle_width_m
-            finger_closed_qpos = best_finger_closed_qpos
+            grasp_pos = candidate.grasp_pos
+            approach_finger_qpos = candidate.approach_finger_qpos
+            grasp_quat = candidate.grasp_quat
+            closing_axis_world = candidate.closing_axis_world
+            handle_width_m = candidate.handle_width_m
+            finger_closed_qpos = candidate.finger_closed_qpos
         if grasp_ik is None or standoff_ik is None:
             return SkillResult(
                 success=False,

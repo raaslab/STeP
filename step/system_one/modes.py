@@ -21,6 +21,23 @@ RIM_GRASP_KEYWORDS: frozenset[str] = frozenset([
     "saucer",
 ])
 
+# Object-class substrings forced onto ManualDeepCenterGraspGenerator even
+# when manual_pose_width_feasible would otherwise exclude them (see
+# libero_pick_adapter.py's manual_only classification). Deliberately empty:
+# "book" was added here on the assumption that a real, upright-resting book
+# had no gripper-width-compatible grasp available to GraspNet at all (every
+# tried candidate came back 11-17cm against an 8cm gripper) -- but a real
+# rollout directly contradicted that: GraspNet DID find and close on a real
+# working grasp for exactly this object, which then got dropped later (a
+# transport/stage-sync bug, not a bad grasp -- see libero_pick_adapter.py's
+# own PickSkill-candidate-cap discussion). Forcing manual-only here would
+# have permanently prevented GraspNet from ever proposing that same good
+# candidate again. Kept as an empty, ready-to-use list rather than deleted
+# outright, since the underlying mechanism (skip GraspNet for an object
+# class with no real usable candidate) is still valid in general -- it was
+# just wrong for this specific class.
+FORCE_MANUAL_KEYWORDS: frozenset[str] = frozenset()
+
 
 @dataclass(frozen=True)
 class GraspMode:

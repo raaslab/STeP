@@ -252,7 +252,7 @@ class PickSkill:
         # pose itself -- a different standoff direction sweeps the forearm
         # through a different part of a cluttered scene even when aiming at
         # the identical final target.
-        standoff_ik = grasp_ik = None
+        standoff_ik = grasp_ik = above_ik = None
         last_rejection = "approach_standoff_ik_failed"
         for standoff_position in standoff_candidates(
             cand.grasp_position,
@@ -291,9 +291,60 @@ class PickSkill:
                 last_rejection = "grasp_pose_in_collision"
                 continue
 
+            # --- above-object waypoint: force the final descent to be a straight drop ---
+            # Without this, the "final descent" below is a straight joint-
+            # space interpolation from whichever standoff the search above
+            # picked directly to the grasp pose -- and a standoff needing a
+            # lateral offset to dodge some *other* obstacle produces a
+            # descent that moves down and sideways at once. That combined
+            # move isn't caught by the collision check right below it: this
+            # segment runs under TERMINAL_APPROACH, which deliberately
+            # permits contact with the target object (a pick has to touch it
+            # eventually), so an arm that clips the object's side while
+            # angling in doesn't read as a collision at all. Confirmed by a
+            # real rollout report: the arm visibly approaching diagonally and
+            # hitting the object before ever reaching the intended pose.
+            # Fixing it by construction: always pass through a point directly
+            # above the grasp (same XY, one standoff distance back along the
+            # approach direction) before ever permitting target contact, so
+            # the segment that's allowed to touch the object is a pure
+            # vertical drop, regardless of which standoff got the arm there.
+            above_position = (
+                cand.grasp_position
+                - self.config.grasp.approach_standoff_m * cand.approach_direction_world
+            )
+            candidate_above_ik = _solve_ik_robust(
+                self.ik_solver, scene, above_position, cand.grasp_quat_wxyz, candidate_standoff_ik.q, self._rng,
+                n_restarts=self.config.grasp.pose_selection_attempts,
+            )
+            if not candidate_above_ik.success:
+                last_rejection = "above_grasp_ik_failed"
+                continue
+            above_check = self.collision_checker.check(
+                candidate_above_ik.q, phase=CollisionPhase.FREE_SPACE, target_object_body=cand.object_name
+            )
+            if above_check.in_collision:
+                last_rejection = "above_grasp_in_collision"
+                continue
+
             # --- final descent segment: explicitly validated, never blindly executed ---
-            descent_check = self.collision_checker.check_edge(
+            # Split in two: standoff -> above still forbids target contact
+            # (free maneuvering, not descending yet); above -> grasp is the
+            # one segment allowed to touch the object, and it is now always a
+            # straight vertical line by construction (both endpoints share
+            # the grasp's XY).
+            approach_descent_check = self.collision_checker.check_edge(
                 candidate_standoff_ik.q,
+                candidate_above_ik.q,
+                resolution=descent_resolution,
+                phase=CollisionPhase.FREE_SPACE,
+                target_object_body=cand.object_name,
+            )
+            if approach_descent_check.in_collision:
+                last_rejection = "standoff_to_above_in_collision"
+                continue
+            descent_check = self.collision_checker.check_edge(
+                candidate_above_ik.q,
                 candidate_grasp_ik.q,
                 resolution=descent_resolution,
                 phase=CollisionPhase.TERMINAL_APPROACH,
@@ -314,7 +365,7 @@ class PickSkill:
                 last_rejection = "gripper_closure_in_collision"
                 continue
 
-            standoff_ik, grasp_ik = candidate_standoff_ik, candidate_grasp_ik
+            standoff_ik, grasp_ik, above_ik = candidate_standoff_ik, candidate_grasp_ik, candidate_above_ik
             break
 
         if standoff_ik is None or grasp_ik is None:
@@ -379,11 +430,32 @@ class PickSkill:
         # Already validated above via check_edge -- safe to hand to the
         # executor as-is (see libero_pick_adapter.py, which appends this to
         # the time-parameterized standoff leg and tracks it under
-        # TERMINAL_APPROACH).
-        approach_positions = np.linspace(standoff_ik.q, grasp_ik.q, 15)
+        # TERMINAL_APPROACH). Two legs, not one: standoff -> above (still no
+        # target contact permitted), then above -> grasp (the one segment
+        # allowed to touch the object, and always a straight vertical drop
+        # by construction -- see the above-waypoint validation above for why
+        # a single standoff->grasp interpolation let a diagonal, lateral-plus-
+        # vertical approach through uncaught).
+        to_above_count = 8
+        approach_positions = np.concatenate(
+            [
+                np.linspace(standoff_ik.q, above_ik.q, to_above_count),
+                np.linspace(above_ik.q, grasp_ik.q, 8)[1:],
+            ]
+        )
         plan.metadata["standoff_q"] = standoff_ik.q.tolist()
+        plan.metadata["above_q"] = above_ik.q.tolist()
         plan.metadata["grasp_q"] = grasp_ik.q.tolist()
         plan.metadata["approach_positions"] = approach_positions.tolist()
+        # Where approach_positions splits into its two legs (index of above_q,
+        # shared by both): the executor needs this to track them as two
+        # separate, sequential MPC phases with a real convergence check in
+        # between -- see LiberoPickAdapter.run's own comment for why a single
+        # continuous reference isn't enough (the MPC's lookahead horizon
+        # blends across the standoff->above/above->grasp boundary, so the arm
+        # can still be correcting XY while Z is already dropping toward the
+        # object -- confirmed via a real rollout's own Cartesian trace).
+        plan.metadata["to_above_count"] = to_above_count
 
         path_cost = 0.0
         if plan.geometric_path is not None and len(plan.geometric_path) > 1:

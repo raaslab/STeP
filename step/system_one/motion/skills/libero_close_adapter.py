@@ -136,17 +136,40 @@ class LiberoCloseAdapter(_ServoMixin):
             phase = CollisionPhase.FREE_SPACE if t0 < approach_start_idx else CollisionPhase.TERMINAL_APPROACH
             live_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
             q_current = live_scene.get_qpos(self.joint_names)
-            mpc_result = mpc.step(
-                live_scene,
-                q_current,
-                ctx,
-                t0_step=t0,
-                collision_checker=checker,
-                collision_phase=phase,
-                target_object_body=target_body,
-                replan_config=self.config.replan,
-            )
-            cart_pos, cart_ori = self._servo_toward_joint_target(live_scene, mpc_result.joint_command)
+            if phase == CollisionPhase.FREE_SPACE:
+                mpc_result = mpc.step(
+                    live_scene,
+                    q_current,
+                    ctx,
+                    t0_step=t0,
+                    collision_checker=checker,
+                    collision_phase=phase,
+                    target_object_body=target_body,
+                    replan_config=self.config.replan,
+                )
+                joint_target = mpc_result.joint_command
+                step_min_clearance = mpc_result.min_clearance
+                step_replan_requested = mpc_result.replan_requested
+            else:
+                # Plain joint-space tracking, no MPC optimization, once
+                # TERMINAL_APPROACH starts (descent onto and push through
+                # the fixture) -- descent and push are contact BY DESIGN,
+                # and the MPC's own cost function was measured fighting
+                # that even with collision-avoidance disabled: tracking a
+                # real predefined-point close, the whole reference stalled
+                # 11.5cm short of its final (push) target -- real, sustained
+                # contact (min_clearance -0.024m) the MPC's smoothness/
+                # effort cost apparently traded off against, rather than
+                # driving firmly through it the way a plain reference-
+                # following servo does. The planning stage (CloseSkill)
+                # already decided this point and push are the ones to use;
+                # an execution-time controller second-guessing that against
+                # its own cost function only ever produces a worse outcome.
+                ref_idx = min(t0, len(full_reference) - 1)
+                joint_target = full_reference[ref_idx]
+                step_min_clearance = float("inf")
+                step_replan_requested = False
+            cart_pos, cart_ori = self._servo_toward_joint_target(live_scene, joint_target)
             self._step_env(cart_pos, cart_ori, gripper_cmd)
             steps += 1
             t0 += 1
@@ -156,8 +179,8 @@ class LiberoCloseAdapter(_ServoMixin):
             trace.record_step(
                 t0,
                 post_scene.site_pose(self.ee_site)[0],
-                mpc_result.min_clearance,
-                mpc_result.replan_requested,
+                step_min_clearance,
+                step_replan_requested,
                 real_nonpermitted_contacts(post_scene, checker, phase, target_body, target_geom_ids),
             )
             if steps >= max_steps:

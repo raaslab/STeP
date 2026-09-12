@@ -56,7 +56,7 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
-from ...modes import RIM_GRASP_KEYWORDS
+from ...modes import FORCE_MANUAL_KEYWORDS, RIM_GRASP_KEYWORDS
 from ..config import GraspSampleConfig
 from ..scene_query import SceneQuery, quat_mul_wxyz, quat_to_rotmat_wxyz
 from ..types import GraspCandidate
@@ -94,6 +94,16 @@ def _is_rim_graspable_object_class(object_name: str) -> bool:
     genuinely hollow/thin-walled enough for a rim grasp to mean anything."""
     name = object_name.lower()
     return any(kw in name for kw in RIM_GRASP_KEYWORDS)
+
+
+def _is_forced_manual_object_class(object_name: str) -> bool:
+    """Object classes routed to ``ManualDeepCenterGraspGenerator`` even when
+    ``manual_pose_width_feasible`` reports the fixed axis infeasible -- see
+    ``FORCE_MANUAL_KEYWORDS``'s own comment for why (a class of object where
+    no generator currently available, learned or heuristic, has found a
+    gripper-width-compatible candidate at its real resting geometry)."""
+    name = object_name.lower()
+    return any(kw in name for kw in FORCE_MANUAL_KEYWORDS)
 
 
 def _object_xy_obb_world(scene: SceneQuery, object_name: str, obj_quat_wxyz: np.ndarray) -> tuple[float, float, float] | None:
@@ -655,6 +665,35 @@ class PrivilegedTopDownGraspGenerator(GraspGenerator):
         return float(np.clip(1.0 - width / self.gripper_max_opening_m, 0.0, 1.0))
 
 
+MANUAL_DEEP_CENTER_YAW_RAD = np.pi / 2.0
+
+
+def manual_pose_width_feasible(scene: SceneQuery, object_name: str, gripper_max_opening_m: float) -> bool:
+    """Whether ``ManualDeepCenterGraspGenerator``'s one fixed-yaw pose could
+    ever physically close on ``object_name`` at all, before any IK/collision
+    check runs.
+
+    The generator's own fixed axis is non-negotiable (see its class
+    docstring), so an object whose real width *at that specific axis* -- not
+    its OBB-fitted short axis, which can be a completely different,
+    narrower number for an elongated object -- already exceeds the
+    gripper's opening has no candidate this generator could ever accept,
+    regardless of how many it emits or how they're scored. Confirmed on a
+    real book (STUDY_SCENE1's black_book_1): every one of 5 manual
+    candidates was rejected as ``gripper_width_incompatible`` at ~9.3cm
+    against an 8cm gripper -- a flat, elongated object where the fixed axis
+    happens to span its long dimension, the same failure mode already
+    documented for cream_cheese_1/butter_1 in ``generate()``'s own comment,
+    just never checked for *before* committing to manual-only (see
+    ``libero_pick_adapter.py``'s own ``manual_only`` classification, which
+    this exists to correct)."""
+    obj_pos, obj_quat = scene.body_pose(object_name)
+    width = _object_width_at_yaw(scene, object_name, obj_quat, MANUAL_DEEP_CENTER_YAW_RAD)
+    if width is None:
+        return True  # unknown -- don't preemptively exclude; let the generator's own checks decide
+    return width <= gripper_max_opening_m
+
+
 class ManualDeepCenterGraspGenerator(GraspGenerator):
     """Single hardcoded top-down grasp per object: centered on the object's
     own (x, y), the fixed orientation that matches the arm's own home/resting
@@ -768,7 +807,7 @@ class ManualDeepCenterGraspGenerator(GraspGenerator):
             # switching axes: rejected candidates fail cleanly through the
             # ordinary width/collision checks below, same as any other
             # infeasible candidate.
-            manual_yaw_rad = np.pi / 2.0
+            manual_yaw_rad = MANUAL_DEEP_CENTER_YAW_RAD
             grasp_quat = quat_mul_wxyz(yaw_quat_wxyz(manual_yaw_rad), _TOP_DOWN_QUAT_WXYZ)
 
             # The width the gripper needs to span *at this specific fixed

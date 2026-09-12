@@ -308,8 +308,19 @@ class ContactGraspNetGenerator(GraspGenerator):
         #    too-high) extreme. Backing off by the same margin used for the
         #    other two thresholds gives the checker real clearance instead of
         #    sitting exactly on its own decision boundary.
+        # Collision-only, not the merged visual+collision extent used by an
+        # earlier version of this clamp: the two can disagree, and when they
+        # do it's the collision geometry that determines what the gripper can
+        # actually touch. Confirmed against the real moka_pot_1 asset: its
+        # visual mesh's own top (1.087m, from a tall rendered
+        # handle/spout) sits 3.5cm above its real collision top (1.052m).
+        # Every one of this generator's 32 candidates for that object clamped
+        # to the visual-mesh ceiling -- identical z to four decimal places,
+        # confirming the clamp (not the network) determined the height --
+        # closing on empty air every time (zero object displacement, despite
+        # near-zero tracking error to that target).
         min_safe_z = None
-        extent = scene.body_extent_world(object_name)
+        extent = scene.body_collision_extent_world(object_name)
         if extent is not None:
             obj_pos, _ = scene.body_pose(object_name)
             margin = self.config.grasp_height_margin_m

@@ -80,7 +80,19 @@ def resolve_body_name(scene: "SceneQuery", canonical_name: str) -> str:
     a circular import -- ``articulation.py`` itself imports from this
     module) before giving up.
     """
-    for candidate in (f"{canonical_name}_main", canonical_name):
+    # "_burner" before "_main": a stove's "_main"/"_base" frame body is not
+    # its functional surface -- confirmed against the real flat_stove_1
+    # asset, whose "_main" body sits 15cm away (in a completely different
+    # local frame) from its "_burner" body, which is what a placed object
+    # actually needs to land on/near. Resolving to "_main" here silently
+    # aimed every hover/placement candidate at the wrong body's position --
+    # confirmed by a real rollout: transport's own hover_target_xy matched
+    # "_main"'s xy exactly, 0.15m off from the burner scene_context's own
+    # entity entry (infer_stove_fixtures) correctly pointed System 2 at.
+    # "_main" still wins for every ordinary free-body object (nothing else
+    # in this codebase's assets defines a "_burner" body), so this can't
+    # regress anything that isn't a stove.
+    for candidate in (f"{canonical_name}_burner", f"{canonical_name}_main", canonical_name):
         try:
             scene.body_id(candidate)
             return candidate
@@ -92,9 +104,37 @@ def resolve_body_name(scene: "SceneQuery", canonical_name: str) -> str:
         return resolve_drawer(scene, canonical_name).drawer_body
     except KeyError:
         pass
+    if canonical_name == "table":
+        # "table" is the one canonical name every scene is assumed to have
+        # (e.g. the executor's own point-target path defaults an unset
+        # params.goal_surface to it -- see executor.py's _resolve_point_
+        # goal), but it's a real, exact MuJoCo body name only in a kitchen
+        # scene's own arena; a living-room scene names it
+        # "living_room_table", a study scene "study_table", and presumably
+        # others follow the same room-prefixed pattern -- confirmed via a
+        # real rollout (STUDY_SCENE1, a caddy/book task): the literal body
+        # "table" doesn't exist there, and _resolve_point_goal's hardcoded
+        # default crashed uncaught deep in this function instead of ever
+        # reaching a real surface. Fall back to any top-level body whose
+        # name contains "table" -- sorted by (length, name) so the base
+        # table body (e.g. "living_room_table") wins over a longer,
+        # more-specific sub-body/geom-holder (e.g. "living_room_table_col")
+        # when a scene happens to expose both.
+        matches = sorted(
+            (
+                name
+                for bid in range(scene.model.nbody)
+                if (name := mujoco.mj_id2name(scene.model, mujoco.mjtObj.mjOBJ_BODY, bid))
+                and "table" in name.lower()
+            ),
+            key=lambda n: (len(n), n),
+        )
+        if matches:
+            return matches[0]
     raise KeyError(
         f"Could not find a MuJoCo body for canonical object {canonical_name!r} "
-        "(tried the '_main' suffix convention, the exact name, and drawer-level resolution)."
+        "(tried the '_burner'/'_main' suffix conventions, the exact name, drawer-level "
+        "resolution, and -- for 'table' specifically -- any body name containing 'table')."
     )
 
 
