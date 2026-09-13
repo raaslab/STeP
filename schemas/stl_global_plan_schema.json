@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md): one global STL formula for the whole task, decomposed into subtasks by step/system_two/stl_plan.py:decompose() instead of by the VLM. Not used by the default libero_runner.py pipeline.",
+  "type": "object",
+  "properties": {
+    "system2_plan": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "const": "stl_spec" },
+        "task_name": { "type": "string" },
+        "scene_summary": { "type": "string" },
+        "formula": { "$ref": "#/$defs/formula" },
+        "object_hints": {
+          "type": "object",
+          "description": "Per-object execution metadata that has no natural predicate-arg home (grasp geometry, support-surface mode). Keyed by the same entity names used in the formula's predicate args. Merged into a subtask's params at decomposition time.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "grasp_target": { "type": "string", "enum": ["rim"] },
+              "grasp_offset_xyz": {
+                "type": "array",
+                "items": { "type": "number" },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "place_surface": { "type": "string", "enum": ["top", "inside"] }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["type", "task_name", "scene_summary", "formula"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["system2_plan"],
+  "additionalProperties": false,
+  "$defs": {
+    "formula": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": { "type": { "type": "string", "const": "true" } },
+          "required": ["type"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "const": "predicate" },
+            "name": { "type": "string" },
+            "args": { "type": "array", "items": {} }
+          },
+          "required": ["type", "name", "args"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "const": "not" },
+            "child": { "$ref": "#/$defs/formula" }
+          },
+          "required": ["type", "child"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "const": "and" },
+            "children": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/formula" }
+            }
+          },
+          "required": ["type", "children"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "const": "implies" },
+            "left": { "$ref": "#/$defs/formula" },
+            "right": { "$ref": "#/$defs/formula" }
+          },
+          "required": ["type", "left", "right"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "enum": ["always", "eventually"] },
+            "interval": { "$ref": "#/$defs/interval" },
+            "child": { "$ref": "#/$defs/formula" }
+          },
+          "required": ["type", "interval", "child"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "const": "until" },
+            "interval": { "$ref": "#/$defs/interval" },
+            "left": { "$ref": "#/$defs/formula" },
+            "right": { "$ref": "#/$defs/formula" }
+          },
+          "required": ["type", "interval", "left", "right"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "interval": {
+      "type": ["array", "null"],
+      "prefixItems": [
+        { "type": "integer", "minimum": 0 },
+        { "type": "integer", "minimum": 0 }
+      ],
+      "minItems": 2,
+      "maxItems": 2
+    }
+  }
+}

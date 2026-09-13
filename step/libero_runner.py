@@ -9,12 +9,36 @@ from typing import Any
 from .io import load_json, save_json
 from .system_two.stl_plan import normalize_legacy_pregrasp_grasp, print_formulas, validate_stl_plan
 
+# EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md): schema picked by --stl-mode
+# when --schema isn't given explicitly.
+_DEFAULT_SCHEMA_FOR_MODE = {
+    "stl_spec": "schemas/stl_global_plan_schema.json",
+    "skill_graph": "schemas/stl_plan_schema.json",
+}
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run minimal STeP on a LIBERO task.")
     p.add_argument("--legacy-vlm-stl-root", default="../vlm-stl")
     p.add_argument("--base-scene-context", default="configs/libero_template.json")
-    p.add_argument("--schema", default="schemas/stl_plan_schema.json")
+    p.add_argument(
+        "--schema",
+        default=None,
+        help="STL plan JSON schema. Defaults to the schema matching --stl-mode (see _DEFAULT_SCHEMA_FOR_MODE).",
+    )
+    p.add_argument(
+        "--stl-mode",
+        default="stl_spec",
+        choices=["stl_spec", "skill_graph"],
+        help=(
+            "System 2 output mode. 'stl_spec' (default, EXPERIMENTAL -- see "
+            "STL_DECOMPOSITION_PLAN.md): the VLM emits one global STL formula and "
+            "step/system_two/stl_plan.py:decompose() deterministically derives the "
+            "subtask sequence, instead of the VLM deciding subtask boundaries "
+            "itself. Pass --stl-mode skill_graph to revert to the original "
+            "behavior where the VLM emits the pre-split per-subtask plan directly."
+        ),
+    )
     p.add_argument("--suite", default=None)
     p.add_argument("--task-id", type=int, default=None)
     p.add_argument("--init-state-id", type=int, default=None)
@@ -259,6 +283,80 @@ def _annotate_already_satisfied_objects(
     return satisfied
 
 
+def _annotate_timing_overruns(fresh_context: dict[str, Any], previous_summary: dict[str, Any]) -> list[str]:
+    """EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md).
+
+    Stamp a note onto ``fresh_context`` for every subtask that ran past its
+    own declared STL deadline in the just-failed attempt, so the recalled
+    plan can adjust timing with real numbers instead of guessing blind. Reads
+    the ``timing_violation`` fact ``executor.py``'s ``_annotate_timing_violation``
+    writes onto each ``SkillExecutionRecord.info`` -- itself derived from
+    ``sub["stl_deadline"]``, which only `--stl-mode stl_spec` plans carry (see
+    `step/system_two/stl_plan.py:decompose()`), so this is a no-op for
+    `--stl-mode skill_graph`.
+
+    Deliberately does nothing more than log/annotate: per the explicit design
+    discussion in STL_DECOMPOSITION_PLAN.md, a declared time budget that turns
+    out to be infeasible is not something System 1 should try to enforce or
+    repair -- "if it fails, it would most likely be over the time limit, so
+    just log it" and let the next System-2 call decide what to do with that
+    information (a larger budget, a different approach, or leaving it as-is).
+    """
+    records = previous_summary.get("records") or []
+    violations = [
+        r
+        for r in records
+        if isinstance(r, dict) and isinstance((r.get("info") or {}).get("timing_violation"), dict)
+    ]
+    if not violations:
+        return []
+
+    entities = fresh_context.setdefault("entities", [])
+    by_name = {e.get("name"): e for e in entities if isinstance(e, dict) and e.get("name")}
+
+    annotated: list[str] = []
+    for record in violations:
+        tv = record["info"]["timing_violation"]
+        obj = tv.get("object")
+        skill = tv.get("skill")
+        outcome = "did not succeed" if not tv.get("subtask_succeeded") else "succeeded, but later than planned"
+        flag = (
+            f" [Precomputed: a previous attempt's {skill} subtask"
+            + (f" for {obj}" if obj else "")
+            + f" took {tv.get('actual_absolute_step')} controller-steps, exceeding its declared "
+            f"deadline of {tv.get('declared_deadline_step')} by {tv.get('overrun_steps')} steps, "
+            f"and {outcome}. The requested overall timing may not be achievable as specified -- "
+            "consider a larger time budget for this step, or a different approach.]"
+        )
+        entity = by_name.get(obj) if obj else None
+        if entity is not None:
+            entity["notes"] = entity.get("notes", "") + flag
+        else:
+            entities.append({"name": obj or f"{skill}_timing", "role": "note", "notes": flag.strip()})
+        annotated.append(obj or str(skill))
+    return annotated
+
+
+def _decompose_or_annotate_errors(plan: dict[str, Any], errors_path: Path) -> dict[str, Any]:
+    """EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md): turns a single-global-
+    formula ("stl_spec") plan into the standard subtasks shape.
+
+    On failure, writes the specific validation/decomposition error to
+    `errors_path` and returns the plan UNCHANGED, so the caller's normal
+    `validate_stl_plan(...)` call still rejects it (missing/invalid
+    `subtasks`) through the existing `validation_errors.txt` path -- this
+    function only adds a more specific error message alongside that, it
+    doesn't replace the existing validation control flow.
+    """
+    from .system_two.stl_plan import decompose_and_validate
+
+    decomposed_plan, result = decompose_and_validate(plan)
+    if decomposed_plan is None:
+        errors_path.write_text("\n".join(result.errors))
+        return plan
+    return decomposed_plan
+
+
 def _load_or_create_plan(
     args: argparse.Namespace,
     *,
@@ -271,17 +369,23 @@ def _load_or_create_plan(
         save_json(plan, outdir / "compiled_stl_plan.json")
         return plan
 
-    schema = load_json(args.schema)
+    schema_path = args.schema or _DEFAULT_SCHEMA_FOR_MODE[args.stl_mode]
+    schema = load_json(schema_path)
     image_path = _capture_image(args, scene_context, outdir)
     print(f"[step] System 2 image: {image_path}")
 
     from .system_two.planner import DirectSTLPlanner
 
-    planner = DirectSTLPlanner(schema=schema, scene_context=scene_context, model=args.model)
+    planner = DirectSTLPlanner.for_mode(args.stl_mode, schema=schema, scene_context=scene_context, model=args.model)
     plan, raw_text = planner.plan(instruction=prompt, image_path=image_path)
     save_json(plan, outdir / "direct_stl_plan.json")
-    save_json(plan, outdir / "compiled_stl_plan.json")
     (outdir / "raw_model_output.txt").write_text(raw_text)
+
+    if args.stl_mode == "stl_spec":
+        plan = _decompose_or_annotate_errors(plan, outdir / "decomposition_errors.txt")
+        save_json(plan, outdir / "decomposed_stl_plan.json")
+
+    save_json(plan, outdir / "compiled_stl_plan.json")
     return plan
 
 
@@ -352,13 +456,21 @@ def main() -> int:
                     already_satisfied = _annotate_already_satisfied_objects(fresh_context, env, plan)
                     if already_satisfied:
                         print(f"[step] attempt {attempt}/{max_attempts}: already at goal, excluding from replan: {already_satisfied}")
-                    schema = load_json(args.schema)
+                    timing_overruns = _annotate_timing_overruns(fresh_context, summary)
+                    if timing_overruns:
+                        print(f"[step] attempt {attempt}/{max_attempts}: previous attempt exceeded its declared timing for: {timing_overruns}")
+                    schema_path = args.schema or _DEFAULT_SCHEMA_FOR_MODE[args.stl_mode]
+                    schema = load_json(schema_path)
                     from .system_two.planner import DirectSTLPlanner
 
-                    planner = DirectSTLPlanner(schema=schema, scene_context=fresh_context, model=args.model)
+                    planner = DirectSTLPlanner.for_mode(args.stl_mode, schema=schema, scene_context=fresh_context, model=args.model)
                     plan, raw_text = planner.plan(instruction=prompt, image_path=image_path)
                     save_json(plan, outdir / f"recall_attempt_{attempt:02d}_plan.json")
                     (outdir / f"recall_attempt_{attempt:02d}_raw_model_output.txt").write_text(raw_text)
+                    if args.stl_mode == "stl_spec":
+                        plan = _decompose_or_annotate_errors(
+                            plan, outdir / f"recall_attempt_{attempt:02d}_decomposition_errors.txt"
+                        )
                     if isinstance(plan.get("system2_plan"), dict) and isinstance(plan["system2_plan"].get("subtasks"), list):
                         plan["system2_plan"]["subtasks"] = normalize_legacy_pregrasp_grasp(plan["system2_plan"]["subtasks"])
                     retry_validation = validate_stl_plan(plan)

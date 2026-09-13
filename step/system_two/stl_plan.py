@@ -102,6 +102,313 @@ def _validate_interval(interval: Any, path: str) -> list[str]:
     return []
 
 
+def validate_global_stl_plan(plan: dict[str, Any]) -> ValidationResult:
+    """EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md).
+
+    Validates the single-global-formula plan shape (``system2_plan.type ==
+    "stl_spec"``, a ``formula`` instead of ``subtasks``) produced by
+    ``build_global_developer_prompt`` / ``schemas/stl_global_plan_schema.json``.
+    """
+    errors: list[str] = []
+    system2_plan = plan.get("system2_plan")
+    if not isinstance(system2_plan, dict):
+        return ValidationResult(False, ["missing object: system2_plan"])
+
+    if system2_plan.get("type") != "stl_spec":
+        errors.append("system2_plan.type must be 'stl_spec'")
+
+    formula = system2_plan.get("formula")
+    if not isinstance(formula, dict):
+        errors.append("system2_plan.formula must be an object")
+        return ValidationResult(False, errors)
+    errors.extend(_validate_formula(formula, "system2_plan.formula"))
+
+    object_hints = system2_plan.get("object_hints", {})
+    if object_hints is not None and not isinstance(object_hints, dict):
+        errors.append("system2_plan.object_hints must be an object")
+
+    return ValidationResult(not errors, errors)
+
+
+# EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md): predicate-set -> skill lookup
+# used by decompose()/infer_skill_from_predicates() to replace the
+# natural-language skill-grounding rules (7-13/16) in the *legacy*
+# `build_developer_prompt`. Each key is the exact set of predicate names
+# expected inside one top-level achievement-goal conjunct.
+PREDICATE_TO_SKILL: dict[frozenset[str], str] = {
+    frozenset({"PreGrasp", "Grasped"}): "pick",
+    frozenset({"Grasped"}): "pick",
+    frozenset({"OverGoal"}): "transport",
+    frozenset({"Placed", "Released"}): "place",
+    frozenset({"Placed"}): "place",
+    frozenset({"Opened"}): "open",
+    frozenset({"Closed"}): "close",
+    frozenset({"TurnedOn"}): "turn_on",
+    frozenset({"PouredInto"}): "pour",
+}
+
+
+class DecompositionError(ValueError):
+    """Raised by decompose()/infer_skill_from_predicates() when a formula's
+    top-level structure doesn't match a known, decomposable shape (e.g. a
+    top-level `implies`/`or`, or a predicate set with no registered skill)."""
+
+
+def infer_skill_from_predicates(formula: Formula) -> str:
+    """EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md). Maps one achievement-goal
+    formula to the skill that satisfies it, by its predicate-name set."""
+    names = frozenset(_collect_predicate_names(formula))
+    skill = PREDICATE_TO_SKILL.get(names)
+    if skill is None:
+        raise DecompositionError(
+            f"cannot infer skill: predicate set {sorted(names)!r} does not match any "
+            f"registered skill signature {[sorted(k) for k in PREDICATE_TO_SKILL]!r}"
+        )
+    return skill
+
+
+def _is_global_constraint(formula: Formula) -> bool:
+    return isinstance(formula, dict) and formula.get("type") == "always"
+
+
+def split_top_level_and(formula: Formula) -> tuple[list[Formula], list[Formula]]:
+    """EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md).
+
+    Splits a global formula's top-level conjunction into (a) persistent
+    global constraints (top-level `always` conjuncts) and (b) the ordered
+    sequential achievement goals (everything else), in source order. A
+    formula whose top level is not `and` is treated as one single sequential
+    goal with no global constraints (the single-atomic-goal task case).
+    """
+    if not isinstance(formula, dict):
+        raise DecompositionError("formula must be an object")
+    if formula.get("type") != "and":
+        return [], [formula]
+
+    global_constraints: list[Formula] = []
+    sequential_goals: list[Formula] = []
+    for child in formula.get("children", []):
+        if _is_global_constraint(child):
+            global_constraints.append(child)
+        else:
+            sequential_goals.append(child)
+    return global_constraints, sequential_goals
+
+
+def _collect_intervals(formula: Formula) -> list[tuple[int, int]]:
+    if not isinstance(formula, dict):
+        return []
+    intervals: list[tuple[int, int]] = []
+    interval = formula.get("interval")
+    if isinstance(interval, list) and len(interval) == 2:
+        intervals.append((interval[0], interval[1]))
+    for key in ("child", "left", "right"):
+        if key in formula:
+            intervals.extend(_collect_intervals(formula[key]))
+    for child in formula.get("children", []) or []:
+        intervals.extend(_collect_intervals(child))
+    return intervals
+
+
+def goal_absolute_window(goal: Formula) -> tuple[int, int] | None:
+    """EXPERIMENTAL (SLICE, see STL_DECOMPOSITION_PLAN.md).
+
+    The [min-start, max-end] absolute-time window spanned by one achievement
+    goal's own time-bounded sub-formulas (e.g. a pick's PreGrasp/Grasped
+    intervals), per Kapoor/Kang/Meira-Goes NFM 2024 Algorithm 3 (SLICE):
+    atomic task formulas carry ABSOLUTE bounds on one shared global timeline,
+    not a per-task-local clock reset to 0. Returns None if the goal has no
+    time-bounded nodes at all (e.g. a bare untimed predicate).
+    """
+    intervals = _collect_intervals(goal)
+    if not intervals:
+        return None
+    return min(s for s, _ in intervals), max(e for _, e in intervals)
+
+
+def _validate_sequential_timing(sequential_goals: list[Formula]) -> None:
+    """EXPERIMENTAL (SLICE, see STL_DECOMPOSITION_PLAN.md).
+
+    Sequential achievement goals execute strictly one at a time, so on the
+    global timeline their absolute windows must be non-overlapping and
+    non-decreasing in source order (SLICE's own timeline-partitioning
+    invariant, Algorithm 3 lines 12-28: the active-constraint set changes at
+    each slice boundary, which for a purely sequential chain like ours means
+    one goal's window must end at or before the next one's begins). Goals
+    with no time-bounded nodes are skipped -- nothing to check.
+    """
+    previous_end: int | None = None
+    for idx, goal in enumerate(sequential_goals):
+        window = goal_absolute_window(goal)
+        if window is None:
+            continue
+        start, end = window
+        if previous_end is not None and start < previous_end:
+            raise DecompositionError(
+                f"sequential goal {idx} has absolute window [{start},{end}], which starts "
+                f"before the previous goal's window ended at step {previous_end} -- "
+                "achievement goals must occupy non-overlapping, non-decreasing absolute "
+                "time windows on one shared global timeline (SLICE-style decomposition), "
+                "not per-goal-local windows that each reset to 0"
+            )
+        previous_end = end
+
+
+def _derive_params(skill: str, goal: Formula, object_hints: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    params: dict[str, Any] = {}
+    if skill == "pick":
+        pregrasp_args = find_predicate_args(goal, "PreGrasp") or []
+        grasped_args = find_predicate_args(goal, "Grasped") or []
+        obj = (pregrasp_args[0] if pregrasp_args else None) or (grasped_args[0] if grasped_args else None)
+        params["object"] = obj
+        if len(pregrasp_args) > 1:
+            params["grasp_mode"] = pregrasp_args[1]
+        if len(grasped_args) > 1:
+            params["object_height_m"] = grasped_args[1]
+    elif skill == "transport":
+        args = find_predicate_args(goal, "OverGoal") or []
+        params["object"] = args[0] if args else None
+        if len(args) > 1:
+            params["goal_region"] = args[1]
+    elif skill == "place":
+        args = find_predicate_args(goal, "Placed") or []
+        params["object"] = args[0] if args else None
+        if len(args) > 1:
+            params["goal_region"] = args[1]
+    elif skill in ("open", "close"):
+        pred_name = "Opened" if skill == "open" else "Closed"
+        args = find_predicate_args(goal, pred_name) or []
+        params["object"] = args[0] if args else None
+    elif skill == "turn_on":
+        args = find_predicate_args(goal, "TurnedOn") or []
+        params["object"] = args[0] if args else None
+    elif skill == "pour":
+        args = find_predicate_args(goal, "PouredInto") or []
+        params["object"] = args[0] if args else None
+        if len(args) > 1:
+            params["goal_region"] = args[1]
+
+    obj = params.get("object")
+    if obj is not None and obj in object_hints:
+        params = {**object_hints[obj], **params}
+    return params
+
+
+def _describe_subtask(skill: str, params: dict[str, Any]) -> str:
+    obj = params.get("object", "?")
+    goal_region = params.get("goal_region")
+    if goal_region is not None:
+        return f"{skill}({obj}, {goal_region})"
+    return f"{skill}({obj})"
+
+
+def _constraint_covers_window(constraint: Formula, window: tuple[int, int] | None) -> bool:
+    """EXPERIMENTAL (SLICE, see STL_DECOMPOSITION_PLAN.md).
+
+    Per Algorithm 3, a constraint (l, h, p) is "active" during a slice iff
+    the slice's time range falls inside [l, h] -- an invariance constraint is
+    NOT automatically global just because it's a top-level `always`; a bounded
+    `always[a,b]` only covers subtasks whose own absolute window overlaps
+    [a,b]. `interval: null` (this repo's "holds for the entire task"
+    convention, per rule 5a in build_global_developer_prompt) or a goal with
+    no timed nodes of its own (window is None) always applies -- both cases
+    correspond to a constraint whose bound already equals (or exceeds) the
+    whole horizon.
+    """
+    interval = constraint.get("interval")
+    if interval is None or window is None:
+        return True
+    lo, hi = interval
+    start, end = window
+    return start <= hi and end >= lo
+
+
+def decompose(
+    formula: Formula,
+    object_hints: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md).
+
+    Deterministically derives the ordered `subtasks` list (today's
+    `stl_plan.py`/System 1/`stl_monitor.py` shape) from one global STL
+    formula, instead of the VLM emitting `subtasks` directly. Every top-level
+    `always` conjunct is a persistent constraint and is folded into every
+    subtask whose own absolute window it covers (see _constraint_covers_window
+    -- an unbounded/`interval: null` one covers all of them, matching today's
+    prompt, which only ever asks for that shape); every other top-level
+    conjunct becomes exactly one subtask, in source order (see
+    split_top_level_and).
+
+    Per SLICE (Kapoor/Kang/Meira-Goes, NFM 2024, Algorithm 3), each goal's
+    time-bounded sub-formulas carry ABSOLUTE bounds on one shared global
+    timeline -- e.g. a pick spanning [0,90] followed by a transport spanning
+    [90,270] -- and are validated (_validate_sequential_timing) rather than
+    rewritten: this function does NOT rebase intervals to a per-subtask-local
+    0, it only groups/orders/labels what the formula already specifies.
+    """
+    object_hints = object_hints or {}
+    global_constraints, sequential_goals = split_top_level_and(formula)
+    _validate_sequential_timing(sequential_goals)
+
+    subtasks: list[dict[str, Any]] = []
+    for idx, goal in enumerate(sequential_goals):
+        skill = infer_skill_from_predicates(goal)
+        params = _derive_params(skill, goal, object_hints)
+        window = goal_absolute_window(goal)
+        applicable_constraints = [c for c in global_constraints if _constraint_covers_window(c, window)]
+        combined_formula = {"type": "and", "children": [goal, *applicable_constraints]} if applicable_constraints else goal
+        subtask: dict[str, Any] = {
+            "subtask_id": idx,
+            "skill": skill,
+            "description": _describe_subtask(skill, params),
+            "params": params,
+            "formula": combined_formula,
+        }
+        if window is not None:
+            # EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md): the goal's own
+            # absolute deadline, exposed for System 1's soft, log-only
+            # overrun check (executor.py's _annotate_timing_violation) --
+            # explicitly NOT consumed as a hard timeout (max_subtask_steps is
+            # a separate, unrelated per-skill safety cap; see the "don't wire
+            # this into max_step" discussion in the plan doc).
+            subtask["stl_deadline"] = {"start_step": window[0], "end_step": window[1]}
+        subtasks.append(subtask)
+    return subtasks
+
+
+def decompose_and_validate(plan: dict[str, Any]) -> tuple[dict[str, Any] | None, ValidationResult]:
+    """EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md).
+
+    One-call wrapper around validate_global_stl_plan + decompose +
+    validate_stl_plan, for callers (e.g. `libero_runner.py`) that just want a
+    subtasks-shape plan or a single, unified list of errors -- whichever
+    stage failed. Returns (decomposed_plan, ok_result) on success, or
+    (None, failing_result) otherwise.
+    """
+    global_result = validate_global_stl_plan(plan)
+    if not global_result.ok:
+        return None, global_result
+
+    system2_plan = plan["system2_plan"]
+    try:
+        subtasks = decompose(system2_plan["formula"], system2_plan.get("object_hints"))
+    except DecompositionError as exc:
+        return None, ValidationResult(False, [str(exc)])
+
+    decomposed_plan = {
+        "system2_plan": {
+            "type": "skill_graph",
+            "task_name": system2_plan["task_name"],
+            "scene_summary": system2_plan["scene_summary"],
+            "subtasks": subtasks,
+        }
+    }
+    subtask_result = validate_stl_plan(decomposed_plan)
+    if not subtask_result.ok:
+        return None, subtask_result
+    return decomposed_plan, subtask_result
+
+
 _LEGACY_PREGRASP_SKILLS = {"pregrasp", "pre_grasp", "pre-grasp"}
 _LEGACY_GRASP_SKILLS = {"grasp"}
 

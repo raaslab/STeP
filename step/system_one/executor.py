@@ -611,7 +611,12 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         )
 
     def _run_pick_with_motion_pipeline(
-        self, env: BaseManipulationEnv, sub: dict[str, Any], outdir: str | Path | None = None
+        self,
+        env: BaseManipulationEnv,
+        sub: dict[str, Any],
+        outdir: str | Path | None = None,
+        *,
+        task_steps_so_far: int = 0,
     ) -> tuple[bool, int, dict[str, Any]]:
         from .motion.config import MotionConfig
         from .motion.skills.libero_pick_adapter import LiberoPickAdapter
@@ -626,6 +631,10 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         motion_config = MotionConfig.from_scene_context(self.scene_context)
         adapter = LiberoPickAdapter(env, motion_config)
         max_steps = int(self.max_subtask_steps) if self.max_subtask_steps is not None else 600
+
+        wait_steps_used = self._wait_for_stl_start(
+            adapter, sub, task_steps_so_far=task_steps_so_far, gripper_cmd=env.open_gripper_cmd, env=env
+        )
 
         # Point the env's grasp check at THIS pick's object before running,
         # not just after it succeeds (further down). LiberoManipulationEnv.
@@ -661,7 +670,7 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         # new failure mode added to that adapter later needs no new case
         # here as long as it keeps using one of these two reasons.
         RETRIABLE_REASONS = (SkillFailureReason.GRASP_VERIFICATION_FAILED, SkillFailureReason.EXECUTION_FAILED)
-        steps = 0
+        steps = wait_steps_used
         for attempt in range(self.PICK_GRASP_STABILITY_ATTEMPTS):
             result, attempt_steps, attached_state = adapter.run(
                 object_set,
@@ -686,6 +695,7 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
             "failure_reason": str(result.failure_reason),
             "cost_breakdown": result.cost_breakdown,
             "diagnostics": result.diagnostics,
+            "wait_steps": wait_steps_used,
         }
         if result.success and result.selected_object is not None:
             # NOTE: this only sets the *env's* active object for anything read
@@ -699,7 +709,7 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         return bool(result.success), steps, status
 
     def _run_place_with_motion_pipeline(
-        self, env: BaseManipulationEnv, sub: dict[str, Any]
+        self, env: BaseManipulationEnv, sub: dict[str, Any], *, task_steps_so_far: int = 0
     ) -> tuple[bool, int, dict[str, Any]]:
         from .motion.config import MotionConfig
         from .motion.skills.libero_place_adapter import LiberoPlaceAdapter
@@ -735,6 +745,11 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         motion_config = MotionConfig.from_scene_context(self.scene_context)
         adapter = LiberoPlaceAdapter(env, motion_config)
         max_steps = int(self.max_subtask_steps) if self.max_subtask_steps is not None else 400
+
+        wait_steps_used = self._wait_for_stl_start(
+            adapter, sub, task_steps_so_far=task_steps_so_far, gripper_cmd=env.close_gripper_cmd, env=env
+        )
+
         result, steps = adapter.run(
             goal_name,
             attached_state,
@@ -743,6 +758,7 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
             place_surface=place_surface,
             goal_point_xyz=goal_point_xyz,
         )
+        steps += wait_steps_used
         if result.success:
             self._motion_attached_state = None  # detached -- next pick must re-attach
 
@@ -752,11 +768,12 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
             "failure_reason": str(result.failure_reason),
             "cost_breakdown": result.cost_breakdown,
             "diagnostics": result.diagnostics,
+            "wait_steps": wait_steps_used,
         }
         return bool(result.success), steps, status
 
     def _run_transport_with_motion_pipeline(
-        self, env: BaseManipulationEnv, sub: dict[str, Any]
+        self, env: BaseManipulationEnv, sub: dict[str, Any], *, task_steps_so_far: int = 0
     ) -> tuple[bool, int, dict[str, Any]]:
         from .motion.config import MotionConfig
         from .motion.skills.libero_transport_adapter import LiberoTransportAdapter
@@ -800,6 +817,11 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         motion_config = MotionConfig.from_scene_context(self.scene_context)
         adapter = LiberoTransportAdapter(env, motion_config)
         max_steps = int(self.max_subtask_steps) if self.max_subtask_steps is not None else 400
+
+        wait_steps_used = self._wait_for_stl_start(
+            adapter, sub, task_steps_so_far=task_steps_so_far, gripper_cmd=env.close_gripper_cmd, env=env
+        )
+
         result, steps = adapter.run(
             goal_name,
             attached_state,
@@ -809,6 +831,7 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
             goal_point_xyz=goal_point_xyz,
             goal_radius_m=goal_radius_m,
         )
+        steps += wait_steps_used
         # Unlike place, transport never detaches on success -- it's still
         # holding the object at the hover pose, waiting for the following
         # place subtask to take over.
@@ -819,6 +842,7 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
             "failure_reason": str(result.failure_reason),
             "cost_breakdown": result.cost_breakdown,
             "diagnostics": result.diagnostics,
+            "wait_steps": wait_steps_used,
         }
         return bool(result.success), steps, status
 
@@ -1308,6 +1332,79 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
             return False
         return False
 
+    def _wait_for_stl_start(
+        self, adapter, sub: dict[str, Any], *, task_steps_so_far: int, gripper_cmd: float, env: BaseManipulationEnv
+    ) -> int:
+        """EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md, "wait skill" section).
+
+        If this subtask's own declared not-before bound
+        (``sub["stl_deadline"]["start_step"]``, from
+        ``step/system_two/stl_plan.py:decompose()``) hasn't been reached yet
+        on the real absolute timeline, hold position (``motion.servo.wait_steps``)
+        until it has, then return control to the caller. Returns the number
+        of wait steps consumed (0 in the common case: no declared not-before
+        bound at all, or the real elapsed time has already caught up to it).
+        A no-op for `--stl-mode skill_graph` plans (no `stl_deadline` to
+        read). This is what actually satisfies a constraint like "place at
+        least 5 seconds after picking it up" -- decompose() already encodes
+        that as a gap between two goals' absolute windows (see
+        `build_global_developer_prompt` rule 2b); this is where System 1
+        waits out that gap instead of proceeding early.
+        """
+        deadline = sub.get("stl_deadline")
+        if not isinstance(deadline, dict):
+            return 0
+        start_step = deadline.get("start_step")
+        if start_step is None:
+            return 0
+        remaining = int(start_step) - int(task_steps_so_far)
+        if remaining <= 0:
+            return 0
+        from .motion.servo import wait_steps
+
+        return wait_steps(adapter, remaining, gripper_cmd, step_callback=lambda: self._capture_video_frame(env))
+
+    def _annotate_timing_violation(
+        self, record: SkillExecutionRecord, sub: dict[str, Any], *, task_steps_so_far: int
+    ) -> None:
+        """EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md).
+
+        Stamp a ``timing_violation`` note onto ``record.info`` when this
+        subtask finished (successfully or not) after its own declared
+        absolute deadline -- ``sub["stl_deadline"]``, set by
+        ``step/system_two/stl_plan.py:decompose()`` from the STL formula's
+        own SLICE-derived absolute window. Unrelated to
+        ``_timing_window_violation_for_subtask`` below, which reads the
+        separate (currently unpopulated by any real plan) legacy
+        ``applied_constraints``/``timing_window`` mechanism and can abort a
+        subtask early; this one is purely observational -- it never changes
+        `record.done`/aborts anything, it only records a fact for whoever
+        reads the summary next. That reader is the System-2 recall loop in
+        `libero_runner.py` (`_annotate_timing_overruns`): if a declared time
+        budget turns out to be infeasible, this is how the next recalled
+        plan finds out with real numbers instead of guessing blind -- "just
+        log it," per the explicit design discussion in the plan doc, rather
+        than trying to enforce or repair timing at the System 1 level.
+        """
+        deadline = sub.get("stl_deadline")
+        if not isinstance(deadline, dict):
+            return
+        end_step = deadline.get("end_step")
+        if end_step is None:
+            return
+        actual_absolute_step = int(task_steps_so_far) + int(record.steps)
+        if actual_absolute_step <= int(end_step):
+            return
+        record.info = dict(record.info or {})
+        record.info["timing_violation"] = {
+            "skill": record.skill,
+            "object": (record.params or {}).get("object"),
+            "declared_deadline_step": int(end_step),
+            "actual_absolute_step": actual_absolute_step,
+            "overrun_steps": actual_absolute_step - int(end_step),
+            "subtask_succeeded": bool(record.done),
+        }
+
     def _timing_window_violation_for_subtask(
         self,
         env: BaseManipulationEnv,
@@ -1749,9 +1846,13 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                     self._refresh_subtask_bookkeeping(env)
                 motion_backend = self._motion_backend(env)
                 if skill == "pick" and motion_backend == "ompl_mpc":
-                    done, steps, last_status = self._run_pick_with_motion_pipeline(env, sub, outdir=outdir)
+                    done, steps, last_status = self._run_pick_with_motion_pipeline(
+                        env, sub, outdir=outdir, task_steps_so_far=task_steps_so_far
+                    )
                 elif skill == "place" and motion_backend == "ompl_mpc":
-                    done, steps, last_status = self._run_place_with_motion_pipeline(env, sub)
+                    done, steps, last_status = self._run_place_with_motion_pipeline(
+                        env, sub, task_steps_so_far=task_steps_so_far
+                    )
                 elif skill == "open" and motion_backend == "ompl_mpc":
                     done, steps, last_status = self._run_open_drawer_with_motion_pipeline(env, sub)
                 elif skill == "close" and motion_backend == "ompl_mpc":
@@ -1759,7 +1860,9 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                 elif skill == "turn_on" and motion_backend == "ompl_mpc":
                     done, steps, last_status = self._run_turn_knob_with_motion_pipeline(env, sub)
                 elif skill == "transport" and motion_backend == "ompl_mpc":
-                    done, steps, last_status = self._run_transport_with_motion_pipeline(env, sub)
+                    done, steps, last_status = self._run_transport_with_motion_pipeline(
+                        env, sub, task_steps_so_far=task_steps_so_far
+                    )
                 else:
                     steps = 0
                     done = False
@@ -1826,6 +1929,7 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                     done=done,
                     info=last_status,
                 )
+                self._annotate_timing_violation(record, sub, task_steps_so_far=task_steps_so_far)
                 records.append(record)
 
                 replacement_remaining, should_abort, reflection_result = self._maybe_reflect_after_subtask(

@@ -17,6 +17,32 @@ from ..orientation_utils import orientation_error_rotvec
 from .scene_query import SceneQuery, quat_to_rotmat_wxyz
 
 
+def wait_steps(adapter, n_steps: int, gripper_cmd: float, step_callback=None) -> int:
+    """EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md, "wait skill" section).
+
+    Hold the current end-effector pose completely still for ``n_steps``
+    control ticks: a zero Cartesian-delta action each tick, with
+    ``gripper_cmd`` held constant (``env.open_gripper_cmd`` before a grasp,
+    ``env.close_gripper_cmd`` while carrying -- never re-derived here, the
+    caller decides which one applies). Used to satisfy a not-before STL
+    timing constraint (e.g. "place at least 5 seconds after picking it up")
+    by literally waiting rather than releasing early. ``adapter`` only needs
+    a ``_step_env(cart_pos, cart_ori, gripper_cmd)`` method -- every
+    ``_ServoMixin`` subclass and ``LiberoPlaceAdapter`` (which defines its
+    own, identically-shaped ``_step_env`` instead of inheriting this mixin)
+    both have one, so this one function serves pick, transport, and place
+    without duplicating the same loop three times.
+    """
+    zero = np.zeros(3, dtype=np.float32)
+    steps = 0
+    for _ in range(max(0, int(n_steps))):
+        adapter._step_env(zero, zero, gripper_cmd)
+        steps += 1
+        if step_callback is not None:
+            step_callback()
+    return steps
+
+
 def is_settle_stalled(recent_errors: list[float], window: int, tol_m: float) -> bool:
     """True once a settle loop's rolling window of position errors shows no
     meaningful improvement over ``window`` consecutive steps.
