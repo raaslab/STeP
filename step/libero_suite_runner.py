@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import subprocess
 import sys
 import time
@@ -15,6 +16,13 @@ from .io import load_json, save_json
 
 LIBERO_SUITES = ("libero_spatial", "libero_object", "libero_goal", "libero_10")
 
+# LIBERO-Pro's locally-available generalization dimensions (see
+# libero/libero/bddl_files/<suite>_<dim>/ in the vendored LIBERO-PRO checkout).
+# "swap" = Position, "task" = Task, "object" = Object, "lan" = Semantic.
+# LIBERO-Pro's fifth dimension, Environment, has no pre-built bddl/init files
+# in this checkout, so it isn't offered here.
+LIBERO_PRO_PERTURBATIONS = ("swap", "task", "object", "lan")
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run STeP over a LIBERO benchmark suite.")
@@ -23,6 +31,19 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--schema", default="schemas/stl_plan_schema.json")
     p.add_argument("--safety-json", default="configs/libero_safety.json")
     p.add_argument("--suite", default="libero_spatial", choices=LIBERO_SUITES + ("all",))
+    p.add_argument(
+        "--perturbation",
+        default=None,
+        choices=list(LIBERO_PRO_PERTURBATIONS) + ["random"],
+        help=(
+            "Run LIBERO-Pro's perturbed variant of --suite instead of plain LIBERO. "
+            "'swap' (Position), 'task' (Task), 'object' (Object), 'lan' (Semantic) "
+            "resolve every base suite in this run to '<suite>_<perturbation>' (e.g. "
+            "libero_goal_swap). 'random' draws one of those four once for this whole "
+            "invocation (applied to every task/state-id in the run) and records which "
+            "one was drawn in results_summary.json. Omit for plain LIBERO (default)."
+        ),
+    )
     p.add_argument("--task-id", type=int, default=None)
     p.add_argument("--max-tasks", type=int, default=None)
     p.add_argument("--max-states", type=int, default=1)
@@ -73,6 +94,27 @@ def _suite_names(selected: str) -> list[str]:
     if selected == "all":
         return list(LIBERO_SUITES)
     return [selected]
+
+
+def _resolve_suite(base_suite: str, perturbation: str | None) -> str:
+    return f"{base_suite}_{perturbation}" if perturbation else base_suite
+
+
+def _check_perturbation_available(suite: str) -> None:
+    """Fail fast with a clear message if this suite's bddl files aren't on disk,
+    instead of a deep get_benchmark()/get_task() stack trace."""
+    try:
+        from libero import get_libero_path
+    except ImportError:
+        from libero.libero import get_libero_path  # type: ignore
+
+    bddl_dir = Path(get_libero_path("bddl_files")) / suite
+    if not bddl_dir.is_dir() or not any(bddl_dir.glob("*.bddl")):
+        raise SystemExit(
+            f"[suite] no bddl files found for '{suite}' at {bddl_dir} -- "
+            f"available LIBERO-Pro dimensions are {LIBERO_PRO_PERTURBATIONS}; "
+            "Environment has no pre-built data in this checkout."
+        )
 
 
 def _load_safety_prompts(path: str | Path) -> dict[tuple[str, int], str]:
@@ -182,15 +224,25 @@ def _read_summary(run_dir: Path) -> dict[str, Any]:
 
 def main() -> int:
     args = parse_args()
+    perturbation = args.perturbation
+    if perturbation == "random":
+        perturbation = random.choice(LIBERO_PRO_PERTURBATIONS)
+        print(f"[suite] LIBERO-Pro random perturbation selected: {perturbation}")
+
     if args.outdir is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        args.outdir = f"outputs/{args.suite}_{timestamp}"
+        suffix = f"_{perturbation}" if perturbation else ""
+        args.outdir = f"outputs/{args.suite}{suffix}_{timestamp}"
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     _add_paths(args.legacy_vlm_stl_root, outdir)
 
+    resolved_suites = [_resolve_suite(s, perturbation) for s in _suite_names(args.suite)]
+    for suite in resolved_suites:
+        _check_perturbation_available(suite)
+
     safety_prompts = _load_safety_prompts(args.safety_json) if args.use_safety_prompts else {}
-    tasks = _enumerate_tasks(_suite_names(args.suite))
+    tasks = _enumerate_tasks(resolved_suites)
     if args.task_id is not None:
         tasks = [t for t in tasks if int(t["task_id"]) == int(args.task_id)]
     if args.max_tasks is not None:
@@ -244,6 +296,7 @@ def main() -> int:
     successes = [r for r in ran if r.get("success") is True]
     aggregate = {
         "suite": args.suite,
+        "perturbation": perturbation,
         "total_tasks": len(tasks),
         "total_rollouts": len(runs),
         "total_run": len(ran),

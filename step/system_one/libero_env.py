@@ -445,6 +445,18 @@ class LiberoManipulationEnv(BaseManipulationEnv):
         except Exception:
             return super()._is_success()
 
+    def check_constraints(self) -> dict | None:
+        """None if this task has no <bddl>.constraints.json sidecar;
+        otherwise {"violated": bool, "checks": [...]} evaluated against the
+        rollout so far -- independent of _is_success()/check_success(), so a
+        run can be a task success that still violated its constraint (e.g.
+        grabbed the object while ignoring a keep-out zone entirely).
+        """
+        try:
+            return self.env.env.check_constraints()
+        except Exception:
+            return None
+
     # --------------------------------------------------------- rendering
 
     def render_rgb_frame(

@@ -2004,8 +2004,17 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                     if terminated:
                         break
 
+            constraint_check = None
+            check_constraints_fn = getattr(env, "check_constraints", None)
+            if callable(check_constraints_fn):
+                try:
+                    constraint_check = check_constraints_fn()
+                except Exception:
+                    constraint_check = None
+
             summary = {
                 "success": success,
+                "constraint_check": constraint_check,
                 "env_horizon": runtime.get("_computed_env_horizon", self.env_horizon),
                 "max_subtask_steps": None if self.max_subtask_steps is None else int(self.max_subtask_steps),
                 "reflection_enabled": bool(self.reflection_enabled),

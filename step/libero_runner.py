@@ -2,12 +2,20 @@ from __future__ import annotations
 
 import argparse
 import os
+import random
 import sys
 from pathlib import Path
 from typing import Any
 
 from .io import load_json, save_json
 from .system_two.stl_plan import normalize_legacy_pregrasp_grasp, print_formulas, validate_stl_plan
+
+# LIBERO-Pro's locally-available generalization dimensions (see
+# libero/libero/bddl_files/<suite>_<dim>/ in the vendored LIBERO-PRO checkout).
+# "swap" = Position, "task" = Task, "object" = Object, "lan" = Semantic.
+# LIBERO-Pro's fifth dimension, Environment, has no pre-built bddl/init files
+# in this checkout, so it isn't offered here.
+LIBERO_PRO_PERTURBATIONS = ("swap", "task", "object", "lan")
 
 # EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md): schema picked by --stl-mode
 # when --schema isn't given explicitly.
@@ -40,6 +48,19 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     p.add_argument("--suite", default=None)
+    p.add_argument(
+        "--perturbation",
+        default=None,
+        choices=list(LIBERO_PRO_PERTURBATIONS) + ["random"],
+        help=(
+            "Run LIBERO-Pro's perturbed variant of --suite instead of plain LIBERO. "
+            "'swap' (Position), 'task' (Task), 'object' (Object), 'lan' (Semantic) "
+            "resolve --suite '<suite>' to '<suite>_<perturbation>' (e.g. "
+            "libero_goal_swap). 'random' draws one of those four for this run and "
+            "records which one was drawn under platform.libero.perturbation in the "
+            "saved scene context. Omit for plain LIBERO (default)."
+        ),
+    )
     p.add_argument("--task-id", type=int, default=None)
     p.add_argument("--init-state-id", type=int, default=None)
     p.add_argument("--bddl-file", default=None)
@@ -122,7 +143,12 @@ def _prepare_libero_scene(args: argparse.Namespace, outdir: Path) -> tuple[dict[
     platform["backend"] = "libero"
     libero = platform.setdefault("libero", {})
     if args.suite is not None:
-        libero["suite"] = args.suite
+        perturbation = args.perturbation
+        if perturbation == "random":
+            perturbation = random.choice(LIBERO_PRO_PERTURBATIONS)
+            print(f"[step] LIBERO-Pro random perturbation selected: {perturbation}")
+        libero["suite"] = f"{args.suite}_{perturbation}" if perturbation else args.suite
+        libero["perturbation"] = perturbation
     if args.task_id is not None:
         libero["task_id"] = int(args.task_id)
     if args.init_state_id is not None:
