@@ -105,6 +105,35 @@ happy with the pilot.
 (5 minutes, per your existing preference) -- any single stuck rollout gets
 killed and counted as a failure rather than eating your walltime budget.
 
+## 4b. Plain (unperturbed) LIBERO
+
+To run the standard 4-suite LIBERO benchmark instead of/alongside LIBERO-Pro
+(no perturbation applied):
+
+```bash
+mkdir -p logs
+sbatch cluster/submit_libero_vanilla.slurm
+```
+
+Array job over `libero_spatial`/`libero_object`/`libero_goal`/`libero_10`,
+same resource requests and `MAX_STATES` pilot override as
+`submit_libero_pro.slurm`, just without a `--perturbation` flag. Results land
+in `outputs/libero_vanilla_slurm_<jobid>/<suite>/`.
+
+The same grid runner handles vanilla runs too, if you'd rather not use SLURM
+arrays -- pass `--perturbations none`:
+
+```bash
+python scripts/run_libero_pro_eval.py \
+  --suites libero_spatial libero_object libero_goal libero_10 \
+  --perturbations none \
+  --outdir outputs/libero_vanilla
+```
+
+You can also mix vanilla and perturbed dimensions in one grid, e.g.
+`--perturbations none swap task`, to get a vanilla baseline column alongside
+the perturbed ones in the same summary table.
+
 ## 5. Aggregating results
 
 Once all 6 array tasks finish (`sacct -j <jobid>` to check), fold their

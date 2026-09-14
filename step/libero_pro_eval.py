@@ -23,6 +23,12 @@ from .libero_suite_runner import LIBERO_PRO_PERTURBATIONS, LIBERO_SUITES
 CAPX_SUITES = ("libero_spatial", "libero_object", "libero_goal")
 CAPX_PERTURBATIONS = ("swap", "task")
 
+# "none" runs plain LIBERO (no perturbation suffix) through the same grid/
+# aggregation machinery -- e.g. --suites libero_spatial libero_object
+# libero_goal libero_10 --perturbations none for the standard 4-suite
+# vanilla protocol.
+PERTURBATION_CHOICES = list(LIBERO_PRO_PERTURBATIONS) + ["none"]
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
@@ -41,7 +47,13 @@ def parse_args() -> argparse.Namespace:
         "--perturbations",
         nargs="+",
         default=list(CAPX_PERTURBATIONS),
-        choices=list(LIBERO_PRO_PERTURBATIONS),
+        choices=PERTURBATION_CHOICES,
+        help=(
+            "Which LIBERO-Pro dimensions to run, or 'none' for plain LIBERO "
+            "(no perturbation). Default: swap + task (Cap-X's own protocol). "
+            "For the standard 4-suite vanilla protocol: --suites libero_spatial "
+            "libero_object libero_goal libero_10 --perturbations none."
+        ),
     )
     p.add_argument(
         "--max-states",
@@ -69,6 +81,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def _combo_outdir(root: Path, suite: str, perturbation: str) -> Path:
+    if perturbation == "none":
+        return root / suite
     return root / f"{suite}_{perturbation}"
 
 
@@ -85,11 +99,11 @@ def _build_command(args: argparse.Namespace, suite: str, perturbation: str, comb
         args.schema,
         "--suite",
         suite,
-        "--perturbation",
-        perturbation,
         "--outdir",
         str(combo_outdir),
     ]
+    if perturbation != "none":
+        cmd += ["--perturbation", perturbation]
     if args.max_states is not None:
         cmd += ["--max-states", str(args.max_states)]
     else:
