@@ -522,6 +522,14 @@ def main() -> int:
             if not is_last_attempt:
                 print(f"[step] attempt {attempt}/{max_attempts} failed (success={summary.get('success')!r}); recalling and retrying without resetting the env")
     finally:
+        # No-op (returns None) for tasks with no <bddl>.constraints.json sidecar,
+        # e.g. plain LIBERO/LIBERO-Pro suites -- only LIBERO-Constrained's suites
+        # populate this. Checked independently of summary["success"]: a run can
+        # complete the task while still violating its constraint.
+        if hasattr(env, "check_constraints"):
+            constraint_check = env.check_constraints()
+            if constraint_check is not None:
+                summary["constraint_check"] = constraint_check
         executor._close_video_writer()
         env.close()
 

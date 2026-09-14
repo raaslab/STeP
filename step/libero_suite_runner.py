@@ -16,6 +16,17 @@ from .io import load_json, save_json
 
 LIBERO_SUITES = ("libero_spatial", "libero_object", "libero_goal", "libero_10")
 
+# LIBERO-Constrained's suites (github.com/raaslab/LIBERO-Constrained): each task
+# is an existing LIBERO task plus an added spatial/temporal/logical constraint,
+# checked via libero.libero.utils.constraint_checker. Selectable individually
+# via --suite, but deliberately excluded from --suite all so the standard
+# 4-suite aggregate (the published-results protocol) doesn't silently change.
+LIBERO_CONSTRAINED_SUITES = (
+    "libero_spatial_constrained",
+    "libero_object_constrained",
+    "libero_goal_constrained",
+)
+
 # LIBERO-Pro's locally-available generalization dimensions (see
 # libero/libero/bddl_files/<suite>_<dim>/ in the vendored LIBERO-PRO checkout).
 # "swap" = Position, "task" = Task, "object" = Object, "lan" = Semantic.
@@ -30,7 +41,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--base-scene-context", default="configs/libero_template.json")
     p.add_argument("--schema", default="schemas/stl_plan_schema.json")
     p.add_argument("--safety-json", default="configs/libero_safety.json")
-    p.add_argument("--suite", default="libero_spatial", choices=LIBERO_SUITES + ("all",))
+    p.add_argument(
+        "--suite",
+        default="libero_spatial",
+        choices=LIBERO_SUITES + LIBERO_CONSTRAINED_SUITES + ("all",),
+    )
     p.add_argument(
         "--perturbation",
         default=None,
@@ -46,9 +61,10 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--task-id", type=int, default=None)
     p.add_argument("--max-tasks", type=int, default=None)
-    p.add_argument("--max-states", type=int, default=1)
-    p.add_argument("--state-ids", nargs="+", type=int, default=None)
-    p.add_argument("--all-states", action="store_true")
+    state_group = p.add_mutually_exclusive_group()
+    state_group.add_argument("--max-states", type=int, default=1)
+    state_group.add_argument("--state-ids", nargs="+", type=int, default=None)
+    state_group.add_argument("--all-states", action="store_true")
     p.add_argument(
         "--outdir",
         default=None,
@@ -59,6 +75,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--save-video", default="rollout.mp4", help="Video filename inside each rollout directory.")
     p.add_argument("--no-video", action="store_true")
     p.add_argument("--skip-existing", action="store_true")
+    p.add_argument(
+        "--rollout-timeout",
+        type=float,
+        default=300.0,
+        help="Kill and count as a failure any single rollout (one task/init-state subprocess) that runs longer than this many seconds. Pass 0 to disable.",
+    )
     p.add_argument("--use-safety-prompts", action="store_true", help="Use augmented prompts from configs/libero_safety.json when available.")
     p.add_argument("--dry-run", action="store_true")
     return p.parse_args()
@@ -143,13 +165,17 @@ def _enumerate_tasks(suites: list[str]) -> list[dict[str, Any]]:
         benchmark = get_benchmark(suite)()
         for task_id in range(benchmark.get_num_tasks()):
             task = benchmark.get_task(task_id)
+            try:
+                num_init_states = len(benchmark.get_task_init_states(task_id))
+            except Exception:
+                num_init_states = 50
             tasks.append(
                 {
                     "suite": suite,
                     "task_id": task_id,
                     "task_name": task.name,
                     "language": task.language,
-                    "num_init_states": 50,
+                    "num_init_states": num_init_states,
                 }
             )
     return tasks
@@ -281,11 +307,19 @@ def main() -> int:
 
         print(f"{label} running")
         t0 = time.time()
-        ret = subprocess.call(cmd)
-        elapsed = time.time() - t0
-        summary = _read_summary(run_dir)
-        print(f"{label} exit={ret} success={summary.get('success')} elapsed={elapsed:.1f}s")
-        results.append(_result_row(task, state_id, run_dir, prompt, ret, elapsed, summary, skipped=False))
+        timeout = args.rollout_timeout if args.rollout_timeout and args.rollout_timeout > 0 else None
+        try:
+            ret = subprocess.run(cmd, timeout=timeout).returncode
+            elapsed = time.time() - t0
+            summary = _read_summary(run_dir)
+            print(f"{label} exit={ret} success={summary.get('success')} elapsed={elapsed:.1f}s")
+            results.append(_result_row(task, state_id, run_dir, prompt, ret, elapsed, summary, skipped=False))
+        except subprocess.TimeoutExpired:
+            elapsed = time.time() - t0
+            print(f"{label} TIMED OUT after {elapsed:.1f}s (limit {timeout:.0f}s) -- killed, counted as failure")
+            results.append(
+                _result_row(task, state_id, run_dir, prompt, None, elapsed, {}, skipped=False, timed_out=True)
+            )
         _print_running_tally(results)
 
     if args.dry_run:
@@ -315,11 +349,12 @@ def _result_row(
     state_id: int,
     run_dir: Path,
     prompt: str,
-    exit_code: int,
+    exit_code: int | None,
     elapsed: float,
     summary: dict[str, Any],
     *,
     skipped: bool,
+    timed_out: bool = False,
 ) -> dict[str, Any]:
     return {
         "suite": task["suite"],
@@ -327,10 +362,11 @@ def _result_row(
         "state_id": state_id,
         "task_name": task["task_name"],
         "prompt": prompt,
-        "success": summary.get("success"),
+        "success": False if timed_out else summary.get("success"),
         "exit_code": exit_code,
         "elapsed_sec": round(float(elapsed), 1),
         "skipped": bool(skipped),
+        "timed_out": bool(timed_out),
         "run_dir": str(run_dir),
     }
 
