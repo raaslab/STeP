@@ -143,10 +143,10 @@ def _load_real_estimator(config: ContactGraspNetConfig) -> Any:
     ``ModuleNotFoundError``.
 
     Call shape transcribed directly from Cap-X's server
-    (``capx/serving/launch_contact_graspnet_server.py``) -- not yet executed
-    against a real checkpoint, since this dev machine has no CUDA. Expect to
-    fix up the exact YAML-loading/config shape once run for real once on the
-    target GPU machine.
+    (``capx/serving/launch_contact_graspnet_server.py``), then verified by
+    running it for real: CPU inference works (no CUDA needed --
+    ``contact_graspnet_pytorch`` ships no compiled CUDA extensions) at
+    ~1.6s/call.
     """
     try:
         import yaml
@@ -154,22 +154,33 @@ def _load_real_estimator(config: ContactGraspNetConfig) -> Any:
         from contact_graspnet_pytorch.contact_grasp_estimator import GraspEstimator
     except ImportError as exc:
         raise ImportError(
-            "ContactGraspNetGenerator requires 'contact_graspnet_pytorch' (+ CUDA + "
-            "torch) to be installed -- this is expected to run only on a CUDA machine, "
-            "never in this dev environment. See Cap-X (https://github.com/capgym/cap-x) "
-            "for the vendored package and its 'contactgraspnet' extra."
+            "ContactGraspNetGenerator requires the 'contact_graspnet_pytorch' package "
+            "(https://github.com/elchun/contact_graspnet_pytorch, also vendored by Cap-X "
+            "https://github.com/capgym/cap-x). CUDA is NOT required -- it runs on CPU. "
+            "Install with: pip install -e <checkout> --no-deps --no-build-isolation "
+            "(its setup.py imports numpy at build time, so build isolation breaks), plus "
+            "'trimesh pyrender tqdm', which its Linux/CUDA-pinned conda env file does not "
+            "provide in a usable form."
         ) from exc
-
-    if not config.checkpoint_dir:
-        raise FileNotFoundError(
-            "ContactGraspNetConfig.checkpoint_dir is empty -- set it to a directory "
-            "containing Contact-GraspNet's model.pt and config.yaml before enabling "
-            "contact_graspnet in the motion config."
-        )
 
     import os
 
-    with open(os.path.join(config.checkpoint_dir, "config.yaml")) as f:
+    checkpoint_dir = os.environ.get("CONTACT_GRASPNET_CHECKPOINT_DIR") or config.checkpoint_dir
+    if not checkpoint_dir:
+        raise FileNotFoundError(
+            "No Contact-GraspNet checkpoint directory configured -- set the "
+            "CONTACT_GRASPNET_CHECKPOINT_DIR environment variable, or "
+            "ContactGraspNetConfig.checkpoint_dir, to a directory containing this "
+            "model's config.yaml and a checkpoints/model.pt."
+        )
+    if not os.path.isdir(checkpoint_dir):
+        raise FileNotFoundError(
+            f"Contact-GraspNet checkpoint directory {checkpoint_dir!r} does not exist on "
+            "this machine. It is machine-specific: set CONTACT_GRASPNET_CHECKPOINT_DIR to "
+            "your own checkout's checkpoints/contact_graspnet directory."
+        )
+
+    with open(os.path.join(checkpoint_dir, "config.yaml")) as f:
         global_config = yaml.safe_load(f)
 
     estimator = GraspEstimator(global_config)
@@ -177,14 +188,44 @@ def _load_real_estimator(config: ContactGraspNetConfig) -> Any:
     # (confirmed against contact_graspnet_pytorch's own inference.py) -- CheckpointIO.load()
     # joins its checkpoint_dir with the filename, so this must be the "checkpoints" subdir,
     # not config.checkpoint_dir itself.
-    checkpoint_io = CheckpointIO(checkpoint_dir=os.path.join(config.checkpoint_dir, "checkpoints"), model=estimator.model)
-    checkpoint_io.load("model.pt")
-    estimator.model.to(config.device)
+    checkpoint_io = CheckpointIO(checkpoint_dir=os.path.join(checkpoint_dir, "checkpoints"), model=estimator.model)
+
+    import torch
+
+    device = config.device
+    if device in ("", "auto"):
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # CheckpointIO.load() calls torch.load(filename) with no extra arguments, so
+    # the only way to pass these is to wrap torch.load for the duration of the
+    # call. Both are required on any torch >= 2.6, on CPU *and* GPU machines:
+    #   * weights_only: torch 2.6 flipped this default to True, which refuses to
+    #     unpickle this checkpoint's numpy scalars.
+    #   * map_location: the published checkpoint was saved from a CUDA device, so
+    #     loading it anywhere without a GPU raises outright.
+    original_torch_load = torch.load
+
+    def _patched_load(*args, **kwargs):
+        kwargs.setdefault("weights_only", False)
+        kwargs.setdefault("map_location", device)
+        return original_torch_load(*args, **kwargs)
+
+    torch.load = _patched_load
+    try:
+        checkpoint_io.load("model.pt")
+    finally:
+        torch.load = original_torch_load
+
+    estimator.model.to(device)
     return estimator
 
 
 class ContactGraspNetGenerator(GraspGenerator):
     """Learned grasp-candidate source. See module docstring."""
+
+    # Process-wide, so the fallback warning prints once per run rather than
+    # once per object per pick.
+    _fallback_warned: bool = False
 
     def __init__(
         self,
@@ -213,13 +254,25 @@ class ContactGraspNetGenerator(GraspGenerator):
         for name in object_names:
             try:
                 candidates.extend(self._generate_for_object(scene, name))
-            except Exception:
+            except Exception as exc:
                 # Never let one object's inference failure (bad checkpoint,
                 # CUDA OOM, malformed model output, empty scene geometry)
                 # block picks on other objects or crash the pick attempt --
                 # the heuristic generator's candidates still carry it. See
                 # module docstring / config.py's ContactGraspNetConfig.
                 logger.exception("ContactGraspNetGenerator failed for object %r", name)
+                # Also print, once per process: a run that silently falls back
+                # to the heuristic generator produces perfectly plausible
+                # numbers for a grasp method other than the one being reported.
+                # An unconfigured checkpoint path is the common cause and is
+                # otherwise invisible in the logs.
+                if not ContactGraspNetGenerator._fallback_warned:
+                    ContactGraspNetGenerator._fallback_warned = True
+                    print(
+                        f"[contact_graspnet] WARNING: inference failed ({type(exc).__name__}: {exc}). "
+                        "Falling back to the HEURISTIC grasp generator -- results are NOT "
+                        "Contact-GraspNet's. Set CONTACT_GRASPNET_CHECKPOINT_DIR to fix."
+                    )
         return candidates
 
     def _capture_point_clouds(self, scene: SceneQuery, object_name: str) -> tuple[np.ndarray, np.ndarray]:

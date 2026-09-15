@@ -1,3 +1,10 @@
 __pycache__/
 *.py[cod]
 outputs/
+
+# Local environment: .env holds the OpenAI key, .venv holds it too (appended
+# to bin/activate). Neither may ever be committed.
+.env
+.venv/
+step.egg-info/
+.DS_Store
