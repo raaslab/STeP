@@ -1,0 +1,70 @@
+(define (problem LIBERO_Tabletop_Manipulation)
+  (:domain robosuite)
+  (:language put the black bowl on the plate without passing over the hot stove)
+    (:regions
+      (bowl_region
+          (:target main_table)
+          (:ranges (
+              (-0.03 -0.27 0.03 -0.21)
+            )
+          )
+          (:yaw_rotation (
+              (0.0 0.0)
+            )
+          )
+      )
+      (stove_region
+          (:target main_table)
+          (:ranges (
+              (-0.03 -0.03 0.03 0.03)
+            )
+          )
+          (:yaw_rotation (
+              (0.0 0.0)
+            )
+          )
+      )
+      (plate_region
+          (:target main_table)
+          (:ranges (
+              (-0.03 0.21 0.03 0.27)
+            )
+          )
+          (:yaw_rotation (
+              (0.0 0.0)
+            )
+          )
+      )
+      (cook_region
+          (:target flat_stove_1)
+      )
+    )
+
+  (:fixtures
+    main_table - table
+    flat_stove_1 - flat_stove
+  )
+
+  (:objects
+    akita_black_bowl_1 - akita_black_bowl
+    plate_1 - plate
+  )
+
+  (:obj_of_interest
+    akita_black_bowl_1
+    plate_1
+    flat_stove_1
+  )
+
+  (:init
+    (On akita_black_bowl_1 main_table_bowl_region)
+    (On flat_stove_1 main_table_stove_region)
+    (On plate_1 main_table_plate_region)
+    (Turnon flat_stove_1)
+  )
+
+  (:goal
+    (And (On akita_black_bowl_1 plate_1))
+  )
+
+)

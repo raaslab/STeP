@@ -1164,7 +1164,36 @@ def apply_libero_experiment_geometry(scene_context: dict[str, Any]) -> dict[str,
     if avoid:
         region = normalize_entity_name(avoid.get("region") or avoid.get("object") or avoid.get("obstacle") or "")
         margin = float(avoid.get("margin", avoid.get("radius", 0.06)))
-        if region:
+        explicit_xy = avoid.get("center_xy")
+        if region and explicit_xy is not None:
+            # A VIRTUAL zone: a marked region on the table at a fixed position,
+            # with no object behind it. This is what LIBERO-Constrained uses.
+            # Deriving the zone from a real object instead forces a choice
+            # between a keep-out that never binds (the object sits off the
+            # route) and one that blocks the task outright (the object is
+            # physically in the way) -- both measured, neither usable.
+            g = geom.setdefault(region, {})
+            g["xy"] = [float(explicit_xy[0]), float(explicit_xy[1])]
+            g["sdf_geometry"] = {
+                "type": "circle",
+                "center_xy": [float(explicit_xy[0]), float(explicit_xy[1])],
+                "radius": margin,
+                "convention": "outside_positive",
+                "always_active": True,
+                # Marks it as having no body to follow, so the per-reset
+                # re-centring leaves it exactly where the benchmark put it.
+                "virtual": True,
+            }
+            g.setdefault("radius", margin)
+            if region not in entity_names:
+                entities.append({
+                    "name": region,
+                    "role": "obstacle",
+                    "aliases": _entity_aliases(region) + ["the red zone", "the marked zone", "the danger zone"],
+                    "notes": "Virtual keep-out region marked on the table; no physical object.",
+                })
+                entity_names.add(region)
+        elif region:
             if region not in entity_names:
                 entities.append({"name": region, "role": "obstacle", "aliases": _entity_aliases(region)})
                 entity_names.add(region)
