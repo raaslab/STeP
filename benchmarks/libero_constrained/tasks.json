@@ -431,6 +431,8 @@
       "scoring": {
         "type": "order",
         "expected_first": "alphabet_soup_1",
+        "expected_second": "tomato_sauce_1",
+        "destination": "basket_1",
         "note": "compare the step at which each target first reaches the destination"
       }
     },
@@ -460,6 +462,8 @@
       "scoring": {
         "type": "order",
         "expected_first": "butter_1",
+        "expected_second": "cream_cheese_1",
+        "destination": "basket_1",
         "note": "compare the step at which each target first reaches the destination"
       }
     },
@@ -489,6 +493,8 @@
       "scoring": {
         "type": "order",
         "expected_first": "alphabet_soup_1",
+        "expected_second": "cream_cheese_1",
+        "destination": "basket_1",
         "note": "compare the step at which each target first reaches the destination"
       }
     },
