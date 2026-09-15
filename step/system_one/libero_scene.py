@@ -1189,7 +1189,10 @@ def apply_libero_experiment_geometry(scene_context: dict[str, Any]) -> dict[str,
                 entities.append({
                     "name": region,
                     "role": "obstacle",
-                    "aliases": _entity_aliases(region) + ["the red zone", "the marked zone", "the danger zone"],
+                    "aliases": _entity_aliases(region) + [
+                        "the red zone", "the marked zone", "the danger zone",
+                        "red zone marked on the table", "the zone",
+                    ],
                     "notes": "Virtual keep-out region marked on the table; no physical object.",
                 })
                 entity_names.add(region)

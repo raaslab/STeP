@@ -86,6 +86,28 @@ def parse_args() -> argparse.Namespace:
         help="Keep-out radius in metres around --avoid-region. Difficulty knob.",
     )
     p.add_argument(
+        "--benchmark-task",
+        default=None,
+        help=(
+            "Run one task from benchmarks/libero_constrained/tasks.json by id "
+            "(e.g. libero_10/0/S-zone). Sets the suite, task, init state, prompt and "
+            "keep-out zone from the frozen manifest. Anything given explicitly on the "
+            "command line wins."
+        ),
+    )
+    p.add_argument(
+        "--zone-center-xy",
+        nargs=2,
+        type=float,
+        default=None,
+        metavar=("X", "Y"),
+        help=(
+            "Place the --avoid-region keep-out at this world xy as a VIRTUAL zone -- a "
+            "marked region with no object behind it. Without this the region must name a "
+            "real scene object, whose position then decides where the zone lands."
+        ),
+    )
+    p.add_argument(
         "--place-obstacle-in-path",
         action="store_true",
         help=(
@@ -175,6 +197,54 @@ def _resolve_prompt(args: argparse.Namespace, scene_context: dict[str, Any]) -> 
     return "Execute the LIBERO manipulation task."
 
 
+_BENCHMARK_MANIFEST = Path(__file__).resolve().parents[1] / "benchmarks" / "libero_constrained" / "tasks.json"
+
+
+def _load_benchmark_task(task_id: str) -> dict[str, Any]:
+    """One entry from the LIBERO-Constrained manifest, by its id.
+
+    The manifest is the reviewed, frozen definition: prompt, zone geometry and
+    scoring spec all come from it, so a run cannot quietly differ from the
+    benchmark it claims to be running.
+    """
+    if not _BENCHMARK_MANIFEST.exists():
+        raise SystemExit(f"benchmark manifest not found at {_BENCHMARK_MANIFEST}")
+    manifest = load_json(_BENCHMARK_MANIFEST)
+    for task in manifest.get("tasks", []):
+        if task.get("id") == task_id:
+            return task
+    ids = [t.get("id") for t in manifest.get("tasks", [])]
+    raise SystemExit(
+        f"no benchmark task {task_id!r}. {len(ids)} available, e.g. " + ", ".join(ids[:3])
+    )
+
+
+def _apply_benchmark_task(args: argparse.Namespace) -> dict[str, Any] | None:
+    """Fill in suite/task/prompt/zone from --benchmark-task, without overriding
+    anything the caller set explicitly on the command line."""
+    if not getattr(args, "benchmark_task", None):
+        return None
+    task = _load_benchmark_task(args.benchmark_task)
+    if args.suite is None:
+        args.suite = task["suite"]
+    if args.task_id is None:
+        args.task_id = int(task["task_id"])
+    if args.init_state_id is None:
+        args.init_state_id = int(task.get("init_state_id", 0))
+    if not args.prompt:
+        args.prompt = task["prompt"]
+    zone = task.get("zone")
+    if zone and not args.avoid_region:
+        # A virtual zone: a named region at a fixed point with no backing object.
+        # Named to match how the prompt refers to it ("the red zone marked on the
+        # table"), since System 2 has to resolve the phrase to this entity.
+        args.avoid_region = "marked_zone_1"
+        args.avoid_margin = float(zone["radius_m"])
+        args.zone_center_xy = [float(c) for c in zone["center_xy"]]
+    print(f"[benchmark] {task['id']}  family={task['family']}  scoring={task['scoring']['type']}")
+    return task
+
+
 def _prepare_libero_scene(args: argparse.Namespace, outdir: Path) -> tuple[dict[str, Any], Path, str, Path]:
     scene_context = load_json(args.base_scene_context)
     platform = scene_context.setdefault("platform", {})
@@ -206,13 +276,16 @@ def _prepare_libero_scene(args: argparse.Namespace, outdir: Path) -> tuple[dict[
     # that only exists once the scene has been snapshotted. The real execution
     # env then materializes it during construction.
     if args.avoid_region:
-        platform.setdefault("libero_experiment", {})["avoid_region"] = {
+        avoid: dict[str, Any] = {
             "region": args.avoid_region,
             "margin": float(args.avoid_margin),
         }
+        if getattr(args, "zone_center_xy", None):
+            avoid["center_xy"] = [float(c) for c in args.zone_center_xy]
+        platform.setdefault("libero_experiment", {})["avoid_region"] = dict(avoid)
         scene_context.setdefault("platform", {}).setdefault("libero_experiment", {})[
             "avoid_region"
-        ] = {"region": args.avoid_region, "margin": float(args.avoid_margin)}
+        ] = dict(avoid)
         # --no-enforce-keepout is the RQ2 ablation: the zone is still declared,
         # still turned into an SDF constraint, and still scored exactly the
         # same -- System 1 just never plans around it. Without this the "STL
@@ -479,6 +552,7 @@ def _load_or_create_plan(
 
 def main() -> int:
     args = parse_args()
+    benchmark_task = _apply_benchmark_task(args)
     legacy_root = _add_legacy_root(args.legacy_vlm_stl_root)
     outdir = Path(args.outdir)
     _configure_libero_paths(legacy_root, outdir)
