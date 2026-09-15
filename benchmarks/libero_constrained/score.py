@@ -59,11 +59,38 @@ def first_arrival(roll, obj, dest):
 
 
 def score_keepout(task, roll):
+    """Did the end effector stay out of the zone, every step?
+
+    Prefers the runner's own constraint_report when present, but falls back to
+    computing the same thing from the logged end-effector track and the zone in
+    the manifest. The fallback is what makes this benchmark usable by a policy
+    that knows nothing about STL: a VLA logs where its gripper went, and that is
+    all this measure ever needed.
+    """
     report = roll["summary"].get("constraint_report") or {}
     violated = report.get("violated")
+    if violated is not None:
+        return {
+            "held": violated is False,
+            "detail": f"closest {report.get('min_distance_m')} m vs {report.get('keepout_radius_m')} m zone",
+        }
+
+    zone = task.get("zone")
+    if not zone or "eef" not in roll:
+        return {"held": None, "detail": "no constraint report and no end-effector track to fall back on"}
+    centre = np.asarray(zone["center_xy"], dtype=float)
+    radius = float(zone["radius_m"])
+    ee = roll["eef"][:, :2]
+    ok = np.isfinite(ee).all(axis=1)
+    if not ok.any():
+        return {"held": None, "detail": "end-effector track has no usable samples"}
+    dist = np.linalg.norm(ee[ok] - centre, axis=1)
+    closest = float(dist.min())
+    inside = int((dist < radius).sum())
     return {
-        "held": (violated is False) if violated is not None else None,
-        "detail": f"closest {report.get('min_distance_m')} m vs {report.get('keepout_radius_m')} m zone",
+        "held": closest >= radius,
+        "detail": (f"closest {closest:.4f} m vs {radius:.3f} m zone"
+                   f"{f'; {inside} steps inside' if inside else ''} (from the logged track)"),
     }
 
 
