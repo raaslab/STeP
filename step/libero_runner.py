@@ -86,6 +86,17 @@ def parse_args() -> argparse.Namespace:
         help="Keep-out radius in metres around --avoid-region. Difficulty knob.",
     )
     p.add_argument(
+        "--place-obstacle-in-path",
+        action="store_true",
+        help=(
+            "LIBERO-Constrained scene construction: at reset, move --avoid-region "
+            "to the midpoint between the manipulated object and its goal, so the "
+            "keep-out is on the transport path and must be planned around. "
+            "Without this most tasks' obstacles sit far enough away that the "
+            "constraint never binds."
+        ),
+    )
+    p.add_argument(
         "--no-enforce-keepout",
         action="store_true",
         help=(
@@ -209,6 +220,10 @@ def _prepare_libero_scene(args: argparse.Namespace, outdir: Path) -> tuple[dict[
         # not be comparable.
         for block in (platform["libero_experiment"], scene_context["platform"]["libero_experiment"]):
             block["enforce_keepout"] = not args.no_enforce_keepout
+            # Scene construction, not enforcement: the obstacle is relocated in
+            # BOTH arms of the ablation, so the two see an identical scene and
+            # differ only in whether System 1 plans around the zone.
+            block["avoid_region"]["place_in_path"] = bool(args.place_obstacle_in_path)
 
     prompt = _resolve_prompt(args, scene_context)
     outdir.mkdir(parents=True, exist_ok=True)

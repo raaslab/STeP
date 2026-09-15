@@ -435,16 +435,21 @@ class CollisionChecker:
                     violations.append(Contact(self.ee_site, f"keepout:{zone.name}", d))
                 if attached is None:
                     continue
-                # The carried object sweeps its own footprint through the zone
-                # even when the gripper itself stays clear, which is exactly
-                # the case safe_object measures.
-                for center, radius in self._attached_world_spheres(scratch, attached):
-                    d_obj = zone.clearance(center[:2]) - float(radius)
-                    min_clearance = min(min_clearance, d_obj)
-                    if d_obj < 0.0:
-                        violations.append(
-                            Contact(attached.object_name, f"keepout:{zone.name}", d_obj)
-                        )
+                # The carried object's ORIGIN, not its fitted spheres. safe_object
+                # scores the object's position against the zone, so subtracting
+                # the sphere radius here would enforce a stricter constraint than
+                # the one being measured: for a 6cm keep-out and a bowl whose
+                # conservative sphere fit is ~6cm, the effective zone doubles to
+                # 12cm and transport reports NO_FEASIBLE_CANDIDATE on tasks whose
+                # goal is comfortably outside the scored zone.
+                hand_pos, hand_quat = scratch.site_pose(self.ee_site)
+                obj_pos, _ = compose_world_pose(
+                    hand_pos, hand_quat, attached.grasp_transform_hand_from_object
+                )
+                d_obj = zone.clearance(obj_pos[:2])
+                min_clearance = min(min_clearance, d_obj)
+                if d_obj < 0.0:
+                    violations.append(Contact(attached.object_name, f"keepout:{zone.name}", d_obj))
 
         # 2. Sphere-approximated attached-object collision.
         if attached is not None:
