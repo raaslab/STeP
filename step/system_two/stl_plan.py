@@ -35,7 +35,7 @@ def validate_stl_plan(plan: dict[str, Any]) -> ValidationResult:
         if sid != expected_id:
             errors.append(f"subtask {expected_id} has subtask_id={sid}; expected {expected_id}")
         skill = subtask.get("skill")
-        if skill not in {"pick", "transport", "place", "pour", "open", "close", "turn_on"}:
+        if skill not in {"pick", "transport", "place", "pour", "open", "close", "turn_on", "wait"}:
             errors.append(f"subtask {expected_id} has unsupported skill={skill!r}")
         if not isinstance(subtask.get("params"), dict):
             errors.append(f"subtask {expected_id} params must be an object")
@@ -145,6 +145,7 @@ PREDICATE_TO_SKILL: dict[frozenset[str], str] = {
     frozenset({"Closed"}): "close",
     frozenset({"TurnedOn"}): "turn_on",
     frozenset({"PouredInto"}): "pour",
+    frozenset({"Waited"}): "wait",
 }
 
 
@@ -282,6 +283,13 @@ def _derive_params(skill: str, goal: Formula, object_hints: dict[str, dict[str, 
     elif skill == "turn_on":
         args = find_predicate_args(goal, "TurnedOn") or []
         params["object"] = args[0] if args else None
+    elif skill == "wait":
+        args = find_predicate_args(goal, "Waited") or []
+        # Waited(seconds) -- the only argument is the duration to hold for.
+        try:
+            params["seconds"] = float(args[0]) if args else 2.0
+        except (TypeError, ValueError):
+            params["seconds"] = 2.0
     elif skill == "pour":
         args = find_predicate_args(goal, "PouredInto") or []
         params["object"] = args[0] if args else None

@@ -658,22 +658,6 @@
       }
     },
     {
-      "id": "libero_10/0/T-deadline",
-      "family": "temporal",
-      "kind": "T-deadline",
-      "suite": "libero_10",
-      "task_id": 0,
-      "init_state_id": 0,
-      "prompt": "put both the alphabet soup and the tomato sauce in the basket, and finish within 20 seconds",
-      "stl_intent": "F[0,400](Goal)",
-      "scoring": {
-        "type": "deadline",
-        "seconds": 20,
-        "steps": 400,
-        "note": "step at which the task's own success condition first holds"
-      }
-    },
-    {
       "id": "libero_10/0/T-dwell",
       "family": "temporal",
       "kind": "T-dwell",
@@ -687,22 +671,6 @@
         "seconds": 2,
         "steps": 40,
         "note": "consecutive steps over the goal with the gripper still closed, before release"
-      }
-    },
-    {
-      "id": "libero_10/1/T-deadline",
-      "family": "temporal",
-      "kind": "T-deadline",
-      "suite": "libero_10",
-      "task_id": 1,
-      "init_state_id": 0,
-      "prompt": "put both the cream cheese box and the butter in the basket, and finish within 20 seconds",
-      "stl_intent": "F[0,400](Goal)",
-      "scoring": {
-        "type": "deadline",
-        "seconds": 20,
-        "steps": 400,
-        "note": "step at which the task's own success condition first holds"
       }
     },
     {
@@ -720,6 +688,22 @@
       }
     },
     {
+      "id": "libero_10/2/T-wait",
+      "family": "temporal",
+      "kind": "T-wait",
+      "suite": "libero_10",
+      "task_id": 2,
+      "init_state_id": 0,
+      "prompt": "turn on the stove and put the moka pot on it, waiting at least 4 seconds after turning on the stove before starting the next step",
+      "stl_intent": "F(Waited(4)) between the stages",
+      "scoring": {
+        "type": "wait",
+        "seconds": 4,
+        "steps": 80,
+        "note": "steps held by the wait subtask between the two stages"
+      }
+    },
+    {
       "id": "libero_10/3/T-stage",
       "family": "temporal",
       "kind": "T-stage",
@@ -731,6 +715,22 @@
       "scoring": {
         "type": "stage",
         "note": "step the second stage begins, against the step the first stage completes"
+      }
+    },
+    {
+      "id": "libero_10/3/T-wait",
+      "family": "temporal",
+      "kind": "T-wait",
+      "suite": "libero_10",
+      "task_id": 3,
+      "init_state_id": 0,
+      "prompt": "put the black bowl in the bottom drawer of the cabinet and close it, waiting at least 4 seconds after the first step is done before starting the next step",
+      "stl_intent": "F(Waited(4)) between the stages",
+      "scoring": {
+        "type": "wait",
+        "seconds": 4,
+        "steps": 80,
+        "note": "steps held by the wait subtask between the two stages"
       }
     },
     {
@@ -750,19 +750,19 @@
       }
     },
     {
-      "id": "libero_goal/0/T-deadline",
+      "id": "libero_10/9/T-wait",
       "family": "temporal",
-      "kind": "T-deadline",
-      "suite": "libero_goal",
-      "task_id": 0,
+      "kind": "T-wait",
+      "suite": "libero_10",
+      "task_id": 9,
       "init_state_id": 0,
-      "prompt": "open the middle drawer of the cabinet, and finish within 20 seconds",
-      "stl_intent": "F[0,400](Goal)",
+      "prompt": "put the yellow and white mug in the microwave and close it, waiting at least 4 seconds after the first step is done before starting the next step",
+      "stl_intent": "F(Waited(4)) between the stages",
       "scoring": {
-        "type": "deadline",
-        "seconds": 20,
-        "steps": 400,
-        "note": "step at which the task's own success condition first holds"
+        "type": "wait",
+        "seconds": 4,
+        "steps": 80,
+        "note": "steps held by the wait subtask between the two stages"
       }
     },
     {
@@ -782,22 +782,6 @@
       }
     },
     {
-      "id": "libero_goal/2/T-deadline",
-      "family": "temporal",
-      "kind": "T-deadline",
-      "suite": "libero_goal",
-      "task_id": 2,
-      "init_state_id": 0,
-      "prompt": "put the wine bottle on top of the cabinet, and finish within 20 seconds",
-      "stl_intent": "F[0,400](Goal)",
-      "scoring": {
-        "type": "deadline",
-        "seconds": 20,
-        "steps": 400,
-        "note": "step at which the task's own success condition first holds"
-      }
-    },
-    {
       "id": "libero_goal/3/T-stage",
       "family": "temporal",
       "kind": "T-stage",
@@ -809,6 +793,22 @@
       "scoring": {
         "type": "stage",
         "note": "step the second stage begins, against the step the first stage completes"
+      }
+    },
+    {
+      "id": "libero_goal/3/T-wait",
+      "family": "temporal",
+      "kind": "T-wait",
+      "suite": "libero_goal",
+      "task_id": 3,
+      "init_state_id": 0,
+      "prompt": "open the top drawer and put the bowl inside, waiting at least 4 seconds after opening the top drawer before starting the next step",
+      "stl_intent": "F(Waited(4)) between the stages",
+      "scoring": {
+        "type": "wait",
+        "seconds": 4,
+        "steps": 80,
+        "note": "steps held by the wait subtask between the two stages"
       }
     },
     {
@@ -828,22 +828,6 @@
       }
     },
     {
-      "id": "libero_spatial/0/T-deadline",
-      "family": "temporal",
-      "kind": "T-deadline",
-      "suite": "libero_spatial",
-      "task_id": 0,
-      "init_state_id": 0,
-      "prompt": "pick up the black bowl between the plate and the ramekin and place it on the plate, and finish within 20 seconds",
-      "stl_intent": "F[0,400](Goal)",
-      "scoring": {
-        "type": "deadline",
-        "seconds": 20,
-        "steps": 400,
-        "note": "step at which the task's own success condition first holds"
-      }
-    },
-    {
       "id": "libero_spatial/0/T-dwell",
       "family": "temporal",
       "kind": "T-dwell",
@@ -857,69 +841,6 @@
         "seconds": 2,
         "steps": 40,
         "note": "consecutive steps over the goal with the gripper still closed, before release"
-      }
-    },
-    {
-      "id": "libero_spatial/1/T-deadline",
-      "family": "temporal",
-      "kind": "T-deadline",
-      "suite": "libero_spatial",
-      "task_id": 1,
-      "init_state_id": 0,
-      "prompt": "pick up the black bowl next to the ramekin and place it on the plate, and finish within 20 seconds",
-      "stl_intent": "F[0,400](Goal)",
-      "scoring": {
-        "type": "deadline",
-        "seconds": 20,
-        "steps": 400,
-        "note": "step at which the task's own success condition first holds"
-      }
-    },
-    {
-      "id": "libero_10/0/C-order-deadline",
-      "family": "combined",
-      "kind": "C-order-deadline",
-      "suite": "libero_10",
-      "task_id": 0,
-      "init_state_id": 0,
-      "prompt": "put both the alphabet soup and the tomato sauce in the basket, putting them in alphabetical order, and finish within 20 seconds",
-      "stl_intent": "(F(In(alphabet_soup_1)) before F(In(tomato_sauce_1))) & (F[0,400](Goal))",
-      "scoring": {
-        "type": "combo",
-        "parts": [
-          "libero_10/0/L-order",
-          "libero_10/0/T-deadline"
-        ],
-        "pair": "logical+temporal",
-        "note": "every part must hold; scored by looking each part up in this manifest"
-      }
-    },
-    {
-      "id": "libero_10/0/C-zone-deadline",
-      "family": "combined",
-      "kind": "C-zone-deadline",
-      "suite": "libero_10",
-      "task_id": 0,
-      "init_state_id": 0,
-      "prompt": "put both the alphabet soup and the tomato sauce in the basket, while staying out of the red zone marked on the table, and finish within 20 seconds",
-      "stl_intent": "(G(Safe(zone))) & (F[0,400](Goal))",
-      "scoring": {
-        "type": "combo",
-        "parts": [
-          "libero_10/0/S-zone",
-          "libero_10/0/T-deadline"
-        ],
-        "pair": "spatial+temporal",
-        "note": "every part must hold; scored by looking each part up in this manifest"
-      },
-      "zone": {
-        "center_xy": [
-          -0.02715,
-          0.14167
-        ],
-        "radius_m": 0.03,
-        "route_depth_m": 0.0255,
-        "object_clearance_m": 0.015
       }
     },
     {
@@ -951,25 +872,6 @@
       }
     },
     {
-      "id": "libero_10/1/C-order-deadline",
-      "family": "combined",
-      "kind": "C-order-deadline",
-      "suite": "libero_10",
-      "task_id": 1,
-      "init_state_id": 0,
-      "prompt": "put both the cream cheese box and the butter in the basket, putting them in alphabetical order, and finish within 20 seconds",
-      "stl_intent": "(F(In(butter_1)) before F(In(cream_cheese_1))) & (F[0,400](Goal))",
-      "scoring": {
-        "type": "combo",
-        "parts": [
-          "libero_10/1/L-order",
-          "libero_10/1/T-deadline"
-        ],
-        "pair": "logical+temporal",
-        "note": "every part must hold; scored by looking each part up in this manifest"
-      }
-    },
-    {
       "id": "libero_10/1/C-zone-order",
       "family": "combined",
       "kind": "C-zone-order",
@@ -998,6 +900,34 @@
       }
     },
     {
+      "id": "libero_10/2/C-zone-wait",
+      "family": "combined",
+      "kind": "C-zone-wait",
+      "suite": "libero_10",
+      "task_id": 2,
+      "init_state_id": 0,
+      "prompt": "turn on the stove and put the moka pot on it, while staying out of the red zone marked on the table, and waiting at least 4 seconds after turning on the stove before starting the next step",
+      "stl_intent": "(G(Safe(zone))) & (F(Waited(4)) between the stages)",
+      "scoring": {
+        "type": "combo",
+        "parts": [
+          "libero_10/2/S-zone",
+          "libero_10/2/T-wait"
+        ],
+        "pair": "spatial+temporal",
+        "note": "every part must hold; scored by looking each part up in this manifest"
+      },
+      "zone": {
+        "center_xy": [
+          -0.06719,
+          0.06489
+        ],
+        "radius_m": 0.025,
+        "route_depth_m": 0.0117,
+        "object_clearance_m": 0.0154
+      }
+    },
+    {
       "id": "libero_10/4/C-offset-dwell",
       "family": "combined",
       "kind": "C-offset-dwell",
@@ -1017,31 +947,59 @@
       }
     },
     {
-      "id": "libero_goal/2/C-zone-deadline",
+      "id": "libero_10/9/C-zone-wait",
       "family": "combined",
-      "kind": "C-zone-deadline",
-      "suite": "libero_goal",
-      "task_id": 2,
+      "kind": "C-zone-wait",
+      "suite": "libero_10",
+      "task_id": 9,
       "init_state_id": 0,
-      "prompt": "put the wine bottle on top of the cabinet, while staying out of the red zone marked on the table, and finish within 20 seconds",
-      "stl_intent": "(G(Safe(zone))) & (F[0,400](Goal))",
+      "prompt": "put the yellow and white mug in the microwave and close it, while staying out of the red zone marked on the table, and waiting at least 4 seconds after the first step is done before starting the next step",
+      "stl_intent": "(G(Safe(zone))) & (F(Waited(4)) between the stages)",
       "scoring": {
         "type": "combo",
         "parts": [
-          "libero_goal/2/S-zone",
-          "libero_goal/2/T-deadline"
+          "libero_10/9/S-zone",
+          "libero_10/9/T-wait"
         ],
         "pair": "spatial+temporal",
         "note": "every part must hold; scored by looking each part up in this manifest"
       },
       "zone": {
         "center_xy": [
-          -0.10523,
-          -0.12123
+          -0.0156,
+          0.13101
         ],
-        "radius_m": 0.035,
-        "route_depth_m": 0.0298,
-        "object_clearance_m": 0.0151
+        "radius_m": 0.06,
+        "route_depth_m": 0.06,
+        "object_clearance_m": 0.0206
+      }
+    },
+    {
+      "id": "libero_goal/3/C-zone-wait",
+      "family": "combined",
+      "kind": "C-zone-wait",
+      "suite": "libero_goal",
+      "task_id": 3,
+      "init_state_id": 0,
+      "prompt": "open the top drawer and put the bowl inside, while staying out of the red zone marked on the table, and waiting at least 4 seconds after opening the top drawer before starting the next step",
+      "stl_intent": "(G(Safe(zone))) & (F(Waited(4)) between the stages)",
+      "scoring": {
+        "type": "combo",
+        "parts": [
+          "libero_goal/3/S-zone",
+          "libero_goal/3/T-wait"
+        ],
+        "pair": "spatial+temporal",
+        "note": "every part must hold; scored by looking each part up in this manifest"
+      },
+      "zone": {
+        "center_xy": [
+          -0.05291,
+          -0.08718
+        ],
+        "radius_m": 0.03,
+        "route_depth_m": 0.0106,
+        "object_clearance_m": 0.0162
       }
     },
     {
@@ -1061,34 +1019,6 @@
         ],
         "pair": "spatial+temporal",
         "note": "every part must hold; scored by looking each part up in this manifest"
-      }
-    },
-    {
-      "id": "libero_spatial/1/C-zone-deadline",
-      "family": "combined",
-      "kind": "C-zone-deadline",
-      "suite": "libero_spatial",
-      "task_id": 1,
-      "init_state_id": 0,
-      "prompt": "pick up the black bowl next to the ramekin and place it on the plate, while staying out of the red zone marked on the table, and finish within 20 seconds",
-      "stl_intent": "(G(Safe(zone))) & (F[0,400](Goal))",
-      "scoring": {
-        "type": "combo",
-        "parts": [
-          "libero_spatial/1/S-zone",
-          "libero_spatial/1/T-deadline"
-        ],
-        "pair": "spatial+temporal",
-        "note": "every part must hold; scored by looking each part up in this manifest"
-      },
-      "zone": {
-        "center_xy": [
-          -0.06915,
-          0.25487
-        ],
-        "radius_m": 0.06,
-        "route_depth_m": 0.06,
-        "object_clearance_m": 0.0253
       }
     },
     {

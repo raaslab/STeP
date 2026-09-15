@@ -277,6 +277,88 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
 
     # --------------------------------------------- LIBERO-Constrained metric
 
+    @staticmethod
+    def _subtask_interval_start(sub: dict[str, Any]) -> int | None:
+        """Earliest step this subtask's own achievement goal may be satisfied at.
+
+        Read from the smallest interval lower bound in the subtask's formula.
+        Persistent G(...) terms are skipped: a safety constraint holds from step
+        0 by definition, so including it would always give 0 and no subtask would
+        ever be seen to open late.
+        """
+        formula = sub.get("formula")
+        if not isinstance(formula, dict):
+            return None
+        starts: list[int] = []
+
+        def walk(node, under_always: bool) -> None:
+            if not isinstance(node, dict):
+                return
+            kind = node.get("type")
+            always = under_always or kind == "always"
+            interval = node.get("interval")
+            if (
+                kind in {"eventually", "until"}
+                and not always
+                and isinstance(interval, (list, tuple))
+                and len(interval) == 2
+            ):
+                try:
+                    starts.append(int(interval[0]))
+                except (TypeError, ValueError):
+                    pass
+            for key in ("child", "left", "right"):
+                walk(node.get(key), always)
+            for child in node.get("children", []) or []:
+                walk(child, always)
+
+        walk(formula, False)
+        return min(starts) if starts else None
+
+    def _run_wait(self, env: BaseManipulationEnv, sub: dict[str, Any]):
+        """Hold still for a stated number of seconds.
+
+        Every other skill moves, so a plan could never express "let it heat for
+        four seconds, then take it off" -- the subtasks simply ran back to back
+        and any wait requirement was unsatisfiable by construction. This holds the
+        current joint configuration and the current gripper command, stepping the
+        environment so the world advances, which is exactly what waiting is.
+
+        The gripper command is held rather than reset, so waiting mid-task does
+        not drop whatever is being carried.
+        """
+        seconds = sub.get("params", {}).get("seconds", sub.get("seconds"))
+        try:
+            seconds = float(seconds)
+        except (TypeError, ValueError):
+            seconds = 2.0
+        control_hz = float(
+            (self.scene_context.get("platform", {}).get("libero", {}) or {}).get("control_hz", 20.0)
+        )
+        steps = max(1, int(round(seconds * control_hz)))
+
+        gripper = float(getattr(env, "_last_gripper_cmd", 0.0) or 0.0)
+        # Zero arm delta, gripper unchanged: the arm's controller holds position.
+        action = np.zeros(7, dtype=np.float32)
+        action[-1] = gripper
+
+        last_status: dict[str, Any] = {}
+        taken = 0
+        for _ in range(steps):
+            try:
+                env.step(action)
+            except Exception:
+                break
+            taken += 1
+            self._on_skill_step(env)
+            try:
+                last_status = env.status() or {}
+            except Exception:
+                last_status = {}
+        print(f"[wait] held {taken}/{steps} steps ({taken / control_hz:.1f}s of {seconds:.1f}s)")
+        # Waiting cannot fail on its own terms: if the steps were taken, it held.
+        return taken >= steps, taken, last_status
+
     def _motion_config(self, env: BaseManipulationEnv):
         """Motion config for this skill invocation, with the task's STL keep-out
         zones attached.
@@ -2047,6 +2129,27 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
 
                 dwell_counts.clear()
 
+                # Honour the gap the formula asks for before this subtask starts.
+                #
+                # Asked to "wait 4 seconds after turning on the stove", System 2
+                # encodes the delay in STL's own timing -- F[0,150] for the first
+                # subtask, then F[230,320] for the next, an 80-step gap at 20 Hz.
+                # That is a correct specification, but System 1 ran subtasks back
+                # to back and the absolute bounds were only ever used as
+                # deadlines, so the delay silently evaporated between the plan and
+                # the robot. Holding here is what makes the formula's timing
+                # something the robot actually obeys.
+                start_step = self._subtask_interval_start(sub)
+                if start_step is not None and task_steps_so_far < start_step:
+                    gap = int(start_step - task_steps_so_far)
+                    hz = self._control_hz_for_timing(env, runtime) or 20.0
+                    print(
+                        f"[timing] subtask {idx} opens at step {start_step}; holding "
+                        f"{gap} steps ({gap / hz:.1f}s) to reach it"
+                    )
+                    _, held, _ = self._run_wait(env, {"params": {"seconds": gap / hz}})
+                    task_steps_so_far += held
+
                 if skill == "pick":
                     if hasattr(env, "set_grasp_offset_override"):
                         env.set_grasp_offset_override(
@@ -2101,6 +2204,8 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                     done, steps, last_status = self._run_open_drawer_with_motion_pipeline(env, sub)
                 elif skill == "close" and motion_backend == "ompl_mpc":
                     done, steps, last_status = self._run_close_with_motion_pipeline(env, sub)
+                elif skill == "wait":
+                    done, steps, last_status = self._run_wait(env, sub)
                 elif skill == "turn_on" and motion_backend == "ompl_mpc":
                     done, steps, last_status = self._run_turn_knob_with_motion_pipeline(env, sub)
                 elif skill == "transport" and motion_backend == "ompl_mpc":

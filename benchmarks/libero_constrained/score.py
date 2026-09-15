@@ -193,6 +193,26 @@ def score_success_only(task, roll):
     return {"held": None, "detail": "no constraint on this task"}
 
 
+def score_wait(task, roll):
+    """Did the robot actually hold between the two stages?
+
+    Read from the executor's own subtask records: a wait is a subtask, so its
+    recorded step count is the time held. Measuring the gap between stages some
+    other way would credit a slow planner with having waited, which is the
+    failure mode that made the deadline constraint meaningless.
+    """
+    need = int(task["scoring"]["steps"])
+    records = roll["summary"].get("records", [])
+    if not records:
+        return {"held": None, "detail": "no subtasks were recorded"}
+    waited = sum(int(r.get("steps") or 0) for r in records if r.get("skill") == "wait")
+    if waited == 0:
+        return {"held": False, "detail": f"no wait subtask ran; needed {need} steps"}
+    hz = MANIFEST["control_hz"]
+    return {"held": waited >= need,
+            "detail": f"held {waited} steps ({waited/hz:.1f} s), needed {need} ({need/hz:.1f} s)"}
+
+
 def score_precondition(task, roll):
     """Was the container empty when the placement began?
 
@@ -268,6 +288,7 @@ SCORERS = {
     "untouched": score_untouched,
     "dwell": score_dwell,
     "deadline": score_deadline,
+    "wait": score_wait,
     "success_only": score_success_only,
     "precondition": score_precondition,
     "stage": score_stage,
