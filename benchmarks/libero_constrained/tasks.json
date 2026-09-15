@@ -20,12 +20,12 @@
       },
       "zone": {
         "center_xy": [
-          -0.04445,
-          -0.03184
+          -0.02715,
+          0.14167
         ],
-        "radius_m": 0.06,
-        "route_depth_m": 0.033,
-        "object_clearance_m": 0.0226
+        "radius_m": 0.03,
+        "route_depth_m": 0.0255,
+        "object_clearance_m": 0.015
       }
     },
     {
@@ -115,29 +115,6 @@
       }
     },
     {
-      "id": "libero_10/5/S-zone",
-      "family": "spatial",
-      "kind": "S-zone",
-      "suite": "libero_10",
-      "task_id": 5,
-      "init_state_id": 0,
-      "prompt": "pick up the book and place it in the back compartment of the caddy, while staying out of the red zone marked on the table",
-      "stl_intent": "G(Safe(zone))",
-      "scoring": {
-        "type": "keepout",
-        "note": "min distance from the zone centre to the end effector and carried object, per step"
-      },
-      "zone": {
-        "center_xy": [
-          -0.27785,
-          0.04894
-        ],
-        "radius_m": 0.06,
-        "route_depth_m": 0.06,
-        "object_clearance_m": 0.022
-      }
-    },
-    {
       "id": "libero_10/6/S-offset",
       "family": "spatial",
       "kind": "S-offset",
@@ -155,15 +132,6 @@
         "distance_m": 0.05,
         "tolerance_m": 0.03,
         "note": "final position of the placed object relative to the goal centre"
-      },
-      "zone": {
-        "center_xy": [
-          0.04286,
-          -0.09164
-        ],
-        "radius_m": 0.06,
-        "route_depth_m": 0.0294,
-        "object_clearance_m": 0.0152
       }
     },
     {
@@ -184,38 +152,6 @@
         "sign": 1,
         "tolerance_m": 0.02,
         "note": "final position of the placed object relative to the goal centre"
-      },
-      "zone": {
-        "center_xy": [
-          0.04286,
-          -0.09164
-        ],
-        "radius_m": 0.06,
-        "route_depth_m": 0.0294,
-        "object_clearance_m": 0.0152
-      }
-    },
-    {
-      "id": "libero_10/6/S-zone",
-      "family": "spatial",
-      "kind": "S-zone",
-      "suite": "libero_10",
-      "task_id": 6,
-      "init_state_id": 0,
-      "prompt": "put the white mug on the plate and put the chocolate pudding to the right of the plate, while staying out of the red zone marked on the table",
-      "stl_intent": "G(Safe(zone))",
-      "scoring": {
-        "type": "keepout",
-        "note": "min distance from the zone centre to the end effector and carried object, per step"
-      },
-      "zone": {
-        "center_xy": [
-          0.04286,
-          -0.09164
-        ],
-        "radius_m": 0.06,
-        "route_depth_m": 0.0294,
-        "object_clearance_m": 0.0152
       }
     },
     {
@@ -233,12 +169,12 @@
       },
       "zone": {
         "center_xy": [
-          0.0238,
-          0.0557
+          0.06616,
+          0.12553
         ],
-        "radius_m": 0.06,
-        "route_depth_m": 0.06,
-        "object_clearance_m": 0.0636
+        "radius_m": 0.055,
+        "route_depth_m": 0.005,
+        "object_clearance_m": 0.0161
       }
     },
     {
@@ -256,12 +192,12 @@
       },
       "zone": {
         "center_xy": [
-          -0.14369,
-          0.0476
+          -0.0812,
+          0.11598
         ],
-        "radius_m": 0.06,
-        "route_depth_m": 0.036,
-        "object_clearance_m": 0.0514
+        "radius_m": 0.045,
+        "route_depth_m": 0.0292,
+        "object_clearance_m": 0.0153
       }
     },
     {
@@ -288,29 +224,6 @@
       }
     },
     {
-      "id": "libero_goal/1/S-zone",
-      "family": "spatial",
-      "kind": "S-zone",
-      "suite": "libero_goal",
-      "task_id": 1,
-      "init_state_id": 0,
-      "prompt": "put the bowl on the stove, while staying out of the red zone marked on the table",
-      "stl_intent": "G(Safe(zone))",
-      "scoring": {
-        "type": "keepout",
-        "note": "min distance from the zone centre to the end effector and carried object, per step"
-      },
-      "zone": {
-        "center_xy": [
-          -0.23511,
-          0.03767
-        ],
-        "radius_m": 0.055,
-        "route_depth_m": 0.0106,
-        "object_clearance_m": 0.0158
-      }
-    },
-    {
       "id": "libero_goal/2/S-zone",
       "family": "spatial",
       "kind": "S-zone",
@@ -325,12 +238,12 @@
       },
       "zone": {
         "center_xy": [
-          -0.11781,
-          -0.12445
+          -0.10523,
+          -0.12123
         ],
-        "radius_m": 0.045,
-        "route_depth_m": 0.0292,
-        "object_clearance_m": 0.0164
+        "radius_m": 0.035,
+        "route_depth_m": 0.0298,
+        "object_clearance_m": 0.0151
       }
     },
     {
@@ -566,12 +479,12 @@
       },
       "zone": {
         "center_xy": [
-          -0.11403,
-          0.04922
+          -0.04464,
+          0.09564
         ],
         "radius_m": 0.06,
-        "route_depth_m": 0.042,
-        "object_clearance_m": 0.0715
+        "route_depth_m": 0.06,
+        "object_clearance_m": 0.0226
       }
     },
     {
@@ -991,19 +904,19 @@
       }
     },
     {
-      "id": "libero_goal/1/C-zone-deadline",
+      "id": "libero_goal/2/C-zone-deadline",
       "family": "combined",
       "kind": "C-zone-deadline",
       "suite": "libero_goal",
-      "task_id": 1,
+      "task_id": 2,
       "init_state_id": 0,
-      "prompt": "put the bowl on the stove, while staying out of the red zone marked on the table, and finish within 20 seconds",
+      "prompt": "put the wine bottle on top of the cabinet, while staying out of the red zone marked on the table, and finish within 20 seconds",
       "stl_intent": "(G(Safe(zone))) & (F[0,400](Goal))",
       "scoring": {
         "type": "combo",
         "parts": [
-          "libero_goal/1/S-zone",
-          "libero_goal/1/T-deadline"
+          "libero_goal/2/S-zone",
+          "libero_goal/2/T-deadline"
         ],
         "pair": "spatial+temporal",
         "note": "every part must hold; scored by looking each part up in this manifest"
@@ -1076,6 +989,34 @@
       }
     },
     {
+      "id": "libero_10/5/U-plain",
+      "family": "unconstrained",
+      "kind": "U-plain",
+      "suite": "libero_10",
+      "task_id": 5,
+      "init_state_id": 0,
+      "prompt": "pick up the book and place it in the back compartment of the caddy",
+      "stl_intent": "F(Goal)",
+      "scoring": {
+        "type": "success_only",
+        "note": "no room for a zone in this scene; the prompt states no constraint"
+      }
+    },
+    {
+      "id": "libero_10/6/U-plain",
+      "family": "unconstrained",
+      "kind": "U-plain",
+      "suite": "libero_10",
+      "task_id": 6,
+      "init_state_id": 0,
+      "prompt": "put the white mug on the plate and put the chocolate pudding to the right of the plate",
+      "stl_intent": "F(Goal)",
+      "scoring": {
+        "type": "success_only",
+        "note": "no room for a zone in this scene; the prompt states no constraint"
+      }
+    },
+    {
       "id": "libero_goal/0/U-plain",
       "family": "unconstrained",
       "kind": "U-plain",
@@ -1083,6 +1024,20 @@
       "task_id": 0,
       "init_state_id": 0,
       "prompt": "open the middle drawer of the cabinet",
+      "stl_intent": "F(Goal)",
+      "scoring": {
+        "type": "success_only",
+        "note": "no room for a zone in this scene; the prompt states no constraint"
+      }
+    },
+    {
+      "id": "libero_goal/1/U-plain",
+      "family": "unconstrained",
+      "kind": "U-plain",
+      "suite": "libero_goal",
+      "task_id": 1,
+      "init_state_id": 0,
+      "prompt": "put the bowl on the stove",
       "stl_intent": "F(Goal)",
       "scoring": {
         "type": "success_only",
