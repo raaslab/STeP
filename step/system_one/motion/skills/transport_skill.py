@@ -30,6 +30,7 @@ from ..collision import CollisionChecker, CollisionPhase, required_hand_pose_for
 from ..config import MotionConfig
 from ..kinematics import IKSolver
 from ..ompl_planner import MotionPlanner
+from ..panda import ROBOT_BODIES
 from ..scene_query import SceneQuery, quat_mul_wxyz
 from .grasp_generator import yaw_quat_wxyz
 from ..types import AttachedObjectState, PlannerFailureReason, SkillFailureReason, SkillResult
@@ -162,10 +163,29 @@ class TransportSkill:
                 # real rollout had 206 candidates correctly rejected for
                 # putting the carried bowl inside a stove that isn't even a
                 # named entity).
+                #
+                # "Furthest from the object" alone still isn't enough: it
+                # says nothing about whether the arm can actually *track*
+                # to that candidate, only that IK+collision accept it as a
+                # final pose. Confirmed via a real rollout: the furthest
+                # candidate on a real table was 0.68m from the robot's own
+                # base and left the settle loop frozen at ~0% progress
+                # (0.289m residual against a 0.288m planned path), while
+                # closer candidates (0.59-0.63m from base) converged to
+                # within a few cm. So candidates beyond
+                # cfg.max_practical_reach_m from the base are pushed to the
+                # back of the ordering -- still tried (never dropped
+                # outright, in case nothing closer is feasible on some
+                # other scene), just no longer preferred purely for being
+                # far from the object.
                 object_xy_now = scene.body_pose(attached.object_name)[0][:2]
+                robot_base_xy = scene.body_pose(ROBOT_BODIES[0])[0][:2]
                 anchor_xy = container_pos[:2]
                 xy_offsets.sort(
-                    key=lambda off: -float(np.linalg.norm(anchor_xy + off - object_xy_now))
+                    key=lambda off: (
+                        float(np.linalg.norm(anchor_xy + off - robot_base_xy)) > cfg.max_practical_reach_m,
+                        -float(np.linalg.norm(anchor_xy + off - object_xy_now)),
+                    )
                 )
             else:
                 interior_half_xy = pcfg.interior_shrink_fraction * container_extent.half_extents[:2]

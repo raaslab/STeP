@@ -268,6 +268,21 @@ class TransportConfig:
     # other transport goals) needed more than 3 attempts to reliably
     # succeed.
     planning_attempts: int = 8
+    # Candidates further than this from the robot's own base (world-frame
+    # xy distance, ignoring z) are tried only after every closer one fails,
+    # regardless of how "furthest from the object" ranks them -- see
+    # TransportSkill.execute()'s own comment on why "furthest first" isn't
+    # enough alone. Measured on a real rollout (libero_goal task 3, moving
+    # the bowl onto the table): a candidate 0.68m from the base picked by
+    # "furthest from object" alone left the settle loop essentially frozen
+    # (0.289m residual error against a 0.288m planned path -- ~0% real
+    # progress), while candidates at 0.59-0.63m converged to within a few
+    # cm. 0.70m sits just above that measured working range and comfortably
+    # under the Panda's nominal ~0.85m kinematic reach, leaving room for a
+    # demanding hover orientation. A heuristic cap on a small sample, not a
+    # precisely derived limit -- revisit if it starts rejecting otherwise-
+    # fine candidates on some other scene.
+    max_practical_reach_m: float = 0.70
 
 
 @dataclass

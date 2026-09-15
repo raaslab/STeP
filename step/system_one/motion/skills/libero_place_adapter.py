@@ -88,6 +88,19 @@ class LiberoPlaceAdapter:
 
         if goal_point_xyz is not None:
             target_xy = np.asarray(goal_point_xyz, dtype=float)[:2]
+        elif place_surface == "top":
+            # A large open support (e.g. "table") has no single right spot
+            # to default to -- but by the time `place` runs, `transport` has
+            # already carried the object to a clear, reachable spot of its
+            # own choosing (see TransportSkill's own "furthest reachable
+            # from current position" search). Defaulting to the support
+            # body's own geometric center here threw that away every time:
+            # confirmed on a real rollout (libero_goal task 3, moving the
+            # bowl clear before opening the drawer) -- transport carried the
+            # bowl to ~(-0.03, 0.07), then this line sent it back to the
+            # table's exact center (0, 0), which the plate already occupied,
+            # undoing the clear placement transport had just found.
+            target_xy = scene.body_pose(attached.object_name)[0][:2]
         else:
             target_xy = container_pos[:2]
         object_xyz = np.array([target_xy[0], target_xy[1], place_z])

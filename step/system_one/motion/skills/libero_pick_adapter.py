@@ -57,6 +57,55 @@ from ..types import AttachedObjectState, MPCCostConfig, SkillFailureReason, Skil
 # shallower is sub-mm meshing/numerical noise, not a genuine obstruction.
 WRONG_OBSTACLE_GRAZE_TOLERANCE_M = 0.005
 
+# Extra clearance above a cabinet's own measured top when extracting an
+# object from inside one of its drawers (see _drawer_extraction_target_z),
+# on top of just reaching that top height -- covers the attached object's
+# own collision radius so it isn't still clipping the frame's top edge by
+# the time transport's hover-candidate search begins.
+DRAWER_EXTRACTION_MARGIN_M = 0.06
+
+
+def _drawer_extraction_target_z(scene: SceneQuery, object_body_name: str) -> float | None:
+    """If ``object_body_name`` currently sits inside a drawer -- its xy
+    within some cabinet frame body's own footprint, and its z below that
+    frame's measured top -- return the world-frame height the object needs
+    to clear (that frame's top + DRAWER_EXTRACTION_MARGIN_M). Returns None
+    if the object isn't inside any discovered cabinet's footprint (the
+    common case: an object picked off an open surface).
+
+    A cabinet's static frame occupies its own full footprint at every
+    height below its top except where a drawer hollows out a slot -- so an
+    object whose xy falls inside that footprint while resting below the
+    frame's top can only be inside a drawer, not merely "on the table
+    nearby" (the frame itself is solid there). Diagnosed on a real rollout
+    (libero_spatial task 4, "pick up the black bowl in the top drawer"):
+    pick succeeded, but transport's hover-candidate search immediately
+    after rejected 59/160 candidates for the attached bowl still colliding
+    with the cabinet's own frame (wooden_cabinet_1_g11) -- the flat
+    post_grasp_carry_lift_m (tuned for objects starting on an open
+    surface) wasn't tall enough to clear the drawer opening first.
+    """
+    try:
+        from ..articulation import discover_cabinet_support_bodies
+    except Exception:
+        return None
+
+    object_pos, _ = scene.body_pose(object_body_name)
+    best_target_z: float | None = None
+    for cabinet_body in discover_cabinet_support_bodies(scene):
+        cab_pos, _ = scene.body_pose(cabinet_body)
+        extent = scene.body_extent_world(cabinet_body)
+        if extent is None:
+            continue
+        top_z = float(cab_pos[2] + extent.center_offset[2] + extent.half_extents[2])
+        half_xy = extent.half_extents[:2]
+        within_xy = bool(np.all(np.abs(object_pos[:2] - cab_pos[:2]) <= half_xy))
+        if within_xy and float(object_pos[2]) < top_z:
+            candidate_target = top_z + DRAWER_EXTRACTION_MARGIN_M
+            if best_target_z is None or candidate_target > best_target_z:
+                best_target_z = candidate_target
+    return best_target_z
+
 
 class LiberoPickAdapter(_ServoMixin):
     def __init__(self, env, motion_config: MotionConfig | None = None) -> None:
@@ -805,8 +854,14 @@ class LiberoPickAdapter(_ServoMixin):
         # start pose that leaves the planner almost no free corridor to
         # expand into, not an inflated object model.
         carry_lift_m = float(self.config.grasp.post_grasp_carry_lift_m)
+        lift_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
+        extraction_target_z = _drawer_extraction_target_z(lift_scene, object_body_name)
+        if extraction_target_z is not None:
+            ee_now_z = float(lift_scene.site_pose(self.ee_site)[0][2])
+            carry_lift_m = max(carry_lift_m, extraction_target_z - ee_now_z)
+            plan_result.diagnostics["grasp_verification"]["drawer_extraction_target_z"] = extraction_target_z
         if carry_lift_m > 0.0:
-            ee_now, _ = SceneQuery.from_robosuite_sim(self.env.env.sim).site_pose(self.ee_site)
+            ee_now, _ = lift_scene.site_pose(self.ee_site)
             carry_target = ee_now + np.array([0.0, 0.0, carry_lift_m])
             for carry_waypoint in np.linspace(ee_now, carry_target, n_lift_steps + 1)[1:]:
                 carry_pos, carry_ori, _, _ = self._servo_toward_cartesian_pose(

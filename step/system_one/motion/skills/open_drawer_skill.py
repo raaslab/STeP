@@ -64,10 +64,21 @@ def _solve_ik_robust(
     standard fix for a local optimizer landing in a bad basin, and mirrors
     this codebase's existing "try a few, take the first/best feasible"
     pattern (see ``pull_fraction_fallbacks``, yaw sampling in
-    ``grasp_generator.py``) rather than trusting one arbitrary seed."""
-    result = ik_solver.solve(scene.clone(), target_pos, target_quat_wxyz, seed_q=seed_q)
-    if result.success:
-        return result
+    ``grasp_generator.py``) rather than trusting one arbitrary seed.
+
+    Does NOT return on the first successful restart: a full-range random
+    seed (needed below for feasibility -- see the loop's own comment) can
+    just as easily land on a distant, unrelated elbow/wrist branch as a
+    nearby one, and accepting whichever happens to succeed first sweeps the
+    arm through that branch's own huge Cartesian detour to get there --
+    measured directly on the toy (clutter-free) drawer-only scene: a 0.27m
+    straight-line descent taking a 2.69m actual path (path_efficiency
+    0.10). Mirrors TransportSkill's own hover-candidate search: spend the
+    whole restart budget, then keep whichever successful solution is
+    closest to `seed_q` in joint space -- the one requiring the least, and
+    least dramatic, movement to reach -- rather than the first one found."""
+    best_result = ik_solver.solve(scene.clone(), target_pos, target_quat_wxyz, seed_q=seed_q)
+    best_distance = float(np.linalg.norm(best_result.q - seed_q)) if best_result.success else float("inf")
     lo, hi = scene.joint_qpos_range(ik_solver.joint_names)
     for attempt in range(n_restarts):
         # Perturbing around `seed_q` only searches that one basin, which is
@@ -85,8 +96,10 @@ def _solve_ik_robust(
             seed = rng.uniform(lo, hi)
         result = ik_solver.solve(scene.clone(), target_pos, target_quat_wxyz, seed_q=seed)
         if result.success:
-            return result
-    return result
+            distance = float(np.linalg.norm(result.q - seed_q))
+            if distance < best_distance:
+                best_result, best_distance = result, distance
+    return best_result
 
 
 def _unit(v: np.ndarray) -> np.ndarray:

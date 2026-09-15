@@ -340,8 +340,30 @@ class PlaceSkill:
 
         offsets = [np.zeros(2)]
         if place_surface == "top":
+            object_xy_now = scene.body_pose(attached.object_name)[0][:2]
+            anchor_xy = container_pos[:2]
+            # Try "exactly where the preceding transport already carried it"
+            # first -- as its own candidate, not just as a sort tiebreaker
+            # on a container-centered ring. The "closest to current
+            # position" sort below still preferred the container's own
+            # dead-center offset almost every time in practice: transport's
+            # own hover search is *also* anchored at the container's center
+            # (see TransportSkill's identical `container_pos`-based ring),
+            # so `object_xy_now` normally already sits close to that center
+            # -- closer than any of the wide-radius ring points below ever
+            # are. Confirmed on a real rollout (libero_goal task 3, moving
+            # the bowl clear before opening the drawer): transport carried
+            # the bowl to a clear spot near (-0.03, 0.07), but place then
+            # picked the container's dead-center (0, 0) anyway -- which the
+            # plate already happened to occupy -- because center was
+            # numerically nearer to that spot than every ring candidate,
+            # even though "stay right here" was never itself an option.
+            offsets.append(object_xy_now - anchor_xy)
             # A large open support (the table): several ring radii, denser
             # angular sampling -- see top_surface_* fields' own docstring.
+            # Still tried, in that order, in case the exact current spot or
+            # dead-center both turn out infeasible (occupied, out of
+            # reach, etc.).
             n = max(0, int(cfg.top_surface_num_ring_samples))
             for shrink_fraction in cfg.top_surface_shrink_fractions:
                 interior_half_xy = shrink_fraction * container_extent.half_extents[:2]
@@ -354,8 +376,6 @@ class PlaceSkill:
             # Without this the two search the same ring independently and
             # can settle on opposite sides of a large support, turning a
             # short descent into another full traverse.
-            object_xy_now = scene.body_pose(attached.object_name)[0][:2]
-            anchor_xy = container_pos[:2]
             offsets.sort(key=lambda off: float(np.linalg.norm(anchor_xy + off - object_xy_now)))
         else:
             interior_half_xy = cfg.interior_shrink_fraction * container_extent.half_extents[:2]
@@ -583,8 +603,23 @@ class PlaceSkill:
             path_cost = float(np.sum(np.linalg.norm(np.diff(plan.geometric_path, axis=0), axis=1)))
         breakdown["path_length"] = path_cost
         breakdown["reachability"] = float(hover_ik.position_error + hover_ik.orientation_error)
-        breakdown["offset_from_center"] = float(np.linalg.norm(object_xyz[:2] - container_pos[:2]))
-        total_cost = 1.0 * path_cost + 5.0 * breakdown["reachability"] + 0.5 * breakdown["offset_from_center"]
+        # Measured from the object's own current position, NOT the goal
+        # container's geometric center: penalizing distance-from-center
+        # unconditionally fought _generate_candidates' own "nearest to
+        # current position" ordering for place_surface="top" every time --
+        # that ordering only affects list order, and `execute()` picks the
+        # global min-cost candidate regardless of order, so a center-anchored
+        # cost silently overrode it. Confirmed on a real rollout (libero_goal
+        # task 3, moving the bowl clear before opening the drawer): transport
+        # carried the bowl near (-0.03, 0.07), but this cost still picked the
+        # container's dead-center (0, 0) -- which the plate already occupied
+        # -- every time, since center had zero offset-cost and nothing else
+        # in the sum outweighed it. Distance-from-current-position is the
+        # semantically right thing to minimize here regardless of
+        # place_surface: an object hovering somewhere shouldn't be penalized
+        # for not being at the container's arbitrary center.
+        breakdown["offset_from_current_position"] = float(np.linalg.norm(object_xyz[:2] - object_pos_now[:2]))
+        total_cost = 1.0 * path_cost + 5.0 * breakdown["reachability"] + 0.5 * breakdown["offset_from_current_position"]
 
         return _PlaceCandidateScore(
             object_xyz=object_xyz,

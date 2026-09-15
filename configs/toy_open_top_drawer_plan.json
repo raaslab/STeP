@@ -1,0 +1,20 @@
+{
+  "system2_plan": {
+    "type": "skill_graph",
+    "task_name": "toy_open_top_drawer",
+    "scene_summary": "Toy scene: only the cabinet, nothing else. Open the top drawer.",
+    "subtasks": [
+      {
+        "subtask_id": 0,
+        "skill": "open",
+        "description": "Open the top drawer.",
+        "params": {"object": "top_drawer"},
+        "formula": {
+          "type": "eventually",
+          "interval": [0, 150],
+          "child": {"type": "predicate", "name": "Opened", "args": ["top_drawer"]}
+        }
+      }
+    ]
+  }
+}
