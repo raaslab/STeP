@@ -670,6 +670,16 @@ def main() -> int:
         env.close()
 
     summary["pipeline_attempts_used"] = attempt
+    # Record what produced this result. The model is otherwise only implied by a
+    # default in planner.py and an environment variable, so a summary could not
+    # say which model it came from -- and a shell with OPENAI_MODEL set would
+    # silently change it with nothing in the output to show that.
+    summary["provenance"] = {
+        "model": args.model or os.environ.get("OPENAI_MODEL", "gpt-5.4"),
+        "benchmark_task": getattr(args, "benchmark_task", None),
+        "max_pipeline_retries": int(args.max_pipeline_retries),
+        "enforce_keepout": not bool(getattr(args, "no_enforce_keepout", False)),
+    }
     save_json(summary, outdir / "execution_summary.json")
     print(f"[step] execution summary: {outdir / 'execution_summary.json'}")
     if args.save_video:
