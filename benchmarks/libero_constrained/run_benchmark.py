@@ -39,6 +39,8 @@ def parse_args():
                    help="seconds before a rollout is killed and recorded as timeout (default 360)")
     p.add_argument("--outdir", default="outputs/benchmark")
     p.add_argument("--retries", type=int, default=0, help="--max-pipeline-retries for each rollout")
+    p.add_argument("--stl-mode", default="stl_spec", choices=["stl_spec", "skill_graph", "no_stl"],
+                   help="Pass no_stl to sweep the baseline: same VLM, skills and planner, no specification layer.")
     p.add_argument("--video", action="store_true", help="record a video per rollout")
     p.add_argument("--dry-run", action="store_true", help="list what would run, then stop")
     return p.parse_args()
@@ -73,6 +75,7 @@ def run_one(task, arm, state, args, outdir):
         "--benchmark-task", task["id"],
         "--init-state-id", str(state),
         "--max-pipeline-retries", str(args.retries),
+        "--stl-mode", args.stl_mode,
         "--outdir", str(run_dir),
     ]
     # The keep-out only exists for tasks that carry a zone; for the rest the two
