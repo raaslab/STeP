@@ -169,6 +169,31 @@ def escape_start_collision(
         norm = float(np.linalg.norm(toward_center_xy))
         toward_center_xy = toward_center_xy / norm if norm > 1e-6 else np.zeros(2)
         directions["up_toward_center"] = np.array([toward_center_xy[0], toward_center_xy[1], 1.0])
+    # Directly away from whatever is actually being touched, tried first --
+    # neither of the two directions above is informed by where the real
+    # obstacle is, and both can fail together when it happens to sit between
+    # the start position and the goal container: confirmed on a real rollout
+    # (libero_goal task 3's final "place the bowl in the drawer" leg) where
+    # the bowl started in contact with a leftover plate from an earlier
+    # subtask, and "toward top_drawer's own center" walked it further INTO
+    # the plate rather than away, exhausting the retreat budget still in
+    # contact (planner then failed outright with START_IN_COLLISION).
+    obstacle_xy_positions = []
+    for contact in check.contacts:
+        for geom_name in (contact.geom1, contact.geom2):
+            if geom_name.startswith("attached:"):
+                continue
+            try:
+                gid = scene.geom_id(geom_name)
+            except KeyError:
+                continue
+            obstacle_xy_positions.append(scene.data.geom_xpos[gid][:2])
+    if obstacle_xy_positions:
+        obstacle_xy = np.mean(obstacle_xy_positions, axis=0)
+        away_xy = hand_pos[:2] - obstacle_xy
+        norm = float(np.linalg.norm(away_xy))
+        away_xy = away_xy / norm if norm > 1e-6 else np.zeros(2)
+        directions = {"away_from_obstacle": np.array([away_xy[0], away_xy[1], 0.3]), **directions}
     n_steps = max(1, int(round(max_lift_m / step_m)))
     for direction in directions.values():
         unit = direction / float(np.linalg.norm(direction))
