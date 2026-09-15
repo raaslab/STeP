@@ -315,28 +315,20 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         walk(formula, False)
         return min(starts) if starts else None
 
-    def _run_wait(self, env: BaseManipulationEnv, sub: dict[str, Any]):
-        """Hold still for a stated number of seconds.
+    def _hold_position(self, env: BaseManipulationEnv, steps: int):
+        """Hold still for a number of control steps.
 
-        Every other skill moves, so a plan could never express "let it heat for
-        four seconds, then take it off" -- the subtasks simply ran back to back
-        and any wait requirement was unsatisfiable by construction. This holds the
-        current joint configuration and the current gripper command, stepping the
-        environment so the world advances, which is exactly what waiting is.
+        Not a skill and not a timer: this is how System 1 reaches a subtask's
+        interval when the formula opens it later than the previous subtask ended.
+        The wait lives in the specification -- the gap between one subtask's
+        interval and the next -- and this is only the mechanism for obeying it.
 
-        The gripper command is held rather than reset, so waiting mid-task does
-        not drop whatever is being carried.
+        The current joint configuration and gripper command are both held, so
+        waiting mid-task does not drop whatever is being carried.
         """
-        seconds = sub.get("params", {}).get("seconds", sub.get("seconds"))
-        try:
-            seconds = float(seconds)
-        except (TypeError, ValueError):
-            seconds = 2.0
-        control_hz = float(
-            (self.scene_context.get("platform", {}).get("libero", {}) or {}).get("control_hz", 20.0)
-        )
-        steps = max(1, int(round(seconds * control_hz)))
-
+        steps = max(0, int(steps))
+        if steps == 0:
+            return True, 0, {}
         gripper = float(getattr(env, "_last_gripper_cmd", 0.0) or 0.0)
         # Zero arm delta, gripper unchanged: the arm's controller holds position.
         action = np.zeros(7, dtype=np.float32)
@@ -344,10 +336,14 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
 
         last_status: dict[str, Any] = {}
         taken = 0
+        first_error: Exception | None = None
         for _ in range(steps):
             try:
-                env.step(action)
-            except Exception:
+                # _step_backend, not step(): the env exposes no step() of its own,
+                # and this is the same entry point the servo loop uses.
+                env._step_backend(action)
+            except Exception as exc:
+                first_error = first_error or exc
                 break
             taken += 1
             self._on_skill_step(env)
@@ -355,8 +351,11 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                 last_status = env.status() or {}
             except Exception:
                 last_status = {}
-        print(f"[wait] held {taken}/{steps} steps ({taken / control_hz:.1f}s of {seconds:.1f}s)")
-        # Waiting cannot fail on its own terms: if the steps were taken, it held.
+        if first_error is not None and taken == 0:
+            print(f"[timing] could not hold: {type(first_error).__name__}: {first_error}")
+        else:
+            print(f"[timing] held {taken}/{steps} steps")
+        # Holding cannot fail on its own terms: if the steps were taken, it held.
         return taken >= steps, taken, last_status
 
     def _motion_config(self, env: BaseManipulationEnv):
@@ -2140,6 +2139,7 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                 # the robot. Holding here is what makes the formula's timing
                 # something the robot actually obeys.
                 start_step = self._subtask_interval_start(sub)
+                timing_hold_steps = 0
                 if start_step is not None and task_steps_so_far < start_step:
                     gap = int(start_step - task_steps_so_far)
                     hz = self._control_hz_for_timing(env, runtime) or 20.0
@@ -2147,8 +2147,8 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                         f"[timing] subtask {idx} opens at step {start_step}; holding "
                         f"{gap} steps ({gap / hz:.1f}s) to reach it"
                     )
-                    _, held, _ = self._run_wait(env, {"params": {"seconds": gap / hz}})
-                    task_steps_so_far += held
+                    _, timing_hold_steps, _ = self._hold_position(env, gap)
+                    task_steps_so_far += timing_hold_steps
 
                 if skill == "pick":
                     if hasattr(env, "set_grasp_offset_override"):
@@ -2204,8 +2204,6 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                     done, steps, last_status = self._run_open_drawer_with_motion_pipeline(env, sub)
                 elif skill == "close" and motion_backend == "ompl_mpc":
                     done, steps, last_status = self._run_close_with_motion_pipeline(env, sub)
-                elif skill == "wait":
-                    done, steps, last_status = self._run_wait(env, sub)
                 elif skill == "turn_on" and motion_backend == "ompl_mpc":
                     done, steps, last_status = self._run_turn_knob_with_motion_pipeline(env, sub)
                 elif skill == "transport" and motion_backend == "ompl_mpc":
@@ -2280,6 +2278,12 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                     info=last_status,
                 )
                 self._annotate_timing_violation(record, sub, task_steps_so_far=task_steps_so_far)
+                # How long the robot held to reach this subtask's interval. The
+                # wait a task asks for lives in the formula, so this is the only
+                # place it shows up in the rollout -- without it a scorer cannot
+                # tell a respected delay from a plan that simply ran slowly.
+                if timing_hold_steps:
+                    record.info = {**(record.info or {}), "timing_hold_steps": int(timing_hold_steps)}
                 records.append(record)
 
                 replacement_remaining, should_abort, reflection_result = self._maybe_reflect_after_subtask(

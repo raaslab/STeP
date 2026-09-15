@@ -700,7 +700,7 @@
         "type": "wait",
         "seconds": 4,
         "steps": 80,
-        "note": "steps held by the wait subtask between the two stages"
+        "note": "steps held to reach the next subtask interval, i.e. the gap the formula asks for"
       }
     },
     {
@@ -730,7 +730,7 @@
         "type": "wait",
         "seconds": 4,
         "steps": 80,
-        "note": "steps held by the wait subtask between the two stages"
+        "note": "steps held to reach the next subtask interval, i.e. the gap the formula asks for"
       }
     },
     {
@@ -762,7 +762,7 @@
         "type": "wait",
         "seconds": 4,
         "steps": 80,
-        "note": "steps held by the wait subtask between the two stages"
+        "note": "steps held to reach the next subtask interval, i.e. the gap the formula asks for"
       }
     },
     {
@@ -808,7 +808,7 @@
         "type": "wait",
         "seconds": 4,
         "steps": 80,
-        "note": "steps held by the wait subtask between the two stages"
+        "note": "steps held to reach the next subtask interval, i.e. the gap the formula asks for"
       }
     },
     {

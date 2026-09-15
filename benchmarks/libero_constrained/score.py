@@ -205,12 +205,17 @@ def score_wait(task, roll):
     records = roll["summary"].get("records", [])
     if not records:
         return {"held": None, "detail": "no subtasks were recorded"}
-    waited = sum(int(r.get("steps") or 0) for r in records if r.get("skill") == "wait")
-    if waited == 0:
-        return {"held": False, "detail": f"no wait subtask ran; needed {need} steps"}
+    # The wait is the gap between one subtask's interval and the next, so what
+    # counts is the time the robot held to reach that interval -- not a wait
+    # subtask, which does not exist, and not total elapsed time, which would
+    # credit a slow planner with having waited.
+    waited = sum(int((r.get("info") or {}).get("timing_hold_steps") or 0) for r in records)
     hz = MANIFEST["control_hz"]
+    if waited == 0:
+        return {"held": False,
+                "detail": f"the plan left no gap before the next subtask; needed {need} steps ({need/hz:.1f} s)"}
     return {"held": waited >= need,
-            "detail": f"held {waited} steps ({waited/hz:.1f} s), needed {need} ({need/hz:.1f} s)"}
+            "detail": f"held {waited} steps ({waited/hz:.1f} s) to reach the interval, needed {need} ({need/hz:.1f} s)"}
 
 
 def score_precondition(task, roll):
