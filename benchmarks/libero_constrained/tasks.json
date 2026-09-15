@@ -75,6 +75,46 @@
       }
     },
     {
+      "id": "libero_10/4/S-offset",
+      "family": "spatial",
+      "kind": "S-offset",
+      "suite": "libero_10",
+      "task_id": 4,
+      "init_state_id": 0,
+      "prompt": "put the white mug on the left plate and put the yellow and white mug on the right plate, leaving it about 5 cm to the left of the centre of the left plate",
+      "stl_intent": "F(Placed(white_yellow_mug_1, offset(-0.05m, plate_1)))",
+      "scoring": {
+        "type": "placement_offset",
+        "target": "white_yellow_mug_1",
+        "reference": "plate_1",
+        "axis": "y",
+        "sign": -1,
+        "distance_m": 0.05,
+        "tolerance_m": 0.03,
+        "note": "final position of the placed object relative to the goal centre"
+      }
+    },
+    {
+      "id": "libero_10/4/S-relative",
+      "family": "spatial",
+      "kind": "S-relative",
+      "suite": "libero_10",
+      "task_id": 4,
+      "init_state_id": 0,
+      "prompt": "put the white mug on the left plate and put the yellow and white mug on the right plate, leaving it on the side of the left plate nearer the red coffee mug",
+      "stl_intent": "F(Placed(white_yellow_mug_1, side_of(plate_1, toward=red_coffee_mug_1)))",
+      "scoring": {
+        "type": "placement_relative",
+        "target": "white_yellow_mug_1",
+        "reference": "plate_1",
+        "toward": "red_coffee_mug_1",
+        "axis": "y",
+        "sign": 1,
+        "tolerance_m": 0.02,
+        "note": "final position of the placed object relative to the goal centre"
+      }
+    },
+    {
       "id": "libero_10/5/S-zone",
       "family": "spatial",
       "kind": "S-zone",
@@ -95,6 +135,64 @@
         "radius_m": 0.06,
         "route_depth_m": 0.06,
         "object_clearance_m": 0.022
+      }
+    },
+    {
+      "id": "libero_10/6/S-offset",
+      "family": "spatial",
+      "kind": "S-offset",
+      "suite": "libero_10",
+      "task_id": 6,
+      "init_state_id": 0,
+      "prompt": "put the white mug on the plate and put the chocolate pudding to the right of the plate, leaving it about 5 cm to the left of the centre of the plate",
+      "stl_intent": "F(Placed(porcelain_mug_1, offset(-0.05m, plate_1)))",
+      "scoring": {
+        "type": "placement_offset",
+        "target": "porcelain_mug_1",
+        "reference": "plate_1",
+        "axis": "y",
+        "sign": -1,
+        "distance_m": 0.05,
+        "tolerance_m": 0.03,
+        "note": "final position of the placed object relative to the goal centre"
+      },
+      "zone": {
+        "center_xy": [
+          0.04286,
+          -0.09164
+        ],
+        "radius_m": 0.06,
+        "route_depth_m": 0.0294,
+        "object_clearance_m": 0.0152
+      }
+    },
+    {
+      "id": "libero_10/6/S-relative",
+      "family": "spatial",
+      "kind": "S-relative",
+      "suite": "libero_10",
+      "task_id": 6,
+      "init_state_id": 0,
+      "prompt": "put the white mug on the plate and put the chocolate pudding to the right of the plate, leaving it on the side of the plate nearer the chocolate pudding",
+      "stl_intent": "F(Placed(porcelain_mug_1, side_of(plate_1, toward=chocolate_pudding_1)))",
+      "scoring": {
+        "type": "placement_relative",
+        "target": "porcelain_mug_1",
+        "reference": "plate_1",
+        "toward": "chocolate_pudding_1",
+        "axis": "y",
+        "sign": 1,
+        "tolerance_m": 0.02,
+        "note": "final position of the placed object relative to the goal centre"
+      },
+      "zone": {
+        "center_xy": [
+          0.04286,
+          -0.09164
+        ],
+        "radius_m": 0.06,
+        "route_depth_m": 0.0294,
+        "object_clearance_m": 0.0152
       }
     },
     {
@@ -302,6 +400,86 @@
         "radius_m": 0.06,
         "route_depth_m": 0.06,
         "object_clearance_m": 0.0209
+      }
+    },
+    {
+      "id": "libero_goal/8/S-offset",
+      "family": "spatial",
+      "kind": "S-offset",
+      "suite": "libero_goal",
+      "task_id": 8,
+      "init_state_id": 0,
+      "prompt": "put the bowl on the plate, leaving it about 5 cm to the left of the centre of the plate",
+      "stl_intent": "F(Placed(akita_black_bowl_1, offset(-0.05m, plate_1)))",
+      "scoring": {
+        "type": "placement_offset",
+        "target": "akita_black_bowl_1",
+        "reference": "plate_1",
+        "axis": "y",
+        "sign": -1,
+        "distance_m": 0.05,
+        "tolerance_m": 0.03,
+        "note": "final position of the placed object relative to the goal centre"
+      }
+    },
+    {
+      "id": "libero_goal/8/S-relative",
+      "family": "spatial",
+      "kind": "S-relative",
+      "suite": "libero_goal",
+      "task_id": 8,
+      "init_state_id": 0,
+      "prompt": "put the bowl on the plate, leaving it on the side of the plate nearer the cream cheese",
+      "stl_intent": "F(Placed(akita_black_bowl_1, side_of(plate_1, toward=cream_cheese_1)))",
+      "scoring": {
+        "type": "placement_relative",
+        "target": "akita_black_bowl_1",
+        "reference": "plate_1",
+        "toward": "cream_cheese_1",
+        "axis": "y",
+        "sign": 1,
+        "tolerance_m": 0.02,
+        "note": "final position of the placed object relative to the goal centre"
+      }
+    },
+    {
+      "id": "libero_spatial/0/S-offset",
+      "family": "spatial",
+      "kind": "S-offset",
+      "suite": "libero_spatial",
+      "task_id": 0,
+      "init_state_id": 0,
+      "prompt": "pick up the black bowl between the plate and the ramekin and place it on the plate, leaving it about 5 cm to the left of the centre of the plate",
+      "stl_intent": "F(Placed(akita_black_bowl_1, offset(-0.05m, plate_1)))",
+      "scoring": {
+        "type": "placement_offset",
+        "target": "akita_black_bowl_1",
+        "reference": "plate_1",
+        "axis": "y",
+        "sign": -1,
+        "distance_m": 0.05,
+        "tolerance_m": 0.03,
+        "note": "final position of the placed object relative to the goal centre"
+      }
+    },
+    {
+      "id": "libero_spatial/0/S-relative",
+      "family": "spatial",
+      "kind": "S-relative",
+      "suite": "libero_spatial",
+      "task_id": 0,
+      "init_state_id": 0,
+      "prompt": "pick up the black bowl between the plate and the ramekin and place it on the plate, leaving it on the side of the plate nearer the cookies",
+      "stl_intent": "F(Placed(akita_black_bowl_1, side_of(plate_1, toward=cookies_1)))",
+      "scoring": {
+        "type": "placement_relative",
+        "target": "akita_black_bowl_1",
+        "reference": "plate_1",
+        "toward": "cookies_1",
+        "axis": "y",
+        "sign": -1,
+        "tolerance_m": 0.02,
+        "note": "final position of the placed object relative to the goal centre"
       }
     },
     {
@@ -696,6 +874,177 @@
         "seconds": 2,
         "steps": 40,
         "note": "consecutive steps over the goal with the gripper still closed, before release"
+      }
+    },
+    {
+      "id": "libero_10/0/C-order-deadline",
+      "family": "combined",
+      "kind": "C-order-deadline",
+      "suite": "libero_10",
+      "task_id": 0,
+      "init_state_id": 0,
+      "prompt": "put both the alphabet soup and the tomato sauce in the basket, putting them in alphabetical order, and finish within 20 seconds",
+      "stl_intent": "(F(In(alphabet_soup_1)) before F(In(tomato_sauce_1))) & (F[0,400](Goal))",
+      "scoring": {
+        "type": "combo",
+        "parts": [
+          "libero_10/0/L-order",
+          "libero_10/0/T-deadline"
+        ],
+        "pair": "logical+temporal",
+        "note": "every part must hold; scored by looking each part up in this manifest"
+      }
+    },
+    {
+      "id": "libero_10/0/C-zone-deadline",
+      "family": "combined",
+      "kind": "C-zone-deadline",
+      "suite": "libero_10",
+      "task_id": 0,
+      "init_state_id": 0,
+      "prompt": "put both the alphabet soup and the tomato sauce in the basket, while staying out of the red zone marked on the table, and finish within 20 seconds",
+      "stl_intent": "(G(Safe(zone))) & (F[0,400](Goal))",
+      "scoring": {
+        "type": "combo",
+        "parts": [
+          "libero_10/0/S-zone",
+          "libero_10/0/T-deadline"
+        ],
+        "pair": "spatial+temporal",
+        "note": "every part must hold; scored by looking each part up in this manifest"
+      }
+    },
+    {
+      "id": "libero_10/0/C-zone-order",
+      "family": "combined",
+      "kind": "C-zone-order",
+      "suite": "libero_10",
+      "task_id": 0,
+      "init_state_id": 0,
+      "prompt": "put both the alphabet soup and the tomato sauce in the basket, while staying out of the red zone marked on the table, and putting them in alphabetical order",
+      "stl_intent": "(G(Safe(zone))) & (F(In(alphabet_soup_1)) before F(In(tomato_sauce_1)))",
+      "scoring": {
+        "type": "combo",
+        "parts": [
+          "libero_10/0/S-zone",
+          "libero_10/0/L-order"
+        ],
+        "pair": "spatial+logical",
+        "note": "every part must hold; scored by looking each part up in this manifest"
+      }
+    },
+    {
+      "id": "libero_10/1/C-order-deadline",
+      "family": "combined",
+      "kind": "C-order-deadline",
+      "suite": "libero_10",
+      "task_id": 1,
+      "init_state_id": 0,
+      "prompt": "put both the cream cheese box and the butter in the basket, putting them in alphabetical order, and finish within 20 seconds",
+      "stl_intent": "(F(In(butter_1)) before F(In(cream_cheese_1))) & (F[0,400](Goal))",
+      "scoring": {
+        "type": "combo",
+        "parts": [
+          "libero_10/1/L-order",
+          "libero_10/1/T-deadline"
+        ],
+        "pair": "logical+temporal",
+        "note": "every part must hold; scored by looking each part up in this manifest"
+      }
+    },
+    {
+      "id": "libero_10/1/C-zone-order",
+      "family": "combined",
+      "kind": "C-zone-order",
+      "suite": "libero_10",
+      "task_id": 1,
+      "init_state_id": 0,
+      "prompt": "put both the cream cheese box and the butter in the basket, while staying out of the red zone marked on the table, and putting them in alphabetical order",
+      "stl_intent": "(G(Safe(zone))) & (F(In(butter_1)) before F(In(cream_cheese_1)))",
+      "scoring": {
+        "type": "combo",
+        "parts": [
+          "libero_10/1/S-zone",
+          "libero_10/1/L-order"
+        ],
+        "pair": "spatial+logical",
+        "note": "every part must hold; scored by looking each part up in this manifest"
+      }
+    },
+    {
+      "id": "libero_10/4/C-offset-dwell",
+      "family": "combined",
+      "kind": "C-offset-dwell",
+      "suite": "libero_10",
+      "task_id": 4,
+      "init_state_id": 0,
+      "prompt": "put the white mug on the left plate and put the yellow and white mug on the right plate, leaving it about 5 cm to the left of the centre of the left plate, and holding it steady above the target for 2 seconds before letting go",
+      "stl_intent": "(F(Placed(white_yellow_mug_1, offset(-0.05m, plate_1)))) & (G[0,40](OverGoal) U Released)",
+      "scoring": {
+        "type": "combo",
+        "parts": [
+          "libero_10/4/S-offset",
+          "libero_10/4/T-dwell"
+        ],
+        "pair": "spatial+temporal",
+        "note": "every part must hold; scored by looking each part up in this manifest"
+      }
+    },
+    {
+      "id": "libero_goal/1/C-zone-deadline",
+      "family": "combined",
+      "kind": "C-zone-deadline",
+      "suite": "libero_goal",
+      "task_id": 1,
+      "init_state_id": 0,
+      "prompt": "put the bowl on the stove, while staying out of the red zone marked on the table, and finish within 20 seconds",
+      "stl_intent": "(G(Safe(zone))) & (F[0,400](Goal))",
+      "scoring": {
+        "type": "combo",
+        "parts": [
+          "libero_goal/1/S-zone",
+          "libero_goal/1/T-deadline"
+        ],
+        "pair": "spatial+temporal",
+        "note": "every part must hold; scored by looking each part up in this manifest"
+      }
+    },
+    {
+      "id": "libero_goal/8/C-offset-dwell",
+      "family": "combined",
+      "kind": "C-offset-dwell",
+      "suite": "libero_goal",
+      "task_id": 8,
+      "init_state_id": 0,
+      "prompt": "put the bowl on the plate, leaving it about 5 cm to the left of the centre of the plate, and holding it steady above the target for 2 seconds before letting go",
+      "stl_intent": "(F(Placed(akita_black_bowl_1, offset(-0.05m, plate_1)))) & (G[0,40](OverGoal) U Released)",
+      "scoring": {
+        "type": "combo",
+        "parts": [
+          "libero_goal/8/S-offset",
+          "libero_goal/8/T-dwell"
+        ],
+        "pair": "spatial+temporal",
+        "note": "every part must hold; scored by looking each part up in this manifest"
+      }
+    },
+    {
+      "id": "libero_spatial/1/C-zone-deadline",
+      "family": "combined",
+      "kind": "C-zone-deadline",
+      "suite": "libero_spatial",
+      "task_id": 1,
+      "init_state_id": 0,
+      "prompt": "pick up the black bowl next to the ramekin and place it on the plate, while staying out of the red zone marked on the table, and finish within 20 seconds",
+      "stl_intent": "(G(Safe(zone))) & (F[0,400](Goal))",
+      "scoring": {
+        "type": "combo",
+        "parts": [
+          "libero_spatial/1/S-zone",
+          "libero_spatial/1/T-deadline"
+        ],
+        "pair": "spatial+temporal",
+        "note": "every part must hold; scored by looking each part up in this manifest"
       }
     },
     {

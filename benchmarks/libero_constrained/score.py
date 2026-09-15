@@ -126,6 +126,69 @@ def score_deadline(task, roll):
             "detail": f"completed in {steps} steps ({steps/MANIFEST['control_hz']:.1f} s), budget {budget}"}
 
 
+AXIS = {"x": 0, "y": 1}
+
+
+def _final_offset(roll, spec):
+    """Final position of the placed object minus the goal's centre, along the axis.
+
+    +y is screen-right under the agentview camera (verified by projecting every
+    object in a scene and checking the ordering), so a leftward offset is negative.
+    """
+    tgt, ref = track(roll, spec["target"]), track(roll, spec["reference"])
+    if tgt is None or ref is None:
+        return None
+    ok = np.isfinite(tgt).all(axis=1) & np.isfinite(ref).all(axis=1)
+    if not ok.any():
+        return None
+    last = np.flatnonzero(ok)[-1]
+    return float(tgt[last, AXIS[spec["axis"]]] - ref[last, AXIS[spec["axis"]]])
+
+
+def score_placement_offset(task, roll):
+    spec = task["scoring"]
+    got = _final_offset(roll, spec)
+    if got is None:
+        return {"held": None, "detail": "target or reference was not logged"}
+    want = spec["sign"] * spec["distance_m"]
+    err = abs(got - want)
+    return {"held": err <= spec["tolerance_m"],
+            "detail": f"asked {want*100:+.0f} cm, got {got*100:+.1f} cm (tolerance {spec['tolerance_m']*100:.0f} cm)"}
+
+
+def score_placement_relative(task, roll):
+    """Which side of the goal the object ended on.
+
+    Only the side is scored, not the distance: the instruction names a reference
+    object rather than a measurement, so anything beyond the sign would be scoring
+    something the instruction never asked for.
+    """
+    spec = task["scoring"]
+    got = _final_offset(roll, spec)
+    if got is None:
+        return {"held": None, "detail": "target or reference was not logged"}
+    side = "right" if spec["sign"] > 0 else "left"
+    ok = (got * spec["sign"]) >= spec.get("tolerance_m", 0.02)
+    return {"held": ok,
+            "detail": f"needed the {side} side, ended {got*100:+.1f} cm from the centre"}
+
+
+def score_combo(task, roll):
+    """Every part must hold. Each part is scored by its own entry in the manifest."""
+    results = []
+    for part_id in task["scoring"]["parts"]:
+        part = TASKS.get(part_id)
+        if part is None:
+            return {"held": None, "detail": f"part {part_id} missing from the manifest"}
+        results.append((part["kind"], SCORERS.get(part["scoring"]["type"], score_unsupported)(part, roll)))
+    if any(r["held"] is None for _, r in results):
+        unknown = ", ".join(k for k, r in results if r["held"] is None)
+        return {"held": None, "detail": f"cannot score {unknown}"}
+    held = all(r["held"] for _, r in results)
+    parts = "; ".join(f"{k}={'ok' if r['held'] else 'NO'}" for k, r in results)
+    return {"held": held, "detail": parts}
+
+
 def score_success_only(task, roll):
     return {"held": None, "detail": "no constraint on this task"}
 
@@ -136,6 +199,9 @@ def score_unsupported(task, roll):
 
 SCORERS = {
     "keepout": score_keepout,
+    "placement_offset": score_placement_offset,
+    "placement_relative": score_placement_relative,
+    "combo": score_combo,
     "order": score_order,
     "untouched": score_untouched,
     "dwell": score_dwell,
