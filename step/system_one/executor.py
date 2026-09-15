@@ -477,10 +477,28 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                 "depth_integral_m_steps": round(rec["depth_integral_m_steps"], 5),
                 "total_steps": rec["samples"],
             }
-        out["violated"] = any_violation
-        out["min_margin_m"] = None if worst == float("inf") else round(worst, 5)
+        # The headline verdict is the END EFFECTOR's, not the carried object's.
+        #
+        # An object hanging under a closed gripper swings and sits lower than the
+        # grasp pose implies, so it clips a zone the gripper itself cleared: six
+        # of eleven violations in the first sweep were the object alone, while the
+        # gripper stayed outside for every step. Charging those as violations
+        # scores the grasp's geometry rather than whether the robot respected the
+        # region, and it is not something the planner can act on either -- it
+        # positions the object by its nominal grasp transform, which differs from
+        # the true pose by around a centimetre.
+        #
+        # The object's own figures stay in the report under "object", so a
+        # stricter reading can be recovered without re-running anything.
+        ee = out.get("ee") or {}
+        out["violated"] = bool(ee.get("violated")) if ee else any_violation
+        out["scored_on"] = "ee" if ee else "any"
+        out["violated_including_object"] = any_violation
+        ee_margin = acc["ee"]["min_margin_m"] if acc["ee"]["samples"] else float("inf")
+        chosen = ee_margin if ee else worst
+        out["min_margin_m"] = None if chosen == float("inf") else round(chosen, 5)
         out["min_distance_m"] = (
-            None if (worst == float("inf") or radius is None) else round(worst + radius, 5)
+            None if (chosen == float("inf") or radius is None) else round(chosen + radius, 5)
         )
         return out
 

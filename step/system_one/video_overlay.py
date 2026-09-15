@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 import json
+import math
 import os
 import time
 
@@ -284,6 +285,93 @@ class VideoOverlayMixin:
             str(self.video_path), fps=max(1, self.video_fps)
         )
 
+    def _keepout_projector(self, env: BaseManipulationEnv, width: int, height: int):
+        """World xyz -> frame pixel, for the camera the video is rendered from.
+
+        MuJoCo cameras look down -Z with +Y up, so this is the ordinary pinhole
+        projection with a sign flip on z. Cached per episode: the camera does not
+        move, and rebuilding it every frame would re-read the model each step.
+        """
+        cached = getattr(self, "_keepout_proj_cache", None)
+        if cached is not None and cached[0] == (self.video_camera, width, height):
+            return cached[1]
+        sim = getattr(getattr(env, "env", None), "sim", None) or getattr(env, "sim", None)
+        if sim is None:
+            return None
+        try:
+            cid = sim.model.camera_name2id(self.video_camera)
+            fovy = float(sim.model.cam_fovy[cid])
+            cam_pos = np.asarray(sim.data.cam_xpos[cid], dtype=float)
+            cam_mat = np.asarray(sim.data.cam_xmat[cid], dtype=float).reshape(3, 3)
+        except Exception:
+            return None
+        focal = (height / 2.0) / math.tan(math.radians(fovy) / 2.0)
+
+        def project(p):
+            q = cam_mat.T @ (np.asarray(p, dtype=float) - cam_pos)
+            if q[2] >= -1e-6:
+                return None
+            u = focal * (q[0] / -q[2]) + width / 2.0
+            v = focal * (q[1] / -q[2]) + height / 2.0
+            return (u, height - v)
+
+        self._keepout_proj_cache = ((self.video_camera, width, height), project)
+        return project
+
+    def _draw_keepout_zones(self, env: BaseManipulationEnv, frame: np.ndarray) -> np.ndarray:
+        """Paint every active keep-out onto the frame as a filled region on the table."""
+        from .geometry_sdf import CircleSDF
+
+        zones = [
+            c for c in (getattr(env, "sdf_constraints", []) or [])
+            if str(getattr(c, "role", "")) in {"obstacle", "keepout"}
+            and isinstance(getattr(c, "primitive", None), CircleSDF)
+            and c.primitive.convention == "outside_positive"
+        ]
+        if not zones:
+            return frame
+        height, width = frame.shape[0], frame.shape[1]
+        project = self._keepout_projector(env, width, height)
+        if project is None:
+            return frame
+
+        # Table height, taken from the objects resting on it so the region is drawn
+        # on the surface rather than floating.
+        try:
+            zs = [float(np.asarray(p).reshape(-1)[2]) for p in (env.scene_objects or {}).values()]
+            table_z = float(np.median(zs)) - 0.02 if zs else 0.90
+        except Exception:
+            table_z = 0.90
+
+        try:
+            from PIL import Image, ImageDraw
+        except ImportError:
+            return frame
+
+        img = Image.fromarray(np.ascontiguousarray(frame)).convert("RGBA")
+        overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        drew = False
+        for zone in zones:
+            centre = np.asarray(zone.primitive.center_xy, dtype=float)
+            radius = float(zone.primitive.radius) + float(getattr(zone, "margin", 0.0))
+            pts = []
+            for i in range(64):
+                a = 2.0 * math.pi * i / 64.0
+                p = project([centre[0] + radius * math.cos(a), centre[1] + radius * math.sin(a), table_z])
+                if p is None:
+                    pts = []
+                    break
+                pts.append(p)
+            if len(pts) < 3:
+                continue
+            draw.polygon(pts, fill=(200, 45, 25, 80))
+            draw.line(pts + [pts[0]], fill=(200, 45, 25, 230), width=3)
+            drew = True
+        if not drew:
+            return frame
+        return np.asarray(Image.alpha_composite(img, overlay).convert("RGB"), dtype=np.uint8)
+
     def _capture_video_frame(self, env: BaseManipulationEnv, *, force: bool = False) -> None:
         if self.video_path is None:
             return
@@ -300,6 +388,11 @@ class VideoOverlayMixin:
             frame = np.flipud(frame)
         if self.video_flip_horizontal:
             frame = np.fliplr(frame)
+        # The keep-out is invisible in the simulator -- it is a region, not an
+        # object -- so a rollout video showed the arm apparently moving through
+        # empty table. Draw it into the frame, projected through the same camera,
+        # or the video cannot be used to judge a violation.
+        frame = self._draw_keepout_zones(env, frame)
         # Keep the robustness line live during the current subtask.
         self._video_current_robustness = self._format_video_robustness(env)
         frame = self._add_prompt_caption(
