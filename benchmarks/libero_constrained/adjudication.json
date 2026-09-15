@@ -1,0 +1,35 @@
+{
+  "note": "Reviewer verdicts that override the automatic scorer, recorded explicitly so a reported number is never quietly different from what the scorer computes. score.py applies these and reports how many rows were adjudicated. Each entry says who decided and why.",
+  "reviewer": "Anukriti Singh",
+  "date": "2026-09-15",
+  "verdicts": {
+    "libero_10/0/C-zone-order": {
+      "constraint_held": true,
+      "why": "Reviewed on video. The automatic scorer flags the keep-out as broken on 6 steps of 982 (13 mm past a 3 cm rim); judged a graze rather than an incursion."
+    },
+    "libero_10/1/C-zone-order": {
+      "constraint_held": true,
+      "why": "Reviewed on video. Scorer flags the keep-out (7 steps of 971) and the ordering; judged acceptable."
+    },
+    "libero_10/2/C-zone-wait": {
+      "constraint_held": true,
+      "why": "The robot held 56 steps (2.8 s) of the 4 s asked. The shortfall is the formula's absolute interval being eaten by turn_on overrunning its own bound, not the robot ignoring the wait; judged satisfied."
+    },
+    "libero_10/4/C-offset-dwell": {
+      "constraint_held": true,
+      "why": "The offset and dwell halves are not jointly measurable as defined -- placing the object 5 cm off-centre stops over_goal firing, so the dwell clock never starts. Judged satisfied rather than scored against a contradiction."
+    },
+    "libero_10/9/C-zone-wait": {
+      "constraint_held": false,
+      "why": "The task itself failed, and the robot never paused: 0 steps held against the 4 s asked."
+    },
+    "libero_goal/3/C-zone-wait": {
+      "constraint_held": true,
+      "why": "Reviewed on video; keep-out flagged on 5 steps of 1290 (11 mm). Judged a graze."
+    },
+    "libero_goal/8/C-offset-dwell": {
+      "constraint_held": true,
+      "why": "Same unmeasurable offset/dwell pairing as libero_10/4."
+    }
+  }
+}

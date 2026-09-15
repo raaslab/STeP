@@ -20,6 +20,11 @@ import numpy as np
 MANIFEST = json.loads((pathlib.Path(__file__).parent / "tasks.json").read_text())
 TASKS = {t["id"]: t for t in MANIFEST["tasks"]}
 
+_ADJ_PATH = pathlib.Path(__file__).parent / "adjudication.json"
+ADJUDICATION = (
+    json.loads(_ADJ_PATH.read_text()).get("verdicts", {}) if _ADJ_PATH.exists() else {}
+)
+
 # An object counts as "at" its destination when its centre is within this of the
 # destination's centre in the plane. Containers in LIBERO measure 15-20cm across,
 # so this sits inside the real opening rather than merely near it.
@@ -340,13 +345,24 @@ def score_run(run_dir: pathlib.Path):
     arm = "on" if name.endswith("_on") else "off"
     state = int(name.split("_s")[-1].split("_")[0])
     result = SCORERS.get(task["scoring"]["type"], score_unsupported)(task, roll)
-    return {
+    row = {
         "id": task["id"], "family": task["family"], "kind": task["kind"],
         "arm": arm, "state": state,
         "success": bool(roll["summary"].get("success")),
         "constraint_held": result["held"],
         "detail": result["detail"],
+        "adjudicated": False,
     }
+    # A reviewer verdict overrides the computed one. Applied here rather than by
+    # loosening a scorer, so the automatic measure keeps saying what it actually
+    # measured and any adjudicated row is visible as such.
+    verdict = ADJUDICATION.get(task["id"])
+    if verdict is not None:
+        row["computed_constraint_held"] = result["held"]
+        row["constraint_held"] = bool(verdict["constraint_held"])
+        row["detail"] = f"[reviewed] {verdict['why']}"
+        row["adjudicated"] = True
+    return row
 
 
 def aggregate(rows):
