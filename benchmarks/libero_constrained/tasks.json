@@ -538,6 +538,8 @@
       "stl_intent": "Empty(basket) U Placed",
       "scoring": {
         "type": "precondition",
+        "container": "basket_1",
+        "target": "alphabet_soup_1",
         "note": "was the container empty at the step the placement began"
       }
     },
@@ -569,6 +571,8 @@
       "stl_intent": "Empty(basket) U Placed",
       "scoring": {
         "type": "precondition",
+        "container": "basket_1",
+        "target": "cream_cheese_1",
         "note": "was the container empty at the step the placement began"
       }
     },
@@ -648,6 +652,8 @@
       "stl_intent": "Empty(drawer) U Placed",
       "scoring": {
         "type": "precondition",
+        "container": null,
+        "target": "akita_black_bowl_1",
         "note": "was the container empty at the step the placement began"
       }
     },
@@ -684,6 +690,22 @@
       }
     },
     {
+      "id": "libero_10/1/T-deadline",
+      "family": "temporal",
+      "kind": "T-deadline",
+      "suite": "libero_10",
+      "task_id": 1,
+      "init_state_id": 0,
+      "prompt": "put both the cream cheese box and the butter in the basket, and finish within 20 seconds",
+      "stl_intent": "F[0,400](Goal)",
+      "scoring": {
+        "type": "deadline",
+        "seconds": 20,
+        "steps": 400,
+        "note": "step at which the task's own success condition first holds"
+      }
+    },
+    {
       "id": "libero_10/2/T-stage",
       "family": "temporal",
       "kind": "T-stage",
@@ -709,6 +731,22 @@
       "scoring": {
         "type": "stage",
         "note": "step the second stage begins, against the step the first stage completes"
+      }
+    },
+    {
+      "id": "libero_10/4/T-dwell",
+      "family": "temporal",
+      "kind": "T-dwell",
+      "suite": "libero_10",
+      "task_id": 4,
+      "init_state_id": 0,
+      "prompt": "put the white mug on the left plate and put the yellow and white mug on the right plate, holding it steady above the target for 2 seconds before letting go",
+      "stl_intent": "G[0,40](OverGoal) U Released",
+      "scoring": {
+        "type": "dwell",
+        "seconds": 2,
+        "steps": 40,
+        "note": "consecutive steps over the goal with the gripper still closed, before release"
       }
     },
     {
@@ -744,6 +782,22 @@
       }
     },
     {
+      "id": "libero_goal/2/T-deadline",
+      "family": "temporal",
+      "kind": "T-deadline",
+      "suite": "libero_goal",
+      "task_id": 2,
+      "init_state_id": 0,
+      "prompt": "put the wine bottle on top of the cabinet, and finish within 20 seconds",
+      "stl_intent": "F[0,400](Goal)",
+      "scoring": {
+        "type": "deadline",
+        "seconds": 20,
+        "steps": 400,
+        "note": "step at which the task's own success condition first holds"
+      }
+    },
+    {
       "id": "libero_goal/3/T-stage",
       "family": "temporal",
       "kind": "T-stage",
@@ -755,6 +809,22 @@
       "scoring": {
         "type": "stage",
         "note": "step the second stage begins, against the step the first stage completes"
+      }
+    },
+    {
+      "id": "libero_goal/8/T-dwell",
+      "family": "temporal",
+      "kind": "T-dwell",
+      "suite": "libero_goal",
+      "task_id": 8,
+      "init_state_id": 0,
+      "prompt": "put the bowl on the plate, holding it steady above the target for 2 seconds before letting go",
+      "stl_intent": "G[0,40](OverGoal) U Released",
+      "scoring": {
+        "type": "dwell",
+        "seconds": 2,
+        "steps": 40,
+        "note": "consecutive steps over the goal with the gripper still closed, before release"
       }
     },
     {
@@ -787,6 +857,22 @@
         "seconds": 2,
         "steps": 40,
         "note": "consecutive steps over the goal with the gripper still closed, before release"
+      }
+    },
+    {
+      "id": "libero_spatial/1/T-deadline",
+      "family": "temporal",
+      "kind": "T-deadline",
+      "suite": "libero_spatial",
+      "task_id": 1,
+      "init_state_id": 0,
+      "prompt": "pick up the black bowl next to the ramekin and place it on the plate, and finish within 20 seconds",
+      "stl_intent": "F[0,400](Goal)",
+      "scoring": {
+        "type": "deadline",
+        "seconds": 20,
+        "steps": 400,
+        "note": "step at which the task's own success condition first holds"
       }
     },
     {
@@ -825,6 +911,15 @@
         ],
         "pair": "spatial+temporal",
         "note": "every part must hold; scored by looking each part up in this manifest"
+      },
+      "zone": {
+        "center_xy": [
+          -0.02715,
+          0.14167
+        ],
+        "radius_m": 0.03,
+        "route_depth_m": 0.0255,
+        "object_clearance_m": 0.015
       }
     },
     {
@@ -844,6 +939,15 @@
         ],
         "pair": "spatial+logical",
         "note": "every part must hold; scored by looking each part up in this manifest"
+      },
+      "zone": {
+        "center_xy": [
+          -0.02715,
+          0.14167
+        ],
+        "radius_m": 0.03,
+        "route_depth_m": 0.0255,
+        "object_clearance_m": 0.015
       }
     },
     {
@@ -882,6 +986,15 @@
         ],
         "pair": "spatial+logical",
         "note": "every part must hold; scored by looking each part up in this manifest"
+      },
+      "zone": {
+        "center_xy": [
+          0.10836,
+          -0.02839
+        ],
+        "radius_m": 0.045,
+        "route_depth_m": 0.005,
+        "object_clearance_m": 0.0155
       }
     },
     {
@@ -920,6 +1033,15 @@
         ],
         "pair": "spatial+temporal",
         "note": "every part must hold; scored by looking each part up in this manifest"
+      },
+      "zone": {
+        "center_xy": [
+          -0.10523,
+          -0.12123
+        ],
+        "radius_m": 0.035,
+        "route_depth_m": 0.0298,
+        "object_clearance_m": 0.0151
       }
     },
     {
@@ -958,6 +1080,15 @@
         ],
         "pair": "spatial+temporal",
         "note": "every part must hold; scored by looking each part up in this manifest"
+      },
+      "zone": {
+        "center_xy": [
+          -0.06915,
+          0.25487
+        ],
+        "radius_m": 0.06,
+        "route_depth_m": 0.06,
+        "object_clearance_m": 0.0253
       }
     },
     {

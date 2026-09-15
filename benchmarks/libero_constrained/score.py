@@ -193,6 +193,68 @@ def score_success_only(task, roll):
     return {"held": None, "detail": "no constraint on this task"}
 
 
+def score_precondition(task, roll):
+    """Was the container empty when the placement began?
+
+    Computed from object tracks rather than from a container-occupancy signal:
+    an object counts as inside when its centre is within the container's arrival
+    radius at the step the carried object first arrives. Anything already there
+    at that moment means the precondition was not met.
+    """
+    spec = task["scoring"]
+    container = spec.get("container")
+    target = spec.get("target")
+    if not (container and target):
+        return {"held": None, "detail": "manifest lacks the container or the target"}
+    arrive = first_arrival(roll, target, container)
+    if arrive is None:
+        return {"held": None, "detail": f"{target} never reached the {container}"}
+    cpos = track(roll, container)
+    occupants = []
+    for name in roll.get("names", []):
+        if name in (container, target):
+            continue
+        p = track(roll, name)
+        if p is None or not np.isfinite(p[arrive]).all():
+            continue
+        if float(np.linalg.norm(p[arrive, :2] - cpos[arrive, :2])) <= ARRIVAL_RADIUS_M:
+            occupants.append(name)
+    return {"held": not occupants,
+            "detail": (f"{container} was empty at step {arrive}" if not occupants
+                       else f"{container} still held {', '.join(occupants)} at step {arrive}")}
+
+
+def score_stage(task, roll):
+    """Did the second stage wait for the first to finish?
+
+    The executor records each subtask with its step count, so the boundary
+    between stages is known without instrumenting the articulated joint: the
+    stage-opening skill's record ends where the next begins. The test is whether
+    the gripper closed on anything before that boundary.
+    """
+    records = roll["summary"].get("records", [])
+    if not records:
+        return {"held": None, "detail": "no subtasks were recorded"}
+    OPENERS = {"open", "turn_on", "close"}
+    boundary, seen_opener = 0, False
+    for rec in records:
+        n = int(rec.get("steps") or 0)
+        if rec.get("skill") in OPENERS:
+            seen_opener = True
+            boundary += n
+            break
+        boundary += n
+    if not seen_opener:
+        return {"held": None, "detail": "no staged skill ran, so there was no ordering to respect"}
+    if "grasped" not in roll:
+        return {"held": None, "detail": "no trajectory logged"}
+    grasped = roll["grasped"] > 0
+    early = np.flatnonzero(grasped[:boundary])
+    if early.size:
+        return {"held": False, "detail": f"grasped at step {int(early[0])}, before the first stage ended at {boundary}"}
+    return {"held": True, "detail": f"nothing grasped before the first stage ended at step {boundary}"}
+
+
 def score_unsupported(task, roll):
     return {"held": None, "detail": "scorer needs a signal the rollout does not log yet"}
 
@@ -207,11 +269,8 @@ SCORERS = {
     "dwell": score_dwell,
     "deadline": score_deadline,
     "success_only": score_success_only,
-    # Both need a signal that is not in trajectory.npz today: whether a container
-    # held anything (precondition) and the articulated joint's state over time
-    # (stage). Recorded as unscored rather than guessed.
-    "precondition": score_unsupported,
-    "stage": score_unsupported,
+    "precondition": score_precondition,
+    "stage": score_stage,
 }
 
 
