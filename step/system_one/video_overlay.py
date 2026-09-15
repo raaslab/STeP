@@ -281,6 +281,10 @@ class VideoOverlayMixin:
                 "Saving videos requires imageio and imageio-ffmpeg. Install with: pip install imageio imageio-ffmpeg pillow"
             ) from exc
         self.video_path.parent.mkdir(parents=True, exist_ok=True)
+        # Per-episode drawing caches: the table height and the camera projection
+        # are both fixed for a rollout but must not carry into the next one.
+        self._keepout_table_z = None
+        self._keepout_proj_cache = None
         self._video_writer = imageio.get_writer(
             str(self.video_path), fps=max(1, self.video_fps)
         )
@@ -335,13 +339,28 @@ class VideoOverlayMixin:
         if project is None:
             return frame
 
-        # Table height, taken from the objects resting on it so the region is drawn
-        # on the surface rather than floating.
-        try:
-            zs = [float(np.asarray(p).reshape(-1)[2]) for p in (env.scene_objects or {}).values()]
-            table_z = float(np.median(zs)) - 0.02 if zs else 0.90
-        except Exception:
-            table_z = 0.90
+        # Table height, measured ONCE and then held fixed.
+        #
+        # Recomputing it per frame made the zone move: it was the median z of the
+        # scene objects, so lifting one raised the median and the zone was drawn
+        # higher, appearing to ride along with the carried object. On a two-object
+        # scene the median is just their mean, so a 20cm lift moved the zone 10cm.
+        #
+        # The minimum is used rather than the median because a zone is painted on
+        # the table, and the lowest object is the one actually resting on it --
+        # a median is pulled upward by anything tall or already stacked.
+        table_z = getattr(self, "_keepout_table_z", None)
+        if table_z is None:
+            try:
+                zs = [
+                    float(np.asarray(p).reshape(-1)[2])
+                    for p in (env.scene_objects or {}).values()
+                    if p is not None and np.isfinite(np.asarray(p).reshape(-1)[2])
+                ]
+                table_z = (min(zs) - 0.02) if zs else 0.90
+            except Exception:
+                table_z = 0.90
+            self._keepout_table_z = table_z
 
         try:
             from PIL import Image, ImageDraw
