@@ -49,6 +49,34 @@ def _import_libero_env():
     return OffScreenRenderEnv
 
 
+def _patch_torch_load_for_libero() -> None:
+    """LIBERO's ``benchmark.get_task_init_states`` calls ``torch.load(path)`` with
+    no ``weights_only`` argument. PyTorch >= 2.6 flipped that default to ``True``,
+    which cannot unpickle LIBERO's numpy-backed init-state files.
+
+    Without this, ``get_libero_init_state``'s own bare ``except`` swallows the
+    resulting ``UnpicklingError`` and returns ``None``, so ``--init-state-id`` is
+    *silently ignored* and every rollout runs the BDDL default layout instead --
+    i.e. an N-init-state benchmark secretly evaluates one state N times. The
+    init-state files ship inside the pinned LIBERO checkout and are trusted, so
+    restore the pre-2.6 behavior for them.
+    """
+    try:
+        import torch
+    except ImportError:
+        return
+    if getattr(torch.load, "_libero_weights_only_patched", False):
+        return
+    _orig_load = torch.load
+
+    def _load(*args, **kwargs):
+        kwargs.setdefault("weights_only", False)
+        return _orig_load(*args, **kwargs)
+
+    _load._libero_weights_only_patched = True
+    torch.load = _load
+
+
 def _ensure_libero_on_path() -> None:
     """Add the LIBERO source tree to sys.path if libero is not already importable.
 
@@ -58,6 +86,7 @@ def _ensure_libero_on_path() -> None:
     """
     try:
         import libero  # noqa: F401
+        _patch_torch_load_for_libero()
         return
     except ImportError:
         pass
@@ -73,7 +102,9 @@ def _ensure_libero_on_path() -> None:
             path_str = str(candidate)
             if path_str not in sys.path:
                 sys.path.insert(0, path_str)
+            _patch_torch_load_for_libero()
             return
+    _patch_torch_load_for_libero()
 
 
 _MOVABLE_HINTS = (
@@ -1136,6 +1167,18 @@ def apply_libero_experiment_geometry(scene_context: dict[str, Any]) -> dict[str,
             if region not in entity_names:
                 entities.append({"name": region, "role": "obstacle", "aliases": _entity_aliases(region)})
                 entity_names.add(region)
+            else:
+                # The obstacle is usually an already-discovered scene object, so
+                # it arrives with whatever role discovery guessed (typically
+                # support_object). Declaring it as a keep-out must override that:
+                # parse_sdf_constraints derives the sign convention and whether
+                # the constraint applies to the end effector from this role, so
+                # leaving it as support_object silently produces an
+                # inside_positive, object-only constraint -- the inverse of a
+                # keep-out.
+                for ent in entities:
+                    if ent.get("name") == region:
+                        ent["role"] = "obstacle"
             g = geom.setdefault(region, {})
             xy = g.get("xy") or updated.get("live_scene_state", {}).get("objects", {}).get(region, {}).get("xy")
             if xy is not None and "sdf_geometry" not in g:
@@ -1144,6 +1187,10 @@ def apply_libero_experiment_geometry(scene_context: dict[str, Any]) -> dict[str,
                     "center_xy": [float(xy[0]), float(xy[1])],
                     "radius": margin,
                     "convention": "outside_positive",
+                    # A keep-out zone is a G(Safe(obstacle)) obligation: it holds
+                    # for every step of the episode, not only while some subtask
+                    # names it in applied_constraints (nothing populates that).
+                    "always_active": True,
                 }
             g.setdefault("radius", margin)
 

@@ -69,6 +69,33 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--outdir", default="outputs/libero")
     p.add_argument("--model", default=None)
     p.add_argument("--compiled-plan", default=None, help="Execute an existing direct STL plan JSON.")
+    p.add_argument(
+        "--avoid-region",
+        default=None,
+        help=(
+            "LIBERO-Constrained: name of the body to treat as a keep-out zone "
+            "(e.g. cookies_1). Materializes a real SDF constraint the MPC and the "
+            "safety robustness terms both see, rather than only mentioning it in "
+            "the prompt."
+        ),
+    )
+    p.add_argument(
+        "--avoid-margin",
+        type=float,
+        default=0.06,
+        help="Keep-out radius in metres around --avoid-region. Difficulty knob.",
+    )
+    p.add_argument(
+        "--no-enforce-keepout",
+        action="store_true",
+        help=(
+            "RQ2 ablation. Declare and SCORE the --avoid-region keep-out exactly "
+            "as normal, but do not let System 1 plan or control around it, so the "
+            "STL constraint is monitored only. This is the 'STL does not reach "
+            "low-level control' arm; both arms stay directly comparable because "
+            "the scene and the metric are identical."
+        ),
+    )
     p.add_argument("--dry-run", action="store_true", help="Stop after writing scene/prompt/plan files.")
     p.add_argument("--render", action="store_true")
     p.add_argument("--save-video", default=None, help="Optional path for an execution video, e.g. outputs/libero/pick.mp4.")
@@ -162,6 +189,26 @@ def _prepare_libero_scene(args: argparse.Namespace, outdir: Path) -> tuple[dict[
         scene_context = LiberoManipulationEnv.snapshot_scene_context(scene_context)
     except Exception as exc:
         print(f"[step] warning: LIBERO scene snapshot failed: {exc}")
+
+    # Declare the keep-out zone *after* the snapshot: apply_libero_experiment_
+    # geometry() needs the obstacle's discovered xy to place the SDF circle, and
+    # that only exists once the scene has been snapshotted. The real execution
+    # env then materializes it during construction.
+    if args.avoid_region:
+        platform.setdefault("libero_experiment", {})["avoid_region"] = {
+            "region": args.avoid_region,
+            "margin": float(args.avoid_margin),
+        }
+        scene_context.setdefault("platform", {}).setdefault("libero_experiment", {})[
+            "avoid_region"
+        ] = {"region": args.avoid_region, "margin": float(args.avoid_margin)}
+        # --no-enforce-keepout is the RQ2 ablation: the zone is still declared,
+        # still turned into an SDF constraint, and still scored exactly the
+        # same -- System 1 just never plans around it. Without this the "STL
+        # off" arm would also be an unscored arm, and the two conditions would
+        # not be comparable.
+        for block in (platform["libero_experiment"], scene_context["platform"]["libero_experiment"]):
+            block["enforce_keepout"] = not args.no_enforce_keepout
 
     prompt = _resolve_prompt(args, scene_context)
     outdir.mkdir(parents=True, exist_ok=True)
