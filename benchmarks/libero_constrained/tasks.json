@@ -788,11 +788,13 @@
       "suite": "libero_goal",
       "task_id": 3,
       "init_state_id": 0,
-      "prompt": "open the top drawer and put the bowl inside, and do not pick anything up until the first step is fully complete",
-      "stl_intent": "not(Grasped) U Opened",
+      "prompt": "open the top drawer and put the bowl inside, making sure nothing is in the way before opening the drawer",
+      "stl_intent": "F(PathClear(drawer)) before Opened(drawer)",
       "scoring": {
-        "type": "stage",
-        "note": "step the second stage begins, against the step the first stage completes"
+        "type": "clear_path",
+        "fixture": "wooden_cabinet_1_base",
+        "radius_m": 0.18,
+        "note": "was the drawer approach clear of other objects when the opening began"
       }
     },
     {

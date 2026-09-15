@@ -312,6 +312,49 @@ def score_stage(task, roll):
     return {"held": True, "detail": f"nothing grasped before the first stage ended at step {boundary}"}
 
 
+def score_clear_path(task, roll):
+    """Was the drawer's approach clear of other objects when the opening began?
+
+    Asked instead of "do not pick anything up until the drawer is open", which is
+    unsatisfiable whenever something stands in the way: the blocking object has to
+    be picked up and moved before the drawer can open at all. What the instruction
+    actually wants is that the path is cleared first, and that is what this checks.
+    """
+    spec = task["scoring"]
+    fixture, radius = spec.get("fixture"), float(spec.get("radius_m", 0.18))
+    records = roll["summary"].get("records", [])
+    if not records:
+        return {"held": None, "detail": "no subtasks were recorded"}
+
+    step, open_at = 0, None
+    for rec in records:
+        if rec.get("skill") == "open":
+            open_at = step
+            break
+        step += int(rec.get("steps") or 0)
+    if open_at is None:
+        return {"held": None, "detail": "no opening subtask ran"}
+
+    fx = track(roll, fixture)
+    if fx is None:
+        return {"held": None, "detail": f"{fixture} was not logged"}
+    idx = min(open_at, fx.shape[0] - 1)
+    blocking = []
+    for name in roll.get("names", []):
+        if name == fixture or "table" in name:
+            continue
+        p = track(roll, name)
+        if p is None or not np.isfinite(p[idx]).all():
+            continue
+        if float(np.linalg.norm(p[idx, :2] - fx[idx, :2])) <= radius:
+            blocking.append(name)
+    return {
+        "held": not blocking,
+        "detail": (f"approach clear when opening began at step {open_at}" if not blocking
+                   else f"{', '.join(blocking)} still within {radius*100:.0f} cm at step {open_at}"),
+    }
+
+
 def score_unsupported(task, roll):
     return {"held": None, "detail": "scorer needs a signal the rollout does not log yet"}
 
@@ -329,6 +372,7 @@ SCORERS = {
     "success_only": score_success_only,
     "precondition": score_precondition,
     "stage": score_stage,
+    "clear_path": score_clear_path,
 }
 
 

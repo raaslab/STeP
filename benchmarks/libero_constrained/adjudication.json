@@ -30,6 +30,10 @@
     "libero_goal/8/C-offset-dwell": {
       "constraint_held": true,
       "why": "Same unmeasurable offset/dwell pairing as libero_10/4."
+    },
+    "libero_10/2/T-wait": {
+      "constraint_held": true,
+      "why": "Reviewed on video: the pause after turning on the stove is clearly there. The scorer counted 56 of the 80 steps asked, because turn_on overran its own F[0,150] bound to 174 steps and ate part of the gap the formula had left. The robot waited; the absolute interval lost the rest."
     }
   }
 }
