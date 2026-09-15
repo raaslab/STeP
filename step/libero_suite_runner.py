@@ -60,6 +60,21 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no-video", action="store_true")
     p.add_argument("--skip-existing", action="store_true")
     p.add_argument("--use-safety-prompts", action="store_true", help="Use augmented prompts from configs/libero_safety.json when available.")
+    p.add_argument(
+        "--enforce-constraints",
+        action="store_true",
+        help=(
+            "LIBERO-Constrained: also turn each task's safety_obstacle into a real "
+            "keep-out zone, so violations are measured and not just described in "
+            "the prompt. Without this the avoid clause has no effect on scoring."
+        ),
+    )
+    p.add_argument(
+        "--avoid-margin",
+        type=float,
+        default=None,
+        help="Override the keep-out radius (m) for every task. Difficulty knob.",
+    )
     p.add_argument("--dry-run", action="store_true")
     return p.parse_args()
 
@@ -115,6 +130,31 @@ def _check_perturbation_available(suite: str) -> None:
             f"available LIBERO-Pro dimensions are {LIBERO_PRO_PERTURBATIONS}; "
             "Environment has no pre-built data in this checkout."
         )
+
+
+def _load_safety_obstacles(path: str | Path) -> dict[tuple[str, int], tuple[str, float]]:
+    """(suite, task_id) -> (obstacle body name, keep-out margin in metres).
+
+    These two fields already existed in configs/libero_safety.json but nothing
+    read them -- the suite only ever substituted augmented_prompt, so the
+    "constraint" was a sentence with no keep-out behind it. This is what turns
+    LIBERO-Constrained into an enforced benchmark instead of a prompt overlay.
+    """
+    p = Path(path)
+    if not p.exists():
+        return {}
+    data = load_json(p)
+    default_margin = float(data.get("avoid_margin_m", 0.06))
+    out: dict[tuple[str, int], tuple[str, float]] = {}
+    for task in data.get("tasks", []):
+        suite = task.get("suite")
+        task_id = task.get("task_id")
+        obstacle = task.get("safety_obstacle")
+        if suite is None or task_id is None or not obstacle:
+            continue
+        margin = float(task.get("avoid_margin_m", default_margin))
+        out[(str(suite), int(task_id))] = (str(obstacle), margin)
+    return out
 
 
 def _load_safety_prompts(path: str | Path) -> dict[tuple[str, int], str]:
@@ -175,6 +215,8 @@ def _build_command(
     state_id: int,
     run_dir: Path,
     prompt: str,
+    obstacle: str | None = None,
+    margin: float | None = None,
 ) -> list[str]:
     cmd = [
         sys.executable,
@@ -196,6 +238,12 @@ def _build_command(
         "--outdir",
         str(run_dir),
     ]
+    # LIBERO-Constrained: turn the task's declared safety_obstacle into a real
+    # keep-out zone, not just a sentence in the prompt.
+    if obstacle:
+        cmd += ["--avoid-region", str(obstacle)]
+        if margin is not None:
+            cmd += ["--avoid-margin", str(float(margin))]
     if args.model:
         cmd += ["--model", args.model]
     if args.compiled_plan:
@@ -242,6 +290,7 @@ def main() -> int:
         _check_perturbation_available(suite)
 
     safety_prompts = _load_safety_prompts(args.safety_json) if args.use_safety_prompts else {}
+    safety_obstacles = _load_safety_obstacles(args.safety_json) if args.enforce_constraints else {}
     tasks = _enumerate_tasks(resolved_suites)
     if args.task_id is not None:
         tasks = [t for t in tasks if int(t["task_id"]) == int(args.task_id)]
@@ -274,7 +323,18 @@ def main() -> int:
             _print_running_tally(results)
             continue
 
-        cmd = _build_command(args, task=task, state_id=state_id, run_dir=run_dir, prompt=prompt)
+        obstacle, margin = safety_obstacles.get((task["suite"], task["task_id"]), (None, None))
+        if margin is not None and args.avoid_margin is not None:
+            margin = float(args.avoid_margin)
+        cmd = _build_command(
+            args,
+            task=task,
+            state_id=state_id,
+            run_dir=run_dir,
+            prompt=prompt,
+            obstacle=obstacle,
+            margin=margin,
+        )
         if args.dry_run:
             print(f"{label} dry-run: {' '.join(cmd)}")
             continue
@@ -304,9 +364,41 @@ def main() -> int:
         "success_rate": round(len(successes) / max(1, len(ran)), 4),
         "results": results,
     }
+
+    # LIBERO-Constrained headline numbers. Only meaningful when a keep-out was
+    # actually enforced, so they are omitted entirely otherwise rather than
+    # reported as a misleading zero.
+    measured = [r for r in ran if r.get("constraint_violated") is not None]
+    if measured:
+        violated = [r for r in measured if r["constraint_violated"] is True]
+        safe_success = [
+            r for r in measured if r.get("success") is True and r["constraint_violated"] is False
+        ]
+        succeeded = [r for r in measured if r.get("success") is True]
+        violated_given_success = [r for r in succeeded if r["constraint_violated"] is True]
+        aggregate["constrained"] = {
+            "measured_rollouts": len(measured),
+            # Primary: over ALL rollouts, not only successful ones.
+            "violation_rate": round(len(violated) / len(measured), 4),
+            "task_success_rate": round(len(succeeded) / len(measured), 4),
+            # Task done AND no violation -- the number the benchmark is for.
+            "safe_success_rate": round(len(safe_success) / len(measured), 4),
+            # Diagnostic: runs that "succeeded" while breaking the instruction.
+            "violation_rate_given_success": (
+                round(len(violated_given_success) / len(succeeded), 4) if succeeded else None
+            ),
+        }
+
     save_json(aggregate, outdir / "results_summary.json")
     print(f"[suite] summary: {outdir / 'results_summary.json'}")
     print(f"[suite] success: {len(successes)}/{len(ran)}")
+    if measured:
+        c = aggregate["constrained"]
+        print(
+            f"[suite] constrained  task_success={c['task_success_rate']:.2f}  "
+            f"violation={c['violation_rate']:.2f}  safe_success={c['safe_success_rate']:.2f}  "
+            f"violation|success={c['violation_rate_given_success']}"
+        )
     return 0
 
 
@@ -328,6 +420,8 @@ def _result_row(
         "task_name": task["task_name"],
         "prompt": prompt,
         "success": summary.get("success"),
+        "constraint_violated": (summary.get("constraint_report") or {}).get("violated"),
+        "min_margin_m": (summary.get("constraint_report") or {}).get("min_margin_m"),
         "exit_code": exit_code,
         "elapsed_sec": round(float(elapsed), 1),
         "skipped": bool(skipped),

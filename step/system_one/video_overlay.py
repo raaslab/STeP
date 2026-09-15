@@ -21,6 +21,12 @@ from .scene_resolver import SceneResolver
 
 
 class VideoOverlayMixin:
+    # Minimum width (px) of the caption panel drawn beside the sim frame. The
+    # LIBERO agentview render is only 256px wide, which is far too narrow to
+    # read a prompt or an STL formula in; the panel is sized independently so
+    # widening it never shrinks the simulation image.
+    _PANEL_MIN_WIDTH = 620
+
     @staticmethod
     def _wrap_text_for_width(draw, text: str, font, max_width: int, max_lines: int = 4) -> list[str]:
         words = str(text).split()
@@ -73,11 +79,20 @@ class VideoOverlayMixin:
         robustness: str = "",
         show_state: bool = True,
     ) -> np.ndarray:
-        """Append fixed-size caption bands below the frame.
+        """Compose the sim frame beside a fixed-size caption panel.
+
+        The caption goes to the RIGHT of the simulation frame, not below it.
+        The sim render is only 256px wide, so the previous below-the-frame bands
+        had to wrap every line at 256px and ellipsized most of the prompt and
+        essentially every STL formula. A side panel gets its own generous width
+        (``_PANEL_MIN_WIDTH``) without touching the sim image, which is pasted at
+        its native resolution.
 
         All frames in an imageio/ffmpeg movie must have identical dimensions.
         Therefore the overlay reserves a constant number of lines, regardless
-        of how long the current precondition/postcondition/reflection text is.
+        of how long the current precondition/postcondition/reflection text is,
+        and rounds the canvas up to a multiple of 16 (ffmpeg's macro block size,
+        otherwise the writer silently rescales every frame).
         """
         if not prompt and not show_state:
             return np.asarray(frame, dtype=np.uint8)
@@ -89,10 +104,14 @@ class VideoOverlayMixin:
             ) from exc
 
         img = Image.fromarray(np.asarray(frame, dtype=np.uint8))
-        pad_x = 20
+        pad_x = 16
         pad_y = 12
-        font_size = max(18, min(30, img.width // 24))
-        state_font_size = max(14, int(font_size * 0.72))
+        # Panel width is independent of the sim frame's own (small) width --
+        # that's the whole point of putting the caption beside it.
+        panel_w = max(cls._PANEL_MIN_WIDTH, img.width)
+        text_w = panel_w - 2 * pad_x
+        font_size = 17
+        state_font_size = 15
         font = None
         state_font = None
         font_candidates = [
@@ -117,10 +136,14 @@ class VideoOverlayMixin:
         dummy = Image.new("RGB", (img.width, 10), "black")
         draw = ImageDraw.Draw(dummy)
 
+        # Budgets are generous now that lines are ~panel_w wide instead of
+        # ~256px: an STL formula like
+        # "(F[0,40](PreGrasp('akita_black_bowl_1','top')) & F[0,90](Grasped(...))) & G(Safe('cookies_1'))"
+        # fits in 3 lines here where it used to be truncated inside 2.
         prompt_max_lines = 3 if prompt else 0
         subtask_max_lines = 2
-        stl_max_lines = 2
-        robust_max_lines = 1
+        stl_max_lines = 4
+        robust_max_lines = 2
         pre_max_lines = 2
         post_max_lines = 2
         refl_max_lines = 3
@@ -139,7 +162,7 @@ class VideoOverlayMixin:
                 draw,
                 f"Prompt: {prompt}",
                 font,
-                max_width=img.width - 2 * pad_x,
+                max_width=text_w,
                 max_lines=prompt_max_lines,
             )
         while len(prompt_lines) < prompt_max_lines:
@@ -160,7 +183,7 @@ class VideoOverlayMixin:
                     draw,
                     f"{label}: {text}",
                     state_font,
-                    max_width=img.width - 2 * pad_x,
+                    max_width=text_w,
                     max_lines=budget,
                 )
                 while len(lines) < budget:
@@ -180,30 +203,56 @@ class VideoOverlayMixin:
 
         prompt_h = 2 * pad_y + line_h * prompt_max_lines if prompt_max_lines else 0
         state_h = 2 * pad_y + state_line_h * state_max_lines if show_state else 0
+        panel_h = prompt_h + state_h
 
-        out = Image.new("RGB", (img.width, img.height + prompt_h + state_h), "black")
+        def _round16(v: int) -> int:
+            return int(((int(v) + 15) // 16) * 16)
+
+        canvas_w = _round16(img.width + panel_w)
+        canvas_h = _round16(max(img.height, panel_h))
+
+        out = Image.new("RGB", (canvas_w, canvas_h), (0, 0, 0))
+        # Sim frame: pasted at native resolution, never scaled.
         out.paste(img, (0, 0))
         draw = ImageDraw.Draw(out)
 
-        y = img.height
+        panel_x = img.width
+        y = 0
         if prompt_max_lines:
-            draw.rectangle((0, y, img.width, y + prompt_h), fill=(0, 0, 0))
+            draw.rectangle((panel_x, y, canvas_w, y + prompt_h), fill=(18, 18, 18))
             yy = y + pad_y
             for line in prompt_lines[:prompt_max_lines]:
                 if line:
-                    draw.text((pad_x, yy), line, fill=(255, 255, 255), font=font)
+                    draw.text((panel_x + pad_x, yy), line, fill=(255, 255, 255), font=font)
                 yy += line_h
             y += prompt_h
 
         if show_state:
-            draw.rectangle((0, y, img.width, y + state_h), fill=(70, 0, 0))
+            draw.rectangle((panel_x, y, canvas_w, y + state_h), fill=(52, 10, 10))
             yy = y + pad_y
             for line in state_lines[:state_max_lines]:
                 if line:
-                    draw.text((pad_x, yy), line, fill=(255, 235, 235), font=state_font)
+                    draw.text((panel_x + pad_x, yy), line, fill=(255, 235, 235), font=state_font)
                 yy += state_line_h
+            y += state_h
+
+        # Fill any remainder of the panel column (when the sim frame is taller
+        # than the text) so the panel reads as one block, not a floating band.
+        if y < canvas_h:
+            draw.rectangle((panel_x, y, canvas_w, canvas_h), fill=(18, 18, 18))
 
         return np.asarray(out, dtype=np.uint8)
+
+    def _on_skill_step(self, env: BaseManipulationEnv) -> None:
+        """Per-step hook for the ompl_mpc skill adapters.
+
+        Those adapters drive the env directly instead of going through
+        ``step_nominal()``, so neither the video capture nor the LIBERO-
+        Constrained margin sampler would otherwise see their steps. Both hang
+        off the single ``step_callback`` they already expose.
+        """
+        self._capture_video_frame(env)
+        self._sample_constraint_margins(env)
 
     def _normalize_video_frame_size(self, frame: np.ndarray) -> np.ndarray:
         """Pad/crop to first written video frame size as a safety guard."""

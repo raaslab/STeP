@@ -473,11 +473,17 @@ class LiberoManipulationEnv(BaseManipulationEnv):
         # macro file (IMAGE_CONVENTION="opencv") flipping it, images come out
         # upside down when saved/displayed top-to-bottom, so flip explicitly
         # here rather than depending on that optional macro setup.
+        #
+        # The obs image is only reused when it already matches the size the
+        # caller asked for. The observation cameras are configured small (256px
+        # square by default, see platform.libero.camera_width) because that's a
+        # policy-input size, not a viewing size -- silently returning it for a
+        # 640x480 video request produced unreadably small rollout videos.
         if self.last_raw_obs is not None:
             for key in (f"{cam}_image", f"{self.camera_name}_image", "agentview_image", "robot0_eye_in_hand_image"):
                 if key in self.last_raw_obs:
                     frame = np.asarray(self.last_raw_obs[key], dtype=np.uint8)
-                    if frame.ndim == 3:
+                    if frame.ndim == 3 and frame.shape[0] == int(height) and frame.shape[1] == int(width):
                         return frame[::-1].copy()
         try:
             frame = self.env.render(height=int(height), width=int(width), camera_name=cam)
@@ -487,6 +493,15 @@ class LiberoManipulationEnv(BaseManipulationEnv):
                 frame = self.env.env.sim.render(camera_name=cam, height=int(height), width=int(width))
                 return np.asarray(frame, dtype=np.uint8)[::-1].copy()
             except Exception:
+                # Last resort before a black frame: the obs image at whatever
+                # size it happens to be (see the size-match note above -- a
+                # small real frame still beats nothing).
+                if self.last_raw_obs is not None:
+                    for key in (f"{cam}_image", f"{self.camera_name}_image", "agentview_image"):
+                        if key in self.last_raw_obs:
+                            frame = np.asarray(self.last_raw_obs[key], dtype=np.uint8)
+                            if frame.ndim == 3:
+                                return frame[::-1].copy()
                 return np.zeros((int(height), int(width), 3), dtype=np.uint8)
 
     def relocalize_scene(self) -> Dict[str, Any]:
