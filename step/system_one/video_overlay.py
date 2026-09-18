@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 import json
+import math
 import os
 import time
 
@@ -21,6 +22,12 @@ from .scene_resolver import SceneResolver
 
 
 class VideoOverlayMixin:
+    # Minimum width (px) of the caption panel drawn beside the sim frame. The
+    # LIBERO agentview render is only 256px wide, which is far too narrow to
+    # read a prompt or an STL formula in; the panel is sized independently so
+    # widening it never shrinks the simulation image.
+    _PANEL_MIN_WIDTH = 620
+
     @staticmethod
     def _wrap_text_for_width(draw, text: str, font, max_width: int, max_lines: int = 4) -> list[str]:
         words = str(text).split()
@@ -73,11 +80,20 @@ class VideoOverlayMixin:
         robustness: str = "",
         show_state: bool = True,
     ) -> np.ndarray:
-        """Append fixed-size caption bands below the frame.
+        """Compose the sim frame beside a fixed-size caption panel.
+
+        The caption goes to the RIGHT of the simulation frame, not below it.
+        The sim render is only 256px wide, so the previous below-the-frame bands
+        had to wrap every line at 256px and ellipsized most of the prompt and
+        essentially every STL formula. A side panel gets its own generous width
+        (``_PANEL_MIN_WIDTH``) without touching the sim image, which is pasted at
+        its native resolution.
 
         All frames in an imageio/ffmpeg movie must have identical dimensions.
         Therefore the overlay reserves a constant number of lines, regardless
-        of how long the current precondition/postcondition/reflection text is.
+        of how long the current precondition/postcondition/reflection text is,
+        and rounds the canvas up to a multiple of 16 (ffmpeg's macro block size,
+        otherwise the writer silently rescales every frame).
         """
         if not prompt and not show_state:
             return np.asarray(frame, dtype=np.uint8)
@@ -89,10 +105,14 @@ class VideoOverlayMixin:
             ) from exc
 
         img = Image.fromarray(np.asarray(frame, dtype=np.uint8))
-        pad_x = 20
+        pad_x = 16
         pad_y = 12
-        font_size = max(18, min(30, img.width // 24))
-        state_font_size = max(14, int(font_size * 0.72))
+        # Panel width is independent of the sim frame's own (small) width --
+        # that's the whole point of putting the caption beside it.
+        panel_w = max(cls._PANEL_MIN_WIDTH, img.width)
+        text_w = panel_w - 2 * pad_x
+        font_size = 17
+        state_font_size = 15
         font = None
         state_font = None
         font_candidates = [
@@ -117,10 +137,14 @@ class VideoOverlayMixin:
         dummy = Image.new("RGB", (img.width, 10), "black")
         draw = ImageDraw.Draw(dummy)
 
+        # Budgets are generous now that lines are ~panel_w wide instead of
+        # ~256px: an STL formula like
+        # "(F[0,40](PreGrasp('akita_black_bowl_1','top')) & F[0,90](Grasped(...))) & G(Safe('cookies_1'))"
+        # fits in 3 lines here where it used to be truncated inside 2.
         prompt_max_lines = 3 if prompt else 0
         subtask_max_lines = 2
-        stl_max_lines = 2
-        robust_max_lines = 1
+        stl_max_lines = 4
+        robust_max_lines = 2
         pre_max_lines = 2
         post_max_lines = 2
         refl_max_lines = 3
@@ -139,7 +163,7 @@ class VideoOverlayMixin:
                 draw,
                 f"Prompt: {prompt}",
                 font,
-                max_width=img.width - 2 * pad_x,
+                max_width=text_w,
                 max_lines=prompt_max_lines,
             )
         while len(prompt_lines) < prompt_max_lines:
@@ -160,7 +184,7 @@ class VideoOverlayMixin:
                     draw,
                     f"{label}: {text}",
                     state_font,
-                    max_width=img.width - 2 * pad_x,
+                    max_width=text_w,
                     max_lines=budget,
                 )
                 while len(lines) < budget:
@@ -180,30 +204,56 @@ class VideoOverlayMixin:
 
         prompt_h = 2 * pad_y + line_h * prompt_max_lines if prompt_max_lines else 0
         state_h = 2 * pad_y + state_line_h * state_max_lines if show_state else 0
+        panel_h = prompt_h + state_h
 
-        out = Image.new("RGB", (img.width, img.height + prompt_h + state_h), "black")
+        def _round16(v: int) -> int:
+            return int(((int(v) + 15) // 16) * 16)
+
+        canvas_w = _round16(img.width + panel_w)
+        canvas_h = _round16(max(img.height, panel_h))
+
+        out = Image.new("RGB", (canvas_w, canvas_h), (0, 0, 0))
+        # Sim frame: pasted at native resolution, never scaled.
         out.paste(img, (0, 0))
         draw = ImageDraw.Draw(out)
 
-        y = img.height
+        panel_x = img.width
+        y = 0
         if prompt_max_lines:
-            draw.rectangle((0, y, img.width, y + prompt_h), fill=(0, 0, 0))
+            draw.rectangle((panel_x, y, canvas_w, y + prompt_h), fill=(18, 18, 18))
             yy = y + pad_y
             for line in prompt_lines[:prompt_max_lines]:
                 if line:
-                    draw.text((pad_x, yy), line, fill=(255, 255, 255), font=font)
+                    draw.text((panel_x + pad_x, yy), line, fill=(255, 255, 255), font=font)
                 yy += line_h
             y += prompt_h
 
         if show_state:
-            draw.rectangle((0, y, img.width, y + state_h), fill=(70, 0, 0))
+            draw.rectangle((panel_x, y, canvas_w, y + state_h), fill=(52, 10, 10))
             yy = y + pad_y
             for line in state_lines[:state_max_lines]:
                 if line:
-                    draw.text((pad_x, yy), line, fill=(255, 235, 235), font=state_font)
+                    draw.text((panel_x + pad_x, yy), line, fill=(255, 235, 235), font=state_font)
                 yy += state_line_h
+            y += state_h
+
+        # Fill any remainder of the panel column (when the sim frame is taller
+        # than the text) so the panel reads as one block, not a floating band.
+        if y < canvas_h:
+            draw.rectangle((panel_x, y, canvas_w, canvas_h), fill=(18, 18, 18))
 
         return np.asarray(out, dtype=np.uint8)
+
+    def _on_skill_step(self, env: BaseManipulationEnv) -> None:
+        """Per-step hook for the ompl_mpc skill adapters.
+
+        Those adapters drive the env directly instead of going through
+        ``step_nominal()``, so neither the video capture nor the LIBERO-
+        Constrained margin sampler would otherwise see their steps. Both hang
+        off the single ``step_callback`` they already expose.
+        """
+        self._capture_video_frame(env)
+        self._sample_constraint_margins(env)
 
     def _normalize_video_frame_size(self, frame: np.ndarray) -> np.ndarray:
         """Pad/crop to first written video frame size as a safety guard."""
@@ -231,9 +281,115 @@ class VideoOverlayMixin:
                 "Saving videos requires imageio and imageio-ffmpeg. Install with: pip install imageio imageio-ffmpeg pillow"
             ) from exc
         self.video_path.parent.mkdir(parents=True, exist_ok=True)
+        # Per-episode drawing caches: the table height and the camera projection
+        # are both fixed for a rollout but must not carry into the next one.
+        self._keepout_table_z = None
+        self._keepout_proj_cache = None
         self._video_writer = imageio.get_writer(
             str(self.video_path), fps=max(1, self.video_fps)
         )
+
+    def _keepout_projector(self, env: BaseManipulationEnv, width: int, height: int):
+        """World xyz -> frame pixel, for the camera the video is rendered from.
+
+        MuJoCo cameras look down -Z with +Y up, so this is the ordinary pinhole
+        projection with a sign flip on z. Cached per episode: the camera does not
+        move, and rebuilding it every frame would re-read the model each step.
+        """
+        cached = getattr(self, "_keepout_proj_cache", None)
+        if cached is not None and cached[0] == (self.video_camera, width, height):
+            return cached[1]
+        sim = getattr(getattr(env, "env", None), "sim", None) or getattr(env, "sim", None)
+        if sim is None:
+            return None
+        try:
+            cid = sim.model.camera_name2id(self.video_camera)
+            fovy = float(sim.model.cam_fovy[cid])
+            cam_pos = np.asarray(sim.data.cam_xpos[cid], dtype=float)
+            cam_mat = np.asarray(sim.data.cam_xmat[cid], dtype=float).reshape(3, 3)
+        except Exception:
+            return None
+        focal = (height / 2.0) / math.tan(math.radians(fovy) / 2.0)
+
+        def project(p):
+            q = cam_mat.T @ (np.asarray(p, dtype=float) - cam_pos)
+            if q[2] >= -1e-6:
+                return None
+            u = focal * (q[0] / -q[2]) + width / 2.0
+            v = focal * (q[1] / -q[2]) + height / 2.0
+            return (u, height - v)
+
+        self._keepout_proj_cache = ((self.video_camera, width, height), project)
+        return project
+
+    def _draw_keepout_zones(self, env: BaseManipulationEnv, frame: np.ndarray) -> np.ndarray:
+        """Paint every active keep-out onto the frame as a filled region on the table."""
+        from .geometry_sdf import CircleSDF
+
+        zones = [
+            c for c in (getattr(env, "sdf_constraints", []) or [])
+            if str(getattr(c, "role", "")) in {"obstacle", "keepout"}
+            and isinstance(getattr(c, "primitive", None), CircleSDF)
+            and c.primitive.convention == "outside_positive"
+        ]
+        if not zones:
+            return frame
+        height, width = frame.shape[0], frame.shape[1]
+        project = self._keepout_projector(env, width, height)
+        if project is None:
+            return frame
+
+        # Table height, measured ONCE and then held fixed.
+        #
+        # Recomputing it per frame made the zone move: it was the median z of the
+        # scene objects, so lifting one raised the median and the zone was drawn
+        # higher, appearing to ride along with the carried object. On a two-object
+        # scene the median is just their mean, so a 20cm lift moved the zone 10cm.
+        #
+        # The minimum is used rather than the median because a zone is painted on
+        # the table, and the lowest object is the one actually resting on it --
+        # a median is pulled upward by anything tall or already stacked.
+        table_z = getattr(self, "_keepout_table_z", None)
+        if table_z is None:
+            try:
+                zs = [
+                    float(np.asarray(p).reshape(-1)[2])
+                    for p in (env.scene_objects or {}).values()
+                    if p is not None and np.isfinite(np.asarray(p).reshape(-1)[2])
+                ]
+                table_z = (min(zs) - 0.02) if zs else 0.90
+            except Exception:
+                table_z = 0.90
+            self._keepout_table_z = table_z
+
+        try:
+            from PIL import Image, ImageDraw
+        except ImportError:
+            return frame
+
+        img = Image.fromarray(np.ascontiguousarray(frame)).convert("RGBA")
+        overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        drew = False
+        for zone in zones:
+            centre = np.asarray(zone.primitive.center_xy, dtype=float)
+            radius = float(zone.primitive.radius) + float(getattr(zone, "margin", 0.0))
+            pts = []
+            for i in range(64):
+                a = 2.0 * math.pi * i / 64.0
+                p = project([centre[0] + radius * math.cos(a), centre[1] + radius * math.sin(a), table_z])
+                if p is None:
+                    pts = []
+                    break
+                pts.append(p)
+            if len(pts) < 3:
+                continue
+            draw.polygon(pts, fill=(200, 45, 25, 80))
+            draw.line(pts + [pts[0]], fill=(200, 45, 25, 230), width=3)
+            drew = True
+        if not drew:
+            return frame
+        return np.asarray(Image.alpha_composite(img, overlay).convert("RGB"), dtype=np.uint8)
 
     def _capture_video_frame(self, env: BaseManipulationEnv, *, force: bool = False) -> None:
         if self.video_path is None:
@@ -251,6 +407,11 @@ class VideoOverlayMixin:
             frame = np.flipud(frame)
         if self.video_flip_horizontal:
             frame = np.fliplr(frame)
+        # The keep-out is invisible in the simulator -- it is a region, not an
+        # object -- so a rollout video showed the arm apparently moving through
+        # empty table. Draw it into the frame, projected through the same camera,
+        # or the video cannot be used to judge a violation.
+        frame = self._draw_keepout_zones(env, frame)
         # Keep the robustness line live during the current subtask.
         self._video_current_robustness = self._format_video_robustness(env)
         frame = self._add_prompt_caption(

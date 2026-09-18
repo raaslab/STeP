@@ -299,6 +299,12 @@ def parse_sdf_constraints(scene_context: dict[str, Any] | None) -> list[SDFConst
             "applies_to": sdf_geom.get("applies_to", ["ee", "object"] if role in {"obstacle", "keepout"} else ["object"]),
             "weight": sdf_geom.get("weight", 24.0 if role in {"obstacle", "keepout"} else 8.0),
             "margin": sdf_geom.get("margin", 0.0),
+            # Without this a geometry-derived constraint is only ever live while
+            # its name appears in the env's active set, which is populated from a
+            # subtask's applied_constraints -- something System 2 never emits. A
+            # benchmark keep-out expressing G(Safe(obstacle)) must hold for the
+            # whole episode, so it declares always_active itself.
+            "always_active": bool(sdf_geom.get("always_active", False)),
         })
 
     out = []

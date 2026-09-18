@@ -24,6 +24,7 @@ from .libero_scene import (
     load_libero_task_from_scene_context,
     merge_drawer_fixtures_into_scene_context,
     normalize_entity_name,
+    relocate_obstacle_into_path,
     update_scene_context_from_objects,
 )
 
@@ -242,6 +243,19 @@ class LiberoManipulationEnv(BaseManipulationEnv):
                     obs = self.env._get_observations()
                 except Exception:
                     pass
+        # Relocate the keep-out obstacle onto the transport path, after the init
+        # state is applied (it would otherwise be overwritten by it) and before
+        # settling (so the moved object drops onto the table naturally rather
+        # than being left floating). See relocate_obstacle_into_path: without
+        # this the obstacle usually sits far enough off the path that a 6cm
+        # keep-out never binds.
+        try:
+            moved = relocate_obstacle_into_path(self.env, self.scene_context, self._task_info.bddl_file)
+        except Exception as exc:
+            moved = {"error": f"{type(exc).__name__}: {exc}"}
+        if moved is not None:
+            self.obstacle_placement = moved
+            print(f"[keepout] obstacle placement: {moved}")
         # Run a handful of zero-action steps so the objects fully settle onto
         # the table before the first video frame is captured.
         zero_action = np.zeros(7, dtype=np.float32)
@@ -258,9 +272,45 @@ class LiberoManipulationEnv(BaseManipulationEnv):
         self._active_obj_at_grasp = None
         self._last_obs = obs
         self._refresh_scene_objects(obs)
+        # The keep-out circle was centred on the obstacle's position in the
+        # pre-reset snapshot, which is where apply_libero_experiment_geometry
+        # read it from. Relocation and settling have both moved it since, so
+        # re-centre the constraint on where the object actually ended up --
+        # otherwise the enforced and scored zone sits at the old location and
+        # the benchmark measures clearance from empty table.
+        self._recentre_keepout_constraints()
         if self.scene_objects:
             self._grow_workspace_bounds_to_include(np.stack(list(self.scene_objects.values())))
         return obs
+
+    def _recentre_keepout_constraints(self) -> None:
+        """Move every obstacle/keep-out SDF circle onto its entity's live position.
+
+        Called once per reset. Only circles whose entity resolves to a real
+        object are touched; a keep-out declared over a region that is not a
+        scene object (a taped-off area, say) has no live position to follow and
+        is left exactly where it was declared.
+        """
+        from .geometry_sdf import CircleSDF
+
+        for constraint in getattr(self, "sdf_constraints", []) or []:
+            if str(getattr(constraint, "role", "")) not in {"obstacle", "keepout"}:
+                continue
+            primitive = getattr(constraint, "primitive", None)
+            if not isinstance(primitive, CircleSDF):
+                continue
+            name = normalize_entity_name(str(getattr(constraint, "entity", None) or getattr(constraint, "name", "")))
+            xyz = self.scene_objects.get(name) if name else None
+            if xyz is None:
+                continue
+            xy = np.asarray(xyz, dtype=np.float32).reshape(-1)[:2]
+            if float(np.linalg.norm(xy - primitive.center_xy)) < 1e-6:
+                continue
+            print(
+                f"[keepout] re-centred {name}: "
+                f"{[round(float(v), 4) for v in primitive.center_xy]} -> {[round(float(v), 4) for v in xy]}"
+            )
+            primitive.center_xy = xy
 
     def _step_backend(self, full_action: np.ndarray):
         action = np.asarray(full_action, dtype=np.float32).reshape(-1)
@@ -473,11 +523,17 @@ class LiberoManipulationEnv(BaseManipulationEnv):
         # macro file (IMAGE_CONVENTION="opencv") flipping it, images come out
         # upside down when saved/displayed top-to-bottom, so flip explicitly
         # here rather than depending on that optional macro setup.
+        #
+        # The obs image is only reused when it already matches the size the
+        # caller asked for. The observation cameras are configured small (256px
+        # square by default, see platform.libero.camera_width) because that's a
+        # policy-input size, not a viewing size -- silently returning it for a
+        # 640x480 video request produced unreadably small rollout videos.
         if self.last_raw_obs is not None:
             for key in (f"{cam}_image", f"{self.camera_name}_image", "agentview_image", "robot0_eye_in_hand_image"):
                 if key in self.last_raw_obs:
                     frame = np.asarray(self.last_raw_obs[key], dtype=np.uint8)
-                    if frame.ndim == 3:
+                    if frame.ndim == 3 and frame.shape[0] == int(height) and frame.shape[1] == int(width):
                         return frame[::-1].copy()
         try:
             frame = self.env.render(height=int(height), width=int(width), camera_name=cam)
@@ -487,6 +543,15 @@ class LiberoManipulationEnv(BaseManipulationEnv):
                 frame = self.env.env.sim.render(camera_name=cam, height=int(height), width=int(width))
                 return np.asarray(frame, dtype=np.uint8)[::-1].copy()
             except Exception:
+                # Last resort before a black frame: the obs image at whatever
+                # size it happens to be (see the size-match note above -- a
+                # small real frame still beats nothing).
+                if self.last_raw_obs is not None:
+                    for key in (f"{cam}_image", f"{self.camera_name}_image", "agentview_image"):
+                        if key in self.last_raw_obs:
+                            frame = np.asarray(self.last_raw_obs[key], dtype=np.uint8)
+                            if frame.ndim == 3:
+                                return frame[::-1].copy()
                 return np.zeros((int(height), int(width), 3), dtype=np.uint8)
 
     def relocalize_scene(self) -> Dict[str, Any]:

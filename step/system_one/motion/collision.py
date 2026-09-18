@@ -229,6 +229,22 @@ class CollisionChecker:
             return False
         return dist >= -self.config.finger_overlap_tolerance_m
 
+    def _attached_world_spheres(
+        self, scratch: SceneQuery, attached: AttachedObjectState
+    ) -> list[tuple[np.ndarray, float]]:
+        """The carried object's fitted spheres placed in the world at whatever
+        configuration ``scratch`` currently holds -- i.e. carried rigidly by the
+        hand, not left at the object's stale live pose."""
+        hand_pos, hand_quat = scratch.site_pose(self.ee_site)
+        obj_pos, obj_quat = compose_world_pose(
+            hand_pos, hand_quat, attached.grasp_transform_hand_from_object
+        )
+        R_obj = quat_to_rotmat_wxyz(obj_quat)
+        return [
+            (obj_pos + R_obj @ local_offset, radius)
+            for local_offset, radius in attached.collision_spheres_object_frame
+        ]
+
     def _attached_sphere_violations(
         self,
         scratch: SceneQuery,
@@ -250,13 +266,7 @@ class CollisionChecker:
         as "in collision" even directly over the empty opening, not touching
         any actual wall/floor geom (the root cause of placement failing to
         find *any* feasible hover pose above a basket)."""
-        hand_pos, hand_quat = scratch.site_pose(self.ee_site)
-        obj_pos, obj_quat = compose_world_pose(hand_pos, hand_quat, attached.grasp_transform_hand_from_object)
-        R_obj = quat_to_rotmat_wxyz(obj_quat)
-        world_spheres = [
-            (obj_pos + R_obj @ local_offset, radius)
-            for local_offset, radius in attached.collision_spheres_object_frame
-        ]
+        world_spheres = self._attached_world_spheres(scratch, attached)
 
         permitted_body = goal_container_body if phase == CollisionPhase.PLACE_APPROACH else None
 
@@ -398,6 +408,38 @@ class CollisionChecker:
                         g1, g2, phase, target_object_geom_ids, d
                     ):
                         violations.append(Contact(scratch.geom_name(g1), scratch.geom_name(g2), d))
+
+        # 1b. STL keep-out zones (LIBERO-Constrained G(Safe(obj))).
+        #
+        # Checked on the end-effector site and on the carried object's fitted
+        # spheres -- the same two signals the benchmark scores (safe_ee /
+        # safe_object). The arm's links are deliberately NOT checked: the
+        # metric does not score them, and a 6cm cylinder that the elbow must
+        # also respect rejects far more of the configuration space than the
+        # constraint actually asks for.
+        #
+        # This runs inside the OMPL state-validity path, so RRTConnect plans
+        # around the zone, and inside the live MPC's own check() call, so
+        # tracking is held to it too. Cost is one FK-derived site read plus a
+        # 2D norm per zone -- negligible next to the contact pass above.
+        zones = getattr(self.config, "keepout_zones", None) or []
+        if zones:
+            ee_xy = scratch.site_pose(self.ee_site)[0][:2]
+            attached_name = attached.object_name if attached is not None else None
+            for zone in zones:
+                if attached_name is not None and attached_name in zone.exempt_bodies:
+                    continue
+                d = zone.clearance(ee_xy)
+                min_clearance = min(min_clearance, d)
+                if d < 0.0:
+                    violations.append(Contact(self.ee_site, f"keepout:{zone.name}", d))
+                # The carried object is deliberately NOT checked. The benchmark
+                # scores the end effector against the zone, so enforcing the
+                # object as well holds the planner to a stricter rule than the
+                # one being measured -- and to one it cannot apply accurately,
+                # since it only knows the object's nominal grasp transform while
+                # the object actually hangs about a centimetre off it. Enforcing
+                # the mismatch made runs worse without reducing violations.
 
         # 2. Sphere-approximated attached-object collision.
         if attached is not None:

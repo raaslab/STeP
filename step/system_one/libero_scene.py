@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Iterable
 import copy
 import json
+import math
 import os
 import re
 
@@ -49,6 +50,34 @@ def _import_libero_env():
     return OffScreenRenderEnv
 
 
+def _patch_torch_load_for_libero() -> None:
+    """LIBERO's ``benchmark.get_task_init_states`` calls ``torch.load(path)`` with
+    no ``weights_only`` argument. PyTorch >= 2.6 flipped that default to ``True``,
+    which cannot unpickle LIBERO's numpy-backed init-state files.
+
+    Without this, ``get_libero_init_state``'s own bare ``except`` swallows the
+    resulting ``UnpicklingError`` and returns ``None``, so ``--init-state-id`` is
+    *silently ignored* and every rollout runs the BDDL default layout instead --
+    i.e. an N-init-state benchmark secretly evaluates one state N times. The
+    init-state files ship inside the pinned LIBERO checkout and are trusted, so
+    restore the pre-2.6 behavior for them.
+    """
+    try:
+        import torch
+    except ImportError:
+        return
+    if getattr(torch.load, "_libero_weights_only_patched", False):
+        return
+    _orig_load = torch.load
+
+    def _load(*args, **kwargs):
+        kwargs.setdefault("weights_only", False)
+        return _orig_load(*args, **kwargs)
+
+    _load._libero_weights_only_patched = True
+    torch.load = _load
+
+
 def _ensure_libero_on_path() -> None:
     """Add the LIBERO source tree to sys.path if libero is not already importable.
 
@@ -58,6 +87,7 @@ def _ensure_libero_on_path() -> None:
     """
     try:
         import libero  # noqa: F401
+        _patch_torch_load_for_libero()
         return
     except ImportError:
         pass
@@ -73,7 +103,9 @@ def _ensure_libero_on_path() -> None:
             path_str = str(candidate)
             if path_str not in sys.path:
                 sys.path.insert(0, path_str)
+            _patch_torch_load_for_libero()
             return
+    _patch_torch_load_for_libero()
 
 
 _MOVABLE_HINTS = (
@@ -1132,10 +1164,54 @@ def apply_libero_experiment_geometry(scene_context: dict[str, Any]) -> dict[str,
     if avoid:
         region = normalize_entity_name(avoid.get("region") or avoid.get("object") or avoid.get("obstacle") or "")
         margin = float(avoid.get("margin", avoid.get("radius", 0.06)))
-        if region:
+        explicit_xy = avoid.get("center_xy")
+        if region and explicit_xy is not None:
+            # A VIRTUAL zone: a marked region on the table at a fixed position,
+            # with no object behind it. This is what LIBERO-Constrained uses.
+            # Deriving the zone from a real object instead forces a choice
+            # between a keep-out that never binds (the object sits off the
+            # route) and one that blocks the task outright (the object is
+            # physically in the way) -- both measured, neither usable.
+            g = geom.setdefault(region, {})
+            g["xy"] = [float(explicit_xy[0]), float(explicit_xy[1])]
+            g["sdf_geometry"] = {
+                "type": "circle",
+                "center_xy": [float(explicit_xy[0]), float(explicit_xy[1])],
+                "radius": margin,
+                "convention": "outside_positive",
+                "always_active": True,
+                # Marks it as having no body to follow, so the per-reset
+                # re-centring leaves it exactly where the benchmark put it.
+                "virtual": True,
+            }
+            g.setdefault("radius", margin)
+            if region not in entity_names:
+                entities.append({
+                    "name": region,
+                    "role": "obstacle",
+                    "aliases": _entity_aliases(region) + [
+                        "the red zone", "the marked zone", "the danger zone",
+                        "red zone marked on the table", "the zone",
+                    ],
+                    "notes": "Virtual keep-out region marked on the table; no physical object.",
+                })
+                entity_names.add(region)
+        elif region:
             if region not in entity_names:
                 entities.append({"name": region, "role": "obstacle", "aliases": _entity_aliases(region)})
                 entity_names.add(region)
+            else:
+                # The obstacle is usually an already-discovered scene object, so
+                # it arrives with whatever role discovery guessed (typically
+                # support_object). Declaring it as a keep-out must override that:
+                # parse_sdf_constraints derives the sign convention and whether
+                # the constraint applies to the end effector from this role, so
+                # leaving it as support_object silently produces an
+                # inside_positive, object-only constraint -- the inverse of a
+                # keep-out.
+                for ent in entities:
+                    if ent.get("name") == region:
+                        ent["role"] = "obstacle"
             g = geom.setdefault(region, {})
             xy = g.get("xy") or updated.get("live_scene_state", {}).get("objects", {}).get(region, {}).get("xy")
             if xy is not None and "sdf_geometry" not in g:
@@ -1144,6 +1220,10 @@ def apply_libero_experiment_geometry(scene_context: dict[str, Any]) -> dict[str,
                     "center_xy": [float(xy[0]), float(xy[1])],
                     "radius": margin,
                     "convention": "outside_positive",
+                    # A keep-out zone is a G(Safe(obstacle)) obligation: it holds
+                    # for every step of the episode, not only while some subtask
+                    # names it in applied_constraints (nothing populates that).
+                    "always_active": True,
                 }
             g.setdefault("radius", margin)
 
@@ -1187,6 +1267,183 @@ def apply_libero_experiment_geometry(scene_context: dict[str, Any]) -> dict[str,
                 })
                 entity_names.add(name)
     return updated
+
+
+def bddl_goal_object_names(bddl_file: str | Path | None) -> list[str]:
+    """Object instances named in a BDDL ``:goal`` block, in the order they
+    appear -- conventionally the manipulated object first, then what it must end
+    up on/in.
+
+    Read from the BDDL rather than from the language string or from discovered
+    entity roles: the goal is the task's own machine-readable statement of which
+    objects matter, and it stays correct across init states and across the role
+    guesses in ``role_for_object_name``.
+    """
+    if not bddl_file:
+        return []
+    try:
+        text = Path(bddl_file).read_text()
+    except OSError:
+        return []
+    match = re.search(r"\(:goal(.*?)\n\s*\)\s*\n", text, re.S) or re.search(r"\(:goal(.*)", text, re.S)
+    if not match:
+        return []
+    seen: list[str] = []
+    # Scene object instances are named "<object>_<index>" in LIBERO's BDDL.
+    for token in re.findall(r"[A-Za-z_][A-Za-z0-9_]*_\d+", match.group(1)):
+        if token not in seen:
+            seen.append(token)
+    return seen
+
+
+def relocate_obstacle_into_path(env: Any, scene_context: dict[str, Any], bddl_file: str | None) -> dict[str, Any] | None:
+    """Move the task's keep-out obstacle onto the straight line between the
+    manipulated object and its goal, so the keep-out is something the robot must
+    actually plan around.
+
+    This is what makes LIBERO-Constrained a benchmark rather than a prompt
+    overlay. Measured across the 30 configured tasks, the designated obstacle
+    sits a median ~13cm off the transport path and up to 26cm away, so a 6cm
+    keep-out is satisfied by the naive trajectory on most tasks and the
+    constrained and unconstrained arms produce the same motion. Three tasks are
+    worse than uninformative: they name the picked object or the goal itself as
+    the obstacle, which no trajectory can satisfy.
+
+    Placement is recomputed at reset from live positions rather than baked into
+    the task config as a fixed coordinate, because LIBERO's init states move the
+    objects: a coordinate that sits on the path in one init state sits well off
+    it in another.
+
+    The obstacle is NOT placed on the segment itself. It goes on the
+    perpendicular bisector, offset by ``h``, which is what makes the placement
+    solvable on short spans: at offset ``h`` the distance to the path is ``h``
+    (so the constraint binds while ``h < margin``) but the distance to each
+    endpoint is ``hypot(span/2, h)``, which grows with ``h`` and can exceed the
+    margin even when ``span/2`` alone does not. Placing the obstacle on the line
+    instead forces ``span >= 2*margin``, which fails on the many LIBERO tasks
+    whose pick and goal are barely 12cm apart.
+
+    So ``h`` is chosen from the window
+
+        h >= sqrt((margin + buffer)^2 - (span/2)^2)   # endpoints stay reachable
+        h <= margin - buffer                          # the path still violates
+
+    and the task is skipped only when that window is genuinely empty.
+    """
+    experiment = (scene_context.get("platform", {}) or {}).get("libero_experiment", {}) or {}
+    avoid = experiment.get("avoid_region") or {}
+    if not avoid or not avoid.get("place_in_path"):
+        return None
+    obstacle = normalize_entity_name(avoid.get("region") or avoid.get("object") or avoid.get("obstacle") or "")
+    if not obstacle:
+        return None
+
+    goal_objects = [normalize_entity_name(n) for n in bddl_goal_object_names(bddl_file)]
+    endpoints = [n for n in goal_objects if n != obstacle]
+    if len(endpoints) < 2:
+        return {"obstacle": obstacle, "skipped": f"goal names {len(endpoints)} usable object(s), need 2"}
+
+    sim = getattr(env, "sim", None) or getattr(getattr(env, "env", None), "sim", None)
+    if sim is None:
+        return None
+    model, data = sim.model, sim.data
+
+    def _body_id(name: str) -> int | None:
+        for candidate in (name, f"{name}_main"):
+            try:
+                bid = model.body_name2id(candidate)
+            except Exception:
+                continue
+            if bid is not None:
+                return int(bid)
+        return None
+
+    pick_id, goal_id, obstacle_id = (_body_id(endpoints[0]), _body_id(endpoints[1]), _body_id(obstacle))
+    if pick_id is None or goal_id is None or obstacle_id is None:
+        return {"obstacle": obstacle, "skipped": "could not resolve one of the bodies in MuJoCo"}
+
+    pick_xy = np.asarray(data.body_xpos[pick_id][:2], dtype=np.float64)
+    goal_xy = np.asarray(data.body_xpos[goal_id][:2], dtype=np.float64)
+    span = float(np.linalg.norm(goal_xy - pick_xy))
+    margin = float(avoid.get("margin", avoid.get("radius", 0.06)))
+    # How far inside/outside the margin the placement aims to land. Too large
+    # and the window closes on short spans; too small and rounding or a few
+    # millimetres of settling decides whether the benchmark is satisfiable.
+    buffer = float(avoid.get("placement_buffer_m", 0.01))
+    if span < 1e-3:
+        return {"obstacle": obstacle, "skipped": "pick and goal are at the same position"}
+
+    half = 0.5 * span
+    h_min = math.sqrt(max(0.0, (margin + buffer) ** 2 - half**2))
+    h_max = margin - buffer
+    if h_min > h_max:
+        return {
+            "obstacle": obstacle,
+            "skipped": (
+                f"no offset satisfies both ends: span {span:.3f}m needs h>={h_min:.3f}m "
+                f"to keep the endpoints reachable but h<={h_max:.3f}m to stay on the path"
+            ),
+        }
+    # The smallest valid offset: closest to the path, so the constraint binds as
+    # hard as it can while the endpoints stay reachable.
+    h = h_min if h_min > 0.0 else min(0.5 * margin, h_max)
+
+    mid = 0.5 * (pick_xy + goal_xy)
+    direction = (goal_xy - pick_xy) / span
+    perp = np.array([-direction[1], direction[0]], dtype=np.float64)
+    # Two perpendicular directions are equally good for the constraint; pick the
+    # one whose landing spot is further from every other object, so the
+    # relocated obstacle does not end up stacked on top of unrelated clutter.
+    others = []
+    for bid in range(int(model.nbody)):
+        if bid in (pick_id, goal_id, obstacle_id):
+            continue
+        try:
+            raw = model.body_id2name(bid)
+        except Exception:
+            raw = None
+        if not raw or any(p in raw for p in ("world", "table", "robot", "panda", "gripper", "mount", "base")):
+            continue
+        others.append(np.asarray(data.body_xpos[bid][:2], dtype=np.float64))
+
+    def _min_other_dist(xy: np.ndarray) -> float:
+        return min((float(np.linalg.norm(xy - o)) for o in others), default=float("inf"))
+
+    candidates = [mid + h * perp, mid - h * perp]
+    target_xy = max(candidates, key=_min_other_dist)
+
+    # The obstacle is moved by writing its free joint's qpos. A body without a
+    # free joint (a fixture bolted into the scene) cannot be moved this way.
+    jnt_adr = int(model.body_jntadr[obstacle_id])
+    jnt_num = int(model.body_jntnum[obstacle_id])
+    if jnt_num < 1 or jnt_adr < 0:
+        return {"obstacle": obstacle, "skipped": "body has no free joint (fixed fixture)"}
+    qpos_adr = int(model.jnt_qposadr[jnt_adr])
+    before = [float(v) for v in data.body_xpos[obstacle_id][:3]]
+    data.qpos[qpos_adr + 0] = float(target_xy[0])
+    data.qpos[qpos_adr + 1] = float(target_xy[1])
+    # z and the quaternion are left alone: the object keeps its resting height
+    # and orientation, and the settling steps after this drop it onto whatever
+    # is beneath its new position.
+    try:
+        sim.forward()
+    except Exception:
+        pass
+    return {
+        "obstacle": obstacle,
+        "between": [endpoints[0], endpoints[1]],
+        "from_xy": [round(before[0], 4), round(before[1], 4)],
+        "to_xy": [round(float(target_xy[0]), 4), round(float(target_xy[1]), 4)],
+        "pick_goal_span_m": round(span, 4),
+        # What the placement guarantees, and the two numbers to check when a
+        # task's results look wrong: path_clearance < margin means the naive
+        # trajectory violates, endpoint_clearance > margin means the task is
+        # still satisfiable.
+        "path_clearance_m": round(float(h), 4),
+        "endpoint_clearance_m": round(math.hypot(half, float(h)), 4),
+        "margin_m": round(margin, 4),
+        "clutter_clearance_m": round(_min_other_dist(target_xy), 4),
+    }
 
 
 def _all_known_entity_names(scene_context: dict[str, Any]) -> set[str]:

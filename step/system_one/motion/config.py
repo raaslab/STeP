@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+import numpy as np
+
 
 @dataclass
 class GraspSampleConfig:
@@ -182,6 +184,43 @@ class CollisionConfig:
     # about the approach itself was unsafe -- only the final pinch was ever
     # going to be snug. 0.0 disables this (strict, zero-tolerance) entirely.
     finger_overlap_tolerance_m: float = 0.006
+    # LIBERO-Constrained keep-out zones: the STL task spec's G(Safe(obj))
+    # obligations, made enforceable at plan/control time. Empty by default, so
+    # an unconstrained run behaves exactly as before. See KeepoutZone.
+    keepout_zones: list["KeepoutZone"] = field(default_factory=list)
+
+
+@dataclass
+class KeepoutZone:
+    """An infinite vertical cylinder the robot must stay out of.
+
+    This is the *same* geometry the benchmark scores against: a
+    ``CircleSDF(convention="outside_positive")`` whose robustness is
+    ``norm(p_xy - center_xy) - radius``, evaluated on the end-effector and on
+    the carried object (see ``System1Executor._sample_constraint_margins``).
+    Enforcement and measurement deliberately share one definition -- a keep-out
+    the planner interprets differently from the metric would make the reported
+    violation rate a property of the mismatch rather than of the policy.
+
+    2D on purpose: the constraint is unbounded in z, so it cannot be satisfied
+    by lifting over the obstacle, only by routing around it in xy. That is what
+    makes it a non-trivial planning requirement rather than one the existing
+    carry height already satisfies for free.
+    """
+
+    name: str = ""
+    center_xy: tuple[float, float] = (0.0, 0.0)
+    radius_m: float = 0.06
+    # Bodies exempt from this zone -- normally the obstacle's own body, so the
+    # zone does not forbid the scene object that defines it from existing, and
+    # the manipulated object when it is also the obstacle.
+    exempt_bodies: tuple[str, ...] = ()
+
+    def clearance(self, xy: Any) -> float:
+        """Signed distance to the zone boundary: >0 outside, <0 inside."""
+        p = np.asarray(xy, dtype=np.float64).reshape(-1)[:2]
+        c = np.asarray(self.center_xy, dtype=np.float64).reshape(-1)[:2]
+        return float(np.linalg.norm(p - c)) - float(self.radius_m)
 
 
 @dataclass
@@ -581,16 +620,26 @@ class ContactGraspNetConfig:
     real run showed PickSkill's OR-set cost function always preferring the
     heuristic's cheap-but-possibly-wrong candidates over the network's).
     Disabled by default so nothing changes for a machine without
-    ``contact_graspnet_pytorch`` + CUDA + a real checkpoint installed (that
+    ``contact_graspnet_pytorch`` or a real checkpoint installed (that
     package is only ever imported lazily, inside
     ``contact_graspnet_generator._load_real_estimator``, never at module
-    import time)."""
+    import time).
+
+    CUDA is *not* required: ``contact_graspnet_pytorch`` ships no compiled CUDA
+    extensions (its PointNet++ ops are pure PyTorch), so CPU inference works and
+    measures ~1.6s/call -- verified end-to-end on an Apple-Silicon Mac, where a
+    full LIBERO pick+transport+place rollout using it took ~70s."""
 
     enabled: bool = False
     # Path to the Contact-GraspNet checkpoint directory (expects model.pt
     # plus its config.yaml alongside it, matching Cap-X's own server loader).
+    # Machine-specific, so it must never be hardcoded to one person's checkout:
+    # the CONTACT_GRASPNET_CHECKPOINT_DIR environment variable overrides
+    # whatever is configured here (see _load_real_estimator).
     checkpoint_dir: str = ""
-    device: str = "cuda"
+    # "auto" resolves to cuda when available, else cpu. An explicit "cuda"/"cpu"/
+    # "mps" is honored as-is.
+    device: str = "auto"
     forward_passes: int = 1
     local_regions: bool = True
     filter_grasps: bool = True
@@ -703,10 +752,19 @@ class MotionConfig:
             ((scene_context or {}).get("platform", {}) or {})
             .get("libero", {}) or {}
         ).get("motion", {}) or {}
+        collision = CollisionConfig(**raw.get("collision", {}))
+        # G(Safe(obj)) reaches the motion layer here, and nowhere else. The
+        # scene's outside_positive circle SDFs (written by
+        # libero_scene.apply_libero_experiment_geometry from the task's
+        # avoid_region) become keep-out zones the OMPL state-validity check and
+        # the live MPC both enforce. Without this the formula is monitored but
+        # never planned for, which makes a 6cm constraint and a 0cm constraint
+        # produce identical trajectories.
+        collision.keepout_zones = list(collision.keepout_zones) + _keepout_zones_from_scene(scene_context)
         return MotionConfig(
             grasp=GraspSampleConfig(**raw.get("grasp", {})),
             planner=PlannerConfig(**raw.get("planner", {})),
-            collision=CollisionConfig(**raw.get("collision", {})),
+            collision=collision,
             time_param=TimeParamConfig(**raw.get("time_param", {})),
             place=PlaceSampleConfig(**raw.get("place", {})),
             transport=TransportConfig(**raw.get("transport", {})),
@@ -718,3 +776,77 @@ class MotionConfig:
             contact_graspnet=ContactGraspNetConfig(**raw.get("contact_graspnet", {})),
             mpc=dict(raw.get("mpc", {})),
         )
+
+
+def _keepout_zones_from_scene(scene_context: dict[str, Any] | None) -> list[KeepoutZone]:
+    """Collect the scene's ``outside_positive`` circle SDFs as keep-out zones.
+
+    Reads the same ``geometry[name].sdf_geometry`` blocks that
+    ``geometry_sdf.parse_sdf_constraints`` turns into the SDF constraints the
+    benchmark scores against, so the planner and the metric are driven from one
+    source. Parsed off the raw dict rather than by importing that parser: this
+    module is imported by every motion skill and must not pull in the parent
+    ``system_one`` package.
+
+    Only circles are read. A box/polygon keep-out is expressible in the scene
+    format but has no cylinder equivalent here, so it is skipped rather than
+    silently approximated by a circle of the wrong size.
+    """
+    if not scene_context:
+        return []
+    # The RQ2 ablation switch. Setting this false leaves the scene's SDF
+    # constraints (and therefore every scored signal -- safe_ee, safe_object,
+    # the violation rate) completely untouched, and only stops the motion layer
+    # from planning around them. That is what isolates "STL reaches control"
+    # from "STL is monitored": both arms of the comparison see an identical
+    # scene and are measured by an identical metric.
+    experiment = ((scene_context.get("platform") or {}).get("libero_experiment") or {})
+    if not bool(experiment.get("enforce_keepout", True)):
+        return []
+    geometry = scene_context.get("geometry") or {}
+    if not isinstance(geometry, dict):
+        return []
+
+    # The manipulated object is never its own keep-out: two libero_10 tasks
+    # name the object being picked as the obstacle, which would make the task
+    # unsolvable by construction rather than hard.
+    manipulated: set[str] = set()
+    for ent in scene_context.get("entities") or []:
+        if isinstance(ent, dict) and str(ent.get("role", "")) in {"manipulated_object", "target_object"}:
+            name = ent.get("name")
+            if name:
+                manipulated.add(str(name))
+
+    zones: list[KeepoutZone] = []
+    for name, g in geometry.items():
+        if not isinstance(g, dict):
+            continue
+        sdf = g.get("sdf_geometry")
+        if not isinstance(sdf, dict):
+            continue
+        if str(sdf.get("type", "")).lower() != "circle":
+            continue
+        if str(sdf.get("convention", "")) != "outside_positive":
+            continue
+        center = sdf.get("center_xy") or g.get("xy")
+        radius = sdf.get("radius", g.get("radius"))
+        if center is None or radius is None:
+            continue
+        if str(name) in manipulated:
+            continue
+        try:
+            cx, cy = float(center[0]), float(center[1])
+            r = float(radius)
+        except (TypeError, ValueError, IndexError):
+            continue
+        if not (r > 0.0):
+            continue
+        zones.append(
+            KeepoutZone(
+                name=str(name),
+                center_xy=(cx, cy),
+                radius_m=r,
+                exempt_bodies=(str(name),),
+            )
+        )
+    return zones
