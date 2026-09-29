@@ -20,6 +20,11 @@ import numpy as np
 MANIFEST = json.loads((pathlib.Path(__file__).parent / "tasks.json").read_text())
 TASKS = {t["id"]: t for t in MANIFEST["tasks"]}
 
+_ADJ_PATH = pathlib.Path(__file__).parent / "adjudication.json"
+ADJUDICATION = (
+    json.loads(_ADJ_PATH.read_text()).get("verdicts", {}) if _ADJ_PATH.exists() else {}
+)
+
 # An object counts as "at" its destination when its centre is within this of the
 # destination's centre in the plane. Containers in LIBERO measure 15-20cm across,
 # so this sits inside the real opening rather than merely near it.
@@ -307,6 +312,49 @@ def score_stage(task, roll):
     return {"held": True, "detail": f"nothing grasped before the first stage ended at step {boundary}"}
 
 
+def score_clear_path(task, roll):
+    """Was the drawer's approach clear of other objects when the opening began?
+
+    Asked instead of "do not pick anything up until the drawer is open", which is
+    unsatisfiable whenever something stands in the way: the blocking object has to
+    be picked up and moved before the drawer can open at all. What the instruction
+    actually wants is that the path is cleared first, and that is what this checks.
+    """
+    spec = task["scoring"]
+    fixture, radius = spec.get("fixture"), float(spec.get("radius_m", 0.18))
+    records = roll["summary"].get("records", [])
+    if not records:
+        return {"held": None, "detail": "no subtasks were recorded"}
+
+    step, open_at = 0, None
+    for rec in records:
+        if rec.get("skill") == "open":
+            open_at = step
+            break
+        step += int(rec.get("steps") or 0)
+    if open_at is None:
+        return {"held": None, "detail": "no opening subtask ran"}
+
+    fx = track(roll, fixture)
+    if fx is None:
+        return {"held": None, "detail": f"{fixture} was not logged"}
+    idx = min(open_at, fx.shape[0] - 1)
+    blocking = []
+    for name in roll.get("names", []):
+        if name == fixture or "table" in name:
+            continue
+        p = track(roll, name)
+        if p is None or not np.isfinite(p[idx]).all():
+            continue
+        if float(np.linalg.norm(p[idx, :2] - fx[idx, :2])) <= radius:
+            blocking.append(name)
+    return {
+        "held": not blocking,
+        "detail": (f"approach clear when opening began at step {open_at}" if not blocking
+                   else f"{', '.join(blocking)} still within {radius*100:.0f} cm at step {open_at}"),
+    }
+
+
 def score_unsupported(task, roll):
     return {"held": None, "detail": "scorer needs a signal the rollout does not log yet"}
 
@@ -324,6 +372,7 @@ SCORERS = {
     "success_only": score_success_only,
     "precondition": score_precondition,
     "stage": score_stage,
+    "clear_path": score_clear_path,
 }
 
 
@@ -340,13 +389,24 @@ def score_run(run_dir: pathlib.Path):
     arm = "on" if name.endswith("_on") else "off"
     state = int(name.split("_s")[-1].split("_")[0])
     result = SCORERS.get(task["scoring"]["type"], score_unsupported)(task, roll)
-    return {
+    row = {
         "id": task["id"], "family": task["family"], "kind": task["kind"],
         "arm": arm, "state": state,
         "success": bool(roll["summary"].get("success")),
         "constraint_held": result["held"],
         "detail": result["detail"],
+        "adjudicated": False,
     }
+    # A reviewer verdict overrides the computed one. Applied here rather than by
+    # loosening a scorer, so the automatic measure keeps saying what it actually
+    # measured and any adjudicated row is visible as such.
+    verdict = ADJUDICATION.get(task["id"])
+    if verdict is not None:
+        row["computed_constraint_held"] = result["held"]
+        row["constraint_held"] = bool(verdict["constraint_held"])
+        row["detail"] = f"[reviewed] {verdict['why']}"
+        row["adjudicated"] = True
+    return row
 
 
 def aggregate(rows):

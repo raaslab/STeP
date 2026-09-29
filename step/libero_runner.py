@@ -22,6 +22,9 @@ LIBERO_PRO_PERTURBATIONS = ("swap", "task", "object", "lan")
 _DEFAULT_SCHEMA_FOR_MODE = {
     "stl_spec": "schemas/stl_global_plan_schema.json",
     "skill_graph": "schemas/stl_plan_schema.json",
+    # The baseline emits the same skill_graph shape, minus every specification
+    # term, so System 1 needs no special case to execute it.
+    "no_stl": "schemas/stl_plan_schema.json",
 }
 
 
@@ -37,7 +40,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--stl-mode",
         default="stl_spec",
-        choices=["stl_spec", "skill_graph"],
+        choices=["stl_spec", "skill_graph", "no_stl"],
         help=(
             "System 2 output mode. 'stl_spec' (default, EXPERIMENTAL -- see "
             "STL_DECOMPOSITION_PLAN.md): the VLM emits one global STL formula and "
@@ -292,7 +295,10 @@ def _prepare_libero_scene(args: argparse.Namespace, outdir: Path) -> tuple[dict[
         # off" arm would also be an unscored arm, and the two conditions would
         # not be comparable.
         for block in (platform["libero_experiment"], scene_context["platform"]["libero_experiment"]):
-            block["enforce_keepout"] = not args.no_enforce_keepout
+            # The no-STL baseline has no specification for the constraint to live
+            # in, so it cannot reach the planner either. Leaving enforcement on
+            # would hand the baseline the very mechanism it is meant to lack.
+            block["enforce_keepout"] = not args.no_enforce_keepout and args.stl_mode != "no_stl"
             # Scene construction, not enforcement: the obstacle is relocated in
             # BOTH arms of the ablation, so the two see an identical scene and
             # differ only in whether System 1 plans around the zone.

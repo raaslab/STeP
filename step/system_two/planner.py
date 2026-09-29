@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 from openai import OpenAI
 
-from .prompts import build_developer_prompt, build_global_developer_prompt, build_user_payload
+from .prompts import build_developer_prompt, build_global_developer_prompt, build_no_stl_developer_prompt, build_user_payload
 
 
 class DirectSTLPlanner:
@@ -51,6 +51,9 @@ class DirectSTLPlanner:
             prompt_fn = build_global_developer_prompt
         elif mode == "skill_graph":
             prompt_fn = build_developer_prompt
+        elif mode == "no_stl":
+            # Baseline: same VLM, same skills, same robot -- no specification.
+            prompt_fn = build_no_stl_developer_prompt
         else:
             raise ValueError(f"unknown DirectSTLPlanner mode {mode!r}")
         return cls(schema=schema, scene_context=scene_context, model=model, developer_prompt_fn=prompt_fn)

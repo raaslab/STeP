@@ -354,3 +354,36 @@ def build_user_payload(
         "stl_plan_schema": schema,
     }
     return json.dumps(payload, indent=2)
+
+
+def build_no_stl_developer_prompt(scene_context: dict[str, Any] | None = None) -> str:
+    """Developer prompt for the no-STL baseline.
+
+    Removes the specification layer and nothing else. The VLM still sees the same
+    instruction, the same image and the same scene entities, and still chooses the
+    same skills over the same robot -- it just has no formal language to state a
+    requirement in. Any constraint in the instruction therefore survives only as
+    English the planner read once, which is exactly the thing STeP claims to
+    improve on.
+
+    The output still uses the skill_graph schema so System 1 needs no special
+    case, but every subtask carries a bare reachability formula with no safety
+    term, no timing bound, and no ordering clause.
+    """
+    base = build_developer_prompt(scene_context)
+    # Keep the skill/parameter rules; replace the specification guidance.
+    return (
+        base
+        + "\n\nBASELINE MODE -- NO SPECIFICATION LAYER. Override anything above that "
+        "asks for safety, timing or ordering clauses:\n"
+        "B1. Emit ONLY the ordered skills needed to achieve the goal, with their "
+        "params. Think of this as a plan, not a specification.\n"
+        "B2. Every subtask's formula must be the bare achievement predicate with a "
+        "single generous interval, e.g. F[0,400](Grasped(object)). Never emit "
+        "Safe(...), never emit an always/G term, and never narrow an interval to "
+        "encode a deadline or a delay.\n"
+        "B3. If the instruction mentions a region to avoid, a distance to leave, an "
+        "order to follow or a time to wait, do NOT translate it into the formula. "
+        "Plan the skills you would anyway; the requirement is not part of the "
+        "output.\n"
+    )
