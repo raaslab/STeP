@@ -56,7 +56,7 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
-from ...modes import FORCE_MANUAL_KEYWORDS, RIM_GRASP_KEYWORDS
+from ...modes import FORCE_MANUAL_KEYWORDS, MANUAL_YAW_OVERRIDE_KEYWORDS, RIM_GRASP_KEYWORDS
 from ..config import GraspSampleConfig
 from ..scene_query import SceneQuery, quat_mul_wxyz, quat_to_rotmat_wxyz
 from ..types import GraspCandidate
@@ -104,6 +104,16 @@ def _is_forced_manual_object_class(object_name: str) -> bool:
     gripper-width-compatible candidate at its real resting geometry)."""
     name = object_name.lower()
     return any(kw in name for kw in FORCE_MANUAL_KEYWORDS)
+
+
+def _manual_yaw_offset_rad(object_name: str) -> float:
+    """Extra yaw (radians) added to MANUAL_DEEP_CENTER_YAW_RAD for object
+    classes in MANUAL_YAW_OVERRIDE_KEYWORDS -- see that dict's own comment."""
+    name = object_name.lower()
+    for kw, offset in MANUAL_YAW_OVERRIDE_KEYWORDS.items():
+        if kw in name:
+            return offset
+    return 0.0
 
 
 def _object_xy_obb_world(scene: SceneQuery, object_name: str, obj_quat_wxyz: np.ndarray) -> tuple[float, float, float] | None:
@@ -807,7 +817,7 @@ class ManualDeepCenterGraspGenerator(GraspGenerator):
             # switching axes: rejected candidates fail cleanly through the
             # ordinary width/collision checks below, same as any other
             # infeasible candidate.
-            manual_yaw_rad = MANUAL_DEEP_CENTER_YAW_RAD
+            manual_yaw_rad = MANUAL_DEEP_CENTER_YAW_RAD + _manual_yaw_offset_rad(name)
             grasp_quat = quat_mul_wxyz(yaw_quat_wxyz(manual_yaw_rad), _TOP_DOWN_QUAT_WXYZ)
 
             # The width the gripper needs to span *at this specific fixed

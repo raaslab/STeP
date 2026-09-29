@@ -332,11 +332,20 @@ def _capture_live_scene_and_image(env: Any, scene_context: dict[str, Any], outdi
     ``capture_initial_scene_image``, which do the same thing but always
     build and reset a brand new env -- exactly what must NOT happen here.
     """
-    from step.system_one.libero_scene import infer_objects_from_mujoco, infer_objects_from_obs, update_scene_context_from_objects
+    from step.system_one.libero_scene import (
+        infer_objects_from_mujoco,
+        infer_objects_from_obs,
+        refresh_drawer_blocking_flags,
+        update_scene_context_from_objects,
+    )
 
     obs = getattr(env, "last_raw_obs", None)
     objects = (infer_objects_from_obs(obs) if obs is not None else {}) or infer_objects_from_mujoco(env.env)
     fresh_context = update_scene_context_from_objects(scene_context, objects, source="pipeline_recall_live")
+    try:
+        fresh_context = refresh_drawer_blocking_flags(fresh_context, env.env)
+    except Exception as exc:
+        print(f"[step] warning: refresh_drawer_blocking_flags failed: {exc}")
 
     import matplotlib
     matplotlib.use("Agg", force=True)
@@ -498,6 +507,57 @@ def _annotate_timing_overruns(fresh_context: dict[str, Any], previous_summary: d
     return annotated
 
 
+def _annotate_skill_failure_hints(fresh_context: dict[str, Any], previous_summary: dict[str, Any]) -> list[str]:
+    """Stamp a note onto ``fresh_context`` describing *why* each failed
+    subtask in the just-failed attempt actually failed (its
+    ``failure_reason``/``diagnostics.detail``), so the recalled plan has a
+    textual signal to reason from instead of just an unchanged scene image.
+
+    Exists because, unlike a pick/place failure (which usually leaves a
+    visible trace -- a dropped object, an arm stuck somewhere), a rejected
+    ``open`` attempt that never finds a feasible candidate pull leaves the
+    scene looking *identical* to the very first frame: the drawer never
+    moved, nothing visibly changed. Confirmed directly: without this, a real
+    recall reasoned "no precomputed blockage flag is present, so no object
+    relocation is needed" -- it had no way to know the previous attempt hit
+    final_descent_in_collision at all, let alone connect that to whatever is
+    sitting in front of the handle in the image. Mirrors
+    ``_annotate_timing_overruns``'s own pattern (precompute the fact in code,
+    stamp the verdict as text) for the general "why did this fail" case."""
+    records = previous_summary.get("records") or []
+    failed = [r for r in records if isinstance(r, dict) and (r.get("info") or {}).get("success") is False]
+    if not failed:
+        return []
+
+    entities = fresh_context.setdefault("entities", [])
+    by_name = {e.get("name"): e for e in entities if isinstance(e, dict) and e.get("name")}
+
+    annotated: list[str] = []
+    for record in failed:
+        info = record.get("info") or {}
+        skill = record.get("skill")
+        obj = (record.get("params") or {}).get("object")
+        reason = info.get("failure_reason")
+        detail = (info.get("diagnostics") or {}).get("detail")
+        pieces = [f"a previous attempt's {skill} subtask" + (f" for {obj}" if obj else "") + " did not succeed"]
+        if reason:
+            pieces.append(f"failure_reason={reason}")
+        if detail:
+            pieces.append(f"detail: {detail}")
+        flag = (
+            " [Precomputed: " + "; ".join(pieces) + " -- if this looks like the arm could not reach or "
+            "move past something, check the scene image for an object sitting near the target and "
+            "consider relocating it before retrying.]"
+        )
+        entity = by_name.get(obj) if obj else None
+        if entity is not None:
+            entity["notes"] = entity.get("notes", "") + flag
+        else:
+            entities.append({"name": obj or f"{skill}_failure", "role": "note", "notes": flag.strip()})
+        annotated.append(obj or str(skill))
+    return annotated
+
+
 def _decompose_or_annotate_errors(plan: dict[str, Any], errors_path: Path) -> dict[str, Any]:
     """EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md): turns a single-global-
     formula ("stl_spec") plan into the standard subtasks shape.
@@ -621,6 +681,9 @@ def main() -> int:
                     timing_overruns = _annotate_timing_overruns(fresh_context, summary)
                     if timing_overruns:
                         print(f"[step] attempt {attempt}/{max_attempts}: previous attempt exceeded its declared timing for: {timing_overruns}")
+                    failure_hints = _annotate_skill_failure_hints(fresh_context, summary)
+                    if failure_hints:
+                        print(f"[step] attempt {attempt}/{max_attempts}: previous attempt failed for: {failure_hints}")
                     schema_path = args.schema or _DEFAULT_SCHEMA_FOR_MODE[args.stl_mode]
                     schema = load_json(schema_path)
                     from .system_two.planner import DirectSTLPlanner

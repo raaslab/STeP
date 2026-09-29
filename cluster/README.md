@@ -56,7 +56,13 @@ creates the `step-libero` conda env (`cluster/environment.yml` +
 environment), editable-installs the local packages, and downloads the
 LIBERO-Pro swap/task perturbation bddl+init files from the official
 HuggingFace dataset (`zhouxueyang/LIBERO-Pro` -- the same source Cap-X's own
-data came from). Re-running it is safe; each step skips if already done.
+data came from), and writes `cluster/env.sh` (sets
+`CONTACT_GRASPNET_CHECKPOINT_DIR` -- `configs/libero_template.json` ships
+with this blank on purpose, no personal path in git, so without it every
+pick silently falls back to a heuristic grasp generator instead of the real
+model). Both SLURM scripts source `cluster/env.sh` automatically; source it
+yourself too if you run anything outside of those. Re-running `setup_env.sh`
+is safe; each step skips if already done.
 
 Sanity-check before submitting anything:
 

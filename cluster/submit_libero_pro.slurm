@@ -31,6 +31,9 @@ cd "$STEP_ROOT"
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate step-libero
 
+# shellcheck disable=SC1091
+source "$STEP_ROOT/cluster/env.sh"  # sets CONTACT_GRASPNET_CHECKPOINT_DIR -- see setup_env.sh's step 5
+
 export MUJOCO_GL=egl
 
 # suite/perturbation grid -- must match CAPX_SUITES x CAPX_PERTURBATIONS in

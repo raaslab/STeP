@@ -83,7 +83,19 @@ python "$STEP_ROOT/cluster/fetch_libero_pro_data.py" \
   --libero-pro-root "$LIBERO_PRO_ROOT" \
   --dimensions swap task
 
+# --- 5. Contact-GraspNet checkpoint path ---
+# configs/libero_template.json intentionally ships with contact_graspnet.
+# checkpoint_dir = "" (no personal absolute path baked into git) -- it's
+# meant to be supplied via this env var instead. Without it, every pick
+# silently falls back to the heuristic grasp generator (a caught exception,
+# not a hard failure) rather than the real model -- confirmed missing on
+# the dev machine's own shell profile too, so write it out here rather than
+# assume it's set.
+echo "export CONTACT_GRASPNET_CHECKPOINT_DIR=\"$CONTACT_GRASPNET_ROOT/checkpoints/contact_graspnet\"" > "$STEP_ROOT/cluster/env.sh"
+echo "[setup] wrote $STEP_ROOT/cluster/env.sh -- source it (or the SLURM scripts, which already do) before running anything"
+
 echo "[setup] done. Sanity check:"
 echo "  conda activate step-libero"
+echo "  source $STEP_ROOT/cluster/env.sh"
 echo "  cd $STEP_ROOT"
 echo "  python -c \"from libero.benchmark import get_benchmark; print(get_benchmark('libero_goal_swap')().n_tasks)\""

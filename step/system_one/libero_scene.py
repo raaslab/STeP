@@ -797,6 +797,15 @@ def merge_drawer_fixtures_into_scene_context(scene_context: dict[str, Any], env:
     geometry = updated.setdefault("geometry", {})
     existing_names = {e.get("name") for e in entities if e.get("name")}
     cabinets_with_drawers: list[tuple[str, list[str]]] = []
+    # Opt-out for experiments that specifically want to test the *reactive*
+    # replanning path (attempt an open, watch it fail/undershoot, recall,
+    # only then diagnose and clear the blocker) rather than always short-
+    # circuiting straight to "move it first" via this precomputed hint. Off
+    # (hint enabled) by default -- this only matters for a scene_context
+    # that explicitly asks to see the reactive path.
+    skip_preemptive_flags = bool(
+        updated.get("platform", {}).get("libero_experiment", {}).get("disable_drawer_preemptive_flags")
+    )
     for entity in (
         infer_drawer_fixtures(env)
         + infer_cabinet_support_entities(env)
@@ -841,6 +850,37 @@ def merge_drawer_fixtures_into_scene_context(scene_context: dict[str, Any], env:
     except Exception:
         pass
 
+    if not skip_preemptive_flags:
+        _annotate_drawer_clearance_conflicts(entities, geometry, cabinets_with_drawers)
+        _annotate_drawer_approach_corridor(entities, geometry, env)
+    return updated
+
+
+def refresh_drawer_blocking_flags(scene_context: dict[str, Any], env: Any) -> dict[str, Any]:
+    """Recompute and (re-)stamp the drawer clearance/approach-corridor flags
+    against a live, already-built scene_context -- unconditionally, ignoring
+    ``disable_drawer_preemptive_flags``.
+
+    For a reactive-replanning experiment that deliberately withholds this
+    hint on the *first* attempt (so System 2 has to try the open blind and
+    actually fail first), the recall snapshot is exactly the point where
+    revealing it is no longer "cheating": the failure already happened, and
+    a rejected ``open`` that never even got a grip leaves the scene visually
+    unchanged, so this is often the only signal that lets a recall connect
+    the failure to a specific object instead of repeating the identical
+    blind plan (confirmed directly: without it, a recall re-issued the exact
+    same open-only plan, reasoning "no precomputed blockage flag is
+    present"). Only used from the recall snapshot path -- the initial
+    snapshot goes through ``snapshot_scene_context``'s own gated call
+    instead."""
+    updated = copy.deepcopy(scene_context)
+    entities = updated.get("entities", [])
+    geometry = updated.get("geometry", {})
+    cabinets_with_drawers = [
+        (e["name"], e["_owned_drawers"])
+        for e in infer_cabinet_support_entities(env)
+        if e.get("_owned_drawers")
+    ]
     _annotate_drawer_clearance_conflicts(entities, geometry, cabinets_with_drawers)
     _annotate_drawer_approach_corridor(entities, geometry, env)
     return updated
@@ -1098,7 +1138,19 @@ def get_libero_init_state(scene_context: dict[str, Any]) -> Any | None:
         return cfg.get("init_state")
     suite = cfg.get("suite") or cfg.get("task_suite")
     task_id = cfg.get("task_id")
-    if suite is None or task_id is None:
+    bddl_file = cfg.get("bddl_file") or cfg.get("bddl_file_name")
+    # A custom bddl_file always takes precedence over suite+task_id (mirrors
+    # load_libero_task_from_scene_context's own gating) -- otherwise a
+    # scene_context built from configs/libero_template.json's default
+    # suite="libero_spatial"/task_id=0 (never cleared by callers that only
+    # set bddl_file) silently fetches *that* unrelated task's saved raw sim
+    # state and force-applies it via env.set_init_state() onto a model with
+    # a different bddl -- different object count/order -- scrambling every
+    # object's position into whatever garbage floats land in that body's
+    # qpos slot. Confirmed directly: a custom single-plate drawer scene had
+    # its plate silently relocated 0.3m away and its drawers desynced this
+    # way, with no error raised anywhere.
+    if suite is None or task_id is None or bddl_file:
         return None
     try:
         _ensure_libero_on_path()
