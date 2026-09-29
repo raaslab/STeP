@@ -34,6 +34,11 @@ class _StubExecutorSelf:
     def _capture_video_frame(self, env, force=False):
         pass
 
+    def _on_skill_step(self, env):
+        # The real executor records a frame and ticks its STL monitor here. The
+        # wait mechanism only cares that the callback is safe to call per step.
+        pass
+
 
 def test_wait_steps_holds_zero_delta_for_exact_count():
     adapter = _StubAdapter()

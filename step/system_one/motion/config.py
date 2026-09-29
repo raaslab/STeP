@@ -112,6 +112,21 @@ class GraspSampleConfig:
     # for a scene no more cluttered than ones that succeed on a later
     # attempt of the same plan.
     planning_attempts: int = 6
+    # How a pick chooses between the manual/heuristic pose and GraspNet.
+    #
+    # "object_class" (default) keyword-matches the MuJoCo body name -- "bowl",
+    # "mug", "cup" -- to decide whether an object is rim-graspable and therefore
+    # needs GraspNet's antipodal search. That is sound only where body names
+    # carry semantics, as they do in LIBERO ("akita_black_bowl_1").
+    #
+    # "graspnet_first" routes every object to GraspNet and falls back to the
+    # manual pose only if it returns nothing. Required for backends whose names
+    # are positional rather than semantic: RoboCasa calls every manipulable
+    # "obj_main" and keeps the real category ("steak", "eggplant") in the
+    # episode metadata, so the keyword table matches nothing and silently sent
+    # every object down the manual-only path -- which never tried GraspNet at
+    # all, even with it enabled and generating good candidates.
+    routing: str = "object_class"
 
 
 @dataclass
@@ -184,10 +199,24 @@ class CollisionConfig:
     # about the approach itself was unsafe -- only the final pinch was ever
     # going to be snug. 0.0 disables this (strict, zero-tolerance) entirely.
     finger_overlap_tolerance_m: float = 0.006
+    # The same compliance allowance, for the PALM, against the grasp target only.
+    #
+    # Zero by default: on LIBERO the objects are small enough that the hand never
+    # needs to touch them, and a palm driven into an object is a real fault there.
+    # RoboCasa's produce is not small -- grasping an eggplant puts it against the
+    # palm, and the human demonstrations prove that is what a working grasp looks
+    # like. Measured on their own close steps, the palm penetrates the object by
+    # 1.1 to 6.9 mm and the object is then lifted successfully. Rejecting that
+    # outright left 2 of 4 demonstrated eggplant grasps unusable while the finger
+    # geoms beside the palm were already forgiven 15 mm by the field above.
+    palm_overlap_tolerance_m: float = 0.0
     # LIBERO-Constrained keep-out zones: the STL task spec's G(Safe(obj))
     # obligations, made enforceable at plan/control time. Empty by default, so
     # an unconstrained run behaves exactly as before. See KeepoutZone.
     keepout_zones: list["KeepoutZone"] = field(default_factory=list)
+    # VLM-MPC-Cost baseline only: the active subtask's cost terms. Empty under
+    # STeP, which drives the controller from the STL formula instead.
+    mpc_cost_terms: list["MPCCostTerm"] = field(default_factory=list)
 
 
 @dataclass
@@ -221,6 +250,33 @@ class KeepoutZone:
         p = np.asarray(xy, dtype=np.float64).reshape(-1)[:2]
         c = np.asarray(self.center_xy, dtype=np.float64).reshape(-1)[:2]
         return float(np.linalg.norm(p - c)) - float(self.radius_m)
+
+
+@dataclass
+class MPCCostTerm:
+    """One weighted term of a VLM-authored MPC cost function.
+
+    The VLM-MPC-Cost baseline replaces STeP's STL specification with a cost
+    function System 2 writes directly over the predicate set. Each predicate it
+    names becomes one of these, resolved to a world position by the executor
+    before it reaches the controller.
+
+    Deliberately has no interval, no ordering, and no temporal operator of any
+    kind -- that absence *is* the baseline. A weighted sum of distance terms can
+    say "be near this" and "stay off that", but it cannot say "after" or
+    "within [a,b]", which is what the comparison against STL is meant to expose.
+
+    ``kind`` is either ``reach`` (quadratic pull toward ``center``) or ``avoid``
+    (softplus push out of a radius around it). ``xy_only`` mirrors the keep-out
+    cylinder: unbounded in z, so it cannot be satisfied by lifting over.
+    """
+
+    predicate: str = ""
+    kind: str = "reach"  # "reach" | "avoid"
+    center: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    radius_m: float = 0.0
+    weight: float = 1.0
+    xy_only: bool = False
 
 
 @dataclass
@@ -748,10 +804,16 @@ class MotionConfig:
 
     @staticmethod
     def from_scene_context(scene_context: dict[str, Any] | None) -> "MotionConfig":
-        raw = (
-            ((scene_context or {}).get("platform", {}) or {})
-            .get("libero", {}) or {}
-        ).get("motion", {}) or {}
+        # Read the motion block from whichever platform the scene declares.
+        # Hardcoding "libero" here meant a RoboCasa scene silently received
+        # every default -- including a validity_resolution tuned for a
+        # tabletop, which rejects paths in a kitchen because a microwave door
+        # is thin enough to slip between samples.
+        platform = (scene_context or {}).get("platform", {}) or {}
+        backend = str(platform.get("backend") or "libero")
+        raw = ((platform.get(backend) or {}).get("motion", {})
+               or (platform.get("libero", {}) or {}).get("motion", {})
+               or {})
         collision = CollisionConfig(**raw.get("collision", {}))
         # G(Safe(obj)) reaches the motion layer here, and nowhere else. The
         # scene's outside_positive circle SDFs (written by
@@ -800,7 +862,10 @@ def _keepout_zones_from_scene(scene_context: dict[str, Any] | None) -> list[Keep
     # from planning around them. That is what isolates "STL reaches control"
     # from "STL is monitored": both arms of the comparison see an identical
     # scene and are measured by an identical metric.
-    experiment = ((scene_context.get("platform") or {}).get("libero_experiment") or {})
+    platform = scene_context.get("platform") or {}
+    # Backend-neutral name first; the LIBERO one stays as a fallback so no
+    # existing scene context or recorded result changes meaning.
+    experiment = platform.get("stl_experiment") or platform.get("libero_experiment") or {}
     if not bool(experiment.get("enforce_keepout", True)):
         return []
     geometry = scene_context.get("geometry") or {}

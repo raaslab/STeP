@@ -16,13 +16,20 @@ sweep continues where it stopped.
 
 import argparse
 import json
+import os
 import pathlib
 import subprocess
 import sys
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-MANIFEST = pathlib.Path(__file__).parent / "tasks.json"
+# tasks.json is the frozen benchmark. A variant that changes a task's own
+# parameters -- a longer dwell, a longer wait -- is a different manifest, not an
+# edit to this one, so set LIBERO_CONSTRAINED_MANIFEST to point at it. The runner
+# and the scorer read the same variable, so a run and its scoring cannot drift.
+MANIFEST = pathlib.Path(
+    os.environ.get("LIBERO_CONSTRAINED_MANIFEST") or (pathlib.Path(__file__).parent / "tasks.json")
+)
 
 
 def parse_args():
@@ -39,8 +46,10 @@ def parse_args():
                    help="seconds before a rollout is killed and recorded as timeout (default 360)")
     p.add_argument("--outdir", default="outputs/benchmark")
     p.add_argument("--retries", type=int, default=0, help="--max-pipeline-retries for each rollout")
-    p.add_argument("--stl-mode", default="stl_spec", choices=["stl_spec", "skill_graph", "no_stl"],
+    p.add_argument("--stl-mode", default="stl_spec", choices=["stl_spec", "skill_graph", "no_stl", "mpc_cost"],
                    help="Pass no_stl to sweep the baseline: same VLM, skills and planner, no specification layer.")
+    p.add_argument("--strip-constraint", action="store_true",
+                   help="chance baseline: original LIBERO instruction, constraint clause removed")
     p.add_argument("--video", action="store_true", help="record a video per rollout")
     p.add_argument("--dry-run", action="store_true", help="list what would run, then stop")
     return p.parse_args()
@@ -82,6 +91,8 @@ def run_one(task, arm, state, args, outdir):
     # arms would be identical, so 'off' is meaningless and never requested.
     if arm == "off" and task.get("zone"):
         cmd.append("--no-enforce-keepout")
+    if args.strip_constraint:
+        cmd.append("--strip-constraint")
     if args.video:
         cmd += ["--save-video", str(run_dir / "r.mp4")]
 

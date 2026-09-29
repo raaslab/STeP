@@ -28,6 +28,7 @@ Two cost tiers, both differentiable but for different reasons:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -147,6 +148,9 @@ class JointSpaceMPC:
         self.step_size = step_size
         self.action_scale = action_scale
         self.cfg = cost_config or MPCCostConfig()
+        # VLM-MPC-Cost baseline: the active subtask's cost terms, read off the
+        # collision checker's config in step(). Empty under STeP.
+        self._cost_terms: list = []
         self._prev_actions = np.zeros((horizon, self.n_joints))
         self._prev_action_applied = np.zeros(self.n_joints)
 
@@ -190,6 +194,52 @@ class JointSpaceMPC:
                 dpenalty_ddist = -_softplus_grad(np.array([violation]))[0]
                 ddist_dee = diff / dist
                 dcost_dee = self.cfg.clearance_weight * dpenalty_ddist * ddist_dee
+                grad[t] += dcost_dee @ J
+        return cost, grad[1:]
+
+    def _predicate_cost_and_grad(
+        self, scene: SceneQuery, q_traj: np.ndarray
+    ) -> tuple[float, np.ndarray]:
+        """The VLM-MPC-Cost baseline's objective: a weighted sum of predicate terms.
+
+        This replaces STeP's ``-lambda * rho(z, t, phi_j)`` term. System 2 writes
+        the cost directly over the predicate set instead of compiling an STL
+        formula, so the controller is steered by a scalar tradeoff rather than by
+        a specification it must satisfy.
+
+        Two term shapes cover the predicates the VLM may name:
+          reach -- quadratic pull toward a target (PreGrasp, Grasped, OverGoal,
+                   Placed all reduce to "get the end effector to this point").
+          avoid -- softplus push out of a radius (Safe), measured in xy only so
+                   it cannot be satisfied by lifting over.
+
+        There is no interval and no ordering here. That is the point of the
+        baseline: whatever the VLM wants to say about *when*, it has only weights
+        to say it with.
+        """
+        terms = getattr(self, "_cost_terms", None)
+        if not terms:
+            return 0.0, np.zeros_like(q_traj[1:])
+        cost = 0.0
+        grad = np.zeros_like(q_traj)
+        for t in range(1, self.horizon + 1):
+            ee_pos, J = self._ee_and_jacobian(scene, q_traj[t])
+            for term in terms:
+                c = np.asarray(term.center, dtype=float)
+                if term.xy_only:
+                    diff = np.zeros(3)
+                    diff[:2] = ee_pos[:2] - c[:2]
+                else:
+                    diff = ee_pos - c
+                dist = float(np.linalg.norm(diff) + 1e-9)
+                if term.kind == "avoid":
+                    violation = float(term.radius_m) - dist
+                    cost += term.weight * _softplus(np.array([violation]))[0]
+                    dpen = -_softplus_grad(np.array([violation]))[0]
+                    dcost_dee = term.weight * dpen * (diff / dist)
+                else:  # reach
+                    cost += term.weight * float(dist**2)
+                    dcost_dee = term.weight * 2.0 * diff
                 grad[t] += dcost_dee @ J
         return cost, grad[1:]
 
@@ -268,6 +318,10 @@ class JointSpaceMPC:
         cost += timing_cost
         grad_q[1:] += timing_grad
 
+        pred_cost, pred_grad = self._predicate_cost_and_grad(scene, q_traj)
+        cost += pred_cost
+        grad_q[1:] += pred_grad
+
         # Backprop through the single-integrator rollout: dq[t]/du[k] = action_scale for k<t.
         grad_u = np.zeros_like(u)
         running = np.zeros(self.n_joints)
@@ -306,6 +360,12 @@ class JointSpaceMPC:
         re-invokes ``step`` with the new ``q_current`` on the next control
         tick -- this class holds no episode-long state besides the warm
         start)."""
+        # The cost terms live on the collision checker's config, which every
+        # adapter already passes in. Reading them here keeps the baseline to one
+        # file instead of six adapter call sites.
+        if collision_checker is not None:
+            self._cost_terms = getattr(collision_checker.config, "mpc_cost_terms", None) or []
+
         u = np.concatenate([self._prev_actions[1:], self._prev_actions[-1:]], axis=0)
 
         m = np.zeros_like(u)

@@ -315,6 +315,80 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         walk(formula, False)
         return min(starts) if starts else None
 
+    @staticmethod
+    def _subtask_interval_end(sub: dict[str, Any]) -> int | None:
+        """Latest step this subtask's own achievement goal may be satisfied at.
+
+        The mirror of ``_subtask_interval_start``, and for the same reason:
+        together they give the window System 2 drew for this subtask, and the
+        distance between one subtask's end and the next one's start is the delay
+        the specification is asking for.
+        """
+        formula = sub.get("formula")
+        if not isinstance(formula, dict):
+            return None
+        ends: list[int] = []
+
+        def walk(node, under_always: bool) -> None:
+            if not isinstance(node, dict):
+                return
+            kind = node.get("type")
+            always = under_always or kind == "always"
+            interval = node.get("interval")
+            if (
+                kind in {"eventually", "until"}
+                and not always
+                and isinstance(interval, (list, tuple))
+                and len(interval) == 2
+            ):
+                try:
+                    ends.append(int(interval[1]))
+                except (TypeError, ValueError):
+                    pass
+            for key in ("child", "left", "right"):
+                walk(node.get(key), always)
+            for child in node.get("children", []) or []:
+                walk(child, always)
+
+        walk(formula, False)
+        return max(ends) if ends else None
+
+    @staticmethod
+    def _timing_gap_to_honour(
+        start_step: int | None, prev_interval_end: int | None, task_steps_so_far: int
+    ) -> tuple[int, str]:
+        """How long to hold before this subtask, and why. 0 means start now.
+
+        Two clocks disagree here, and only one of them carries the constraint.
+
+        System 2 writes a *nominal* timeline: pick ends at step 90, transport
+        runs 90->270, place opens at 430. The 160 steps between 270 and 430 are
+        the 8-second hold the instruction asked for -- that gap is the
+        specification. The nominal timeline is not a prediction of the clock,
+        though: a real pick in LIBERO takes around 350 steps, not 90. So by the
+        time place is dispatched, absolute step 430 is long past, and asking
+        "has the timeline reached 430 yet?" answers yes and holds for nothing.
+        Every declared delay evaporated that way -- measured across the temporal
+        family, the robot held 0 steps where the formula asked for 80.
+
+        So the delay is honoured as a *gap*: the distance the formula put between
+        the previous subtask's window and this one's, held from the moment the
+        previous subtask actually ended. The absolute shortfall is still
+        respected where it is the larger of the two, which is the case a plan
+        that runs ahead of its own schedule produces.
+        """
+        behind = int(start_step - task_steps_so_far) if start_step is not None else 0
+        declared = (
+            int(start_step - prev_interval_end)
+            if start_step is not None and prev_interval_end is not None
+            else 0
+        )
+        if declared >= max(behind, 1):
+            return declared, f"the formula puts a {declared}-step gap after the previous subtask"
+        if behind > 0:
+            return behind, "the timeline has not reached this subtask's window yet"
+        return 0, ""
+
     def _hold_position(self, env: BaseManipulationEnv, steps: int):
         """Hold still for a number of control steps.
 
@@ -358,6 +432,84 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         # Holding cannot fail on its own terms: if the steps were taken, it held.
         return taken >= steps, taken, last_status
 
+    def _cost_terms_for_subtask(self, env: BaseManipulationEnv, sub: dict[str, Any] | None, zones=()):
+        """Resolve a VLM-authored cost function into world-space MPC terms.
+
+        The VLM-MPC-Cost baseline emits ``cost_terms`` of the form
+        ``{predicate, args, weight}``. Each names a predicate but carries no
+        geometry, so this grounds it: object and region names become positions,
+        and ``Safe`` becomes the keep-out circle's centre and radius.
+
+        Predicates that are not a function of end-effector position (Released,
+        Opened, Closed, TurnedOn) are dropped rather than approximated -- they
+        are discrete gripper/joint checks with no smooth distance the controller
+        could descend, and inventing one would give the baseline a capability the
+        cost-function format does not actually have.
+        """
+        from .motion.config import MPCCostTerm
+
+        terms: list = []
+        if not isinstance(sub, dict):
+            return terms
+        REACH = {"PreGrasp", "Grasped", "OverGoal", "Placed"}
+        for raw in sub.get("cost_terms") or []:
+            if not isinstance(raw, dict):
+                continue
+            name = str(raw.get("predicate") or "")
+            args = raw.get("args") or []
+            weight = float(raw.get("weight", 1.0) or 0.0)
+            if weight <= 0.0:
+                continue
+            if name == "Safe":
+                for zone in zones or []:
+                    terms.append(MPCCostTerm(
+                        predicate=name, kind="avoid", weight=weight, xy_only=True,
+                        center=(zone.center_xy[0], zone.center_xy[1], 0.0),
+                        radius_m=float(zone.radius_m),
+                    ))
+                continue
+            if name not in REACH:
+                continue
+            target = None
+            for a in args:
+                if isinstance(a, str):
+                    target = self._world_xyz_for_name(env, a)
+                    if target is not None:
+                        break
+            if target is None:
+                continue
+            terms.append(MPCCostTerm(
+                predicate=name, kind="reach", weight=weight,
+                center=(float(target[0]), float(target[1]), float(target[2])),
+            ))
+        return terms
+
+    def _world_xyz_for_name(self, env: BaseManipulationEnv, name: str):
+        """Best-effort world position for an object or region the VLM named."""
+        import numpy as _np
+
+        canon = self.resolver.canonical(name) or name
+        # `_object_pos_by_name` is the env's own lookup (normalizes the name,
+        # then falls back to fuzzy matching against discovered scene objects).
+        # The earlier guess at `object_position`/`body_position` matched nothing,
+        # which silently dropped every reach term and left the controller with
+        # repulsion and no attraction -- the arm then had nothing pulling it to
+        # the object at all.
+        for candidate in (canon, name):
+            fn = getattr(env, "_object_pos_by_name", None)
+            if callable(fn):
+                try:
+                    p = fn(candidate)
+                    if p is not None:
+                        return _np.asarray(p, dtype=float).reshape(-1)[:3]
+                except Exception:
+                    pass
+        point = self._point_target_from_goal_region(name)
+        if point is not None:
+            (gx, gy), gz, _ = point
+            return _np.asarray([gx, gy, gz if gz is not None else 0.9], dtype=float)
+        return None
+
     def _motion_config(self, env: BaseManipulationEnv):
         """Motion config for this skill invocation, with the task's STL keep-out
         zones attached.
@@ -374,7 +526,12 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         from .geometry_sdf import CircleSDF
 
         cfg = MotionConfig.from_scene_context(self.scene_context)
-        experiment = (self.scene_context.get("platform", {}) or {}).get("libero_experiment", {}) or {}
+        platform_blk = self.scene_context.get("platform", {}) or {}
+        # "stl_experiment" is the backend-neutral name; "libero_experiment" is
+        # kept as a fallback so every existing LIBERO scene context, and every
+        # result already produced from one, still reads identically.
+        experiment = (platform_blk.get("stl_experiment")
+                      or platform_blk.get("libero_experiment") or {})
         if not bool(experiment.get("enforce_keepout", True)):
             return cfg
 
@@ -404,6 +561,15 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                     "[keepout] enforcing "
                     + ", ".join(f"{z.name} r={z.radius_m:.3f}m" for z in zones)
                 )
+        # VLM-MPC-Cost baseline. Empty for STeP, whose controller is driven by
+        # the STL formula instead; when present these replace that entirely.
+        terms = self._cost_terms_for_subtask(env, getattr(self, "_active_subtask", None), zones)
+        if terms:
+            cfg.collision.mpc_cost_terms = terms
+            print(
+                "[mpc-cost] "
+                + ", ".join(f"{t.predicate}({t.kind}) w={t.weight:g}" for t in terms)
+            )
         return cfg
 
     def _sample_constraint_margins(self, env: BaseManipulationEnv) -> None:
@@ -929,11 +1095,17 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         above the goal" doesn't need collision-aware planning as urgently as
         the final insertion into a container does, and this keeps the
         integration's scope bounded)."""
-        if str(self.scene_context.get("platform", {}).get("backend")) != "libero":
-            return "legacy"
-        return str(
-            self.scene_context.get("platform", {}).get("libero", {}).get("motion_backend", "legacy")
-        )
+        # Read the motion backend from whichever platform block the scene
+        # declares, rather than from a hardcoded "libero" key. The pipeline in
+        # step/system_one/motion/ is not LIBERO-specific -- it addresses MuJoCo
+        # through SceneQuery and robosuite's standard Panda names, both of which
+        # a RoboCasa kitchen satisfies unchanged. Gating it on the backend
+        # *name* silently demoted every non-LIBERO scene to the legacy stage
+        # machine, which is not the method the paper describes.
+        platform = self.scene_context.get("platform", {}) or {}
+        backend = str(platform.get("backend") or "libero")
+        block = platform.get(backend) or {}
+        return str(block.get("motion_backend", "legacy"))
 
     def _run_pick_with_motion_pipeline(
         self,
@@ -2016,6 +2188,10 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
 
         records: list[SkillExecutionRecord] = []
         dwell_counts: dict[str, int] = {}
+        # Nominal end of the previous subtask's window, so the gap the formula
+        # leaves before the next one can be measured. See _timing_gap_to_honour.
+        prev_interval_end: int | None = None
+        held_total = 0
         active_subtasks = list(subtasks)
         self._original_subtasks_for_reflection = list(subtasks)
         aborted = False
@@ -2118,7 +2294,10 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                 self._apply_subtask_constraints_to_env(env, sub)
                 self._configure_pass_through_for_subtask(env, sub)
 
-                task_steps_so_far = sum(int(getattr(r, "steps", 0) or 0) for r in records)
+                # Time held to honour a declared delay is time on the clock like
+                # any other, so it counts here; a record's own `steps` is the
+                # skill's, which is what the per-skill budget is measured against.
+                task_steps_so_far = sum(int(getattr(r, "steps", 0) or 0) for r in records) + held_total
                 if hasattr(env, "configure_timing_windows"):
                     env.configure_timing_windows(
                         self._timing_windows_for_subtask(sub),
@@ -2138,17 +2317,25 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                 # deadlines, so the delay silently evaporated between the plan and
                 # the robot. Holding here is what makes the formula's timing
                 # something the robot actually obeys.
+                # VLM-MPC-Cost baseline: the active subtask's cost terms, so
+                # _motion_config can attach them without every skill dispatch
+                # having to thread `sub` through to it.
+                self._active_subtask = sub
                 start_step = self._subtask_interval_start(sub)
                 timing_hold_steps = 0
-                if start_step is not None and task_steps_so_far < start_step:
-                    gap = int(start_step - task_steps_so_far)
+                gap, why = self._timing_gap_to_honour(
+                    start_step, prev_interval_end, task_steps_so_far
+                )
+                if gap > 0:
                     hz = self._control_hz_for_timing(env, runtime) or 20.0
                     print(
                         f"[timing] subtask {idx} opens at step {start_step}; holding "
-                        f"{gap} steps ({gap / hz:.1f}s) to reach it"
+                        f"{gap} steps ({gap / hz:.1f}s) -- {why}"
                     )
                     _, timing_hold_steps, _ = self._hold_position(env, gap)
                     task_steps_so_far += timing_hold_steps
+                    held_total += timing_hold_steps
+                prev_interval_end = self._subtask_interval_end(sub)
 
                 if skill == "pick":
                     if hasattr(env, "set_grasp_offset_override"):

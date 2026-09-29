@@ -25,6 +25,8 @@ _DEFAULT_SCHEMA_FOR_MODE = {
     # The baseline emits the same skill_graph shape, minus every specification
     # term, so System 1 needs no special case to execute it.
     "no_stl": "schemas/stl_plan_schema.json",
+    # VLM-MPC-Cost: cost terms instead of formulas, so its own schema.
+    "mpc_cost": "schemas/mpc_cost_plan_schema.json",
 }
 
 
@@ -40,7 +42,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--stl-mode",
         default="stl_spec",
-        choices=["stl_spec", "skill_graph", "no_stl"],
+        choices=["stl_spec", "skill_graph", "no_stl", "mpc_cost"],
         help=(
             "System 2 output mode. 'stl_spec' (default, EXPERIMENTAL -- see "
             "STL_DECOMPOSITION_PLAN.md): the VLM emits one global STL formula and "
@@ -96,6 +98,18 @@ def parse_args() -> argparse.Namespace:
             "(e.g. libero_10/0/S-zone). Sets the suite, task, init state, prompt and "
             "keep-out zone from the frozen manifest. Anything given explicitly on the "
             "command line wins."
+        ),
+    )
+    p.add_argument(
+        "--strip-constraint",
+        action="store_true",
+        help=(
+            "Chance baseline: run the manifest task's scene and init state but give "
+            "the planner the ORIGINAL LIBERO instruction, with the constraint clause "
+            "removed. Measures how often the constraint holds when nobody was told "
+            "about it. Without this, --stl-mode no_stl still shows the planner the "
+            "constraint sentence, and it obeys ordering constraints through the skill "
+            "order -- so that arm is a plan-level baseline, not a chance baseline."
         ),
     )
     p.add_argument(
@@ -200,7 +214,10 @@ def _resolve_prompt(args: argparse.Namespace, scene_context: dict[str, Any]) -> 
     return "Execute the LIBERO manipulation task."
 
 
-_BENCHMARK_MANIFEST = Path(__file__).resolve().parents[1] / "benchmarks" / "libero_constrained" / "tasks.json"
+_BENCHMARK_MANIFEST = Path(
+    os.environ.get("LIBERO_CONSTRAINED_MANIFEST")
+    or (Path(__file__).resolve().parents[1] / "benchmarks" / "libero_constrained" / "tasks.json")
+)
 
 
 def _load_benchmark_task(task_id: str) -> dict[str, Any]:
@@ -234,6 +251,13 @@ def _apply_benchmark_task(args: argparse.Namespace) -> dict[str, Any] | None:
         args.task_id = int(task["task_id"])
     if args.init_state_id is None:
         args.init_state_id = int(task.get("init_state_id", 0))
+    if getattr(args, "strip_constraint", False):
+        # Leave args.prompt unset so _resolve_prompt falls back to the suite's own
+        # language, and leave the zone off the scene entirely. score.py recomputes
+        # keep-out from the logged end-effector track plus the manifest zone, so
+        # the run is still scored against the same constraint it was never told.
+        print(f"[benchmark] {task['id']}  CHANCE BASELINE: original LIBERO instruction, no zone")
+        return task
     if not args.prompt:
         args.prompt = task["prompt"]
     zone = task.get("zone")
@@ -571,17 +595,30 @@ def main() -> int:
     plan = _load_or_create_plan(args, scene_context=scene_context, prompt=prompt, outdir=outdir)
     if isinstance(plan.get("system2_plan"), dict) and isinstance(plan["system2_plan"].get("subtasks"), list):
         plan["system2_plan"]["subtasks"] = normalize_legacy_pregrasp_grasp(plan["system2_plan"]["subtasks"])
-    result = validate_stl_plan(plan)
-    if not result.ok:
-        (outdir / "validation_errors.txt").write_text("\n".join(result.errors))
-        print(f"[step] direct STL plan validation failed: {outdir / 'validation_errors.txt'}", file=sys.stderr)
-        for err in result.errors:
-            print(f"  - {err}", file=sys.stderr)
-        return 1
+    if args.stl_mode == "mpc_cost":
+        # The VLM-MPC-Cost baseline emits cost terms, not formulas, so the STL
+        # validator does not apply to it -- it would reject every plan for the
+        # absence of exactly the thing the baseline is defined by. Give System 1
+        # the skill_graph shape it dispatches on, and leave each subtask without
+        # a formula: the controller is driven by collision.mpc_cost_terms, which
+        # executor._cost_terms_for_subtask builds from `cost_terms`.
+        plan["system2_plan"]["type"] = "skill_graph"
+        n_terms = sum(len(s.get("cost_terms") or []) for s in plan["system2_plan"]["subtasks"])
+        print(f"[mpc-cost] {len(plan['system2_plan']['subtasks'])} subtasks, {n_terms} cost terms, no STL")
+        if args.dry_run:
+            return 0
+    else:
+        result = validate_stl_plan(plan)
+        if not result.ok:
+            (outdir / "validation_errors.txt").write_text("\n".join(result.errors))
+            print(f"[step] direct STL plan validation failed: {outdir / 'validation_errors.txt'}", file=sys.stderr)
+            for err in result.errors:
+                print(f"  - {err}", file=sys.stderr)
+            return 1
 
-    print_formulas(plan)
-    if args.dry_run:
-        return 0
+        print_formulas(plan)
+        if args.dry_run:
+            return 0
 
     from step.system_one.executor import System1Executor
 
@@ -641,12 +678,19 @@ def main() -> int:
                         )
                     if isinstance(plan.get("system2_plan"), dict) and isinstance(plan["system2_plan"].get("subtasks"), list):
                         plan["system2_plan"]["subtasks"] = normalize_legacy_pregrasp_grasp(plan["system2_plan"]["subtasks"])
-                    retry_validation = validate_stl_plan(plan)
-                    if not retry_validation.ok:
-                        summary = {"success": False, "attempt": attempt, "error": "plan_validation_failed", "errors": retry_validation.errors}
-                        print(f"[step] attempt {attempt}/{max_attempts}: recalled plan failed validation: {retry_validation.errors}", file=sys.stderr)
-                        continue
-                    print_formulas(plan)
+                    if args.stl_mode == "mpc_cost":
+                        # Same bypass as the first plan: a cost-function plan has
+                        # no formulas to validate, and running the STL validator
+                        # here rejected every recall, so all three retries were
+                        # dead on arrival.
+                        plan["system2_plan"]["type"] = "skill_graph"
+                    else:
+                        retry_validation = validate_stl_plan(plan)
+                        if not retry_validation.ok:
+                            summary = {"success": False, "attempt": attempt, "error": "plan_validation_failed", "errors": retry_validation.errors}
+                            print(f"[step] attempt {attempt}/{max_attempts}: recalled plan failed validation: {retry_validation.errors}", file=sys.stderr)
+                            continue
+                        print_formulas(plan)
                     scene_context = fresh_context  # later recalls build on the latest known state, not the original
 
             try:
@@ -684,7 +728,16 @@ def main() -> int:
         "model": args.model or os.environ.get("OPENAI_MODEL", "gpt-5.4"),
         "benchmark_task": getattr(args, "benchmark_task", None),
         "max_pipeline_retries": int(args.max_pipeline_retries),
-        "enforce_keepout": not bool(getattr(args, "no_enforce_keepout", False)),
+        # Must match the scene block exactly: no_stl turns enforcement off too,
+        # and reporting True there made the baseline look like it had planned
+        # around a zone it never saw.
+        "enforce_keepout": (
+            not bool(getattr(args, "no_enforce_keepout", False))
+            and args.stl_mode != "no_stl"
+            and not bool(getattr(args, "strip_constraint", False))
+        ),
+        "stl_mode": args.stl_mode,
+        "strip_constraint": bool(getattr(args, "strip_constraint", False)),
     }
     save_json(summary, outdir / "execution_summary.json")
     print(f"[step] execution summary: {outdir / 'execution_summary.json'}")

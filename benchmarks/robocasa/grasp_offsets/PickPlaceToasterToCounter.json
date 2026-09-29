@@ -1,0 +1,1982 @@
+[
+ {
+  "episode": 0,
+  "step": 95,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread007",
+  "offset_pos": [
+   0.0033502169630489353,
+   -0.039481871733819646,
+   0.0406543839920992
+  ],
+  "offset_quat": [
+   0.02604063562067388,
+   -0.021641658178839937,
+   0.8986575918336761,
+   0.43734203613126355
+  ],
+  "offset_dist": 0.05676989595800171,
+  "tilt_deg": 41.28000234349618
+ },
+ {
+  "episode": 1,
+  "step": 56,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread006",
+  "offset_pos": [
+   0.0005564897713847827,
+   -0.046617074942597876,
+   0.037797389316339025
+  ],
+  "offset_quat": [
+   0.035548110396358246,
+   -0.03388407343997441,
+   0.9645406206464773,
+   0.2593252639780229
+  ],
+  "offset_dist": 0.0600175307406123,
+  "tilt_deg": 30.347941954663565
+ },
+ {
+  "episode": 2,
+  "step": 95,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread005",
+  "offset_pos": [
+   -0.0017318812908611037,
+   -0.04234942476363167,
+   0.023293915958004563
+  ],
+  "offset_quat": [
+   0.006837309347059996,
+   -0.025622891591367866,
+   0.9234431555556194,
+   0.3828177857478278
+  ],
+  "offset_dist": 0.04836403324036069,
+  "tilt_deg": 44.60334070053206
+ },
+ {
+  "episode": 3,
+  "step": 108,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread003",
+  "offset_pos": [
+   0.0004936079291848852,
+   -0.027136817743557362,
+   0.03889018559479718
+  ],
+  "offset_quat": [
+   0.11437905564402218,
+   -0.013324586926231239,
+   0.9925352434959382,
+   0.04017060407419381
+  ],
+  "offset_dist": 0.04742464614135327,
+  "tilt_deg": 13.925967684326032
+ },
+ {
+  "episode": 4,
+  "step": 82,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread002",
+  "offset_pos": [
+   -0.012761134426350296,
+   -0.04450504199561354,
+   0.019429813427840337
+  ],
+  "offset_quat": [
+   0.014799664143019562,
+   -0.018011823222429026,
+   0.9109833843381225,
+   0.4117837024765775
+  ],
+  "offset_dist": 0.050210187857838096,
+  "tilt_deg": 47.74509394780394
+ },
+ {
+  "episode": 5,
+  "step": 78,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread003",
+  "offset_pos": [
+   0.006293393145339351,
+   -0.041314051478895886,
+   0.034232357630487265
+  ],
+  "offset_quat": [
+   -0.013399805988931004,
+   -0.008259101469829923,
+   0.9020153911902621,
+   0.4314168129526811
+  ],
+  "offset_dist": 0.05402140275690963,
+  "tilt_deg": 42.6360779406901
+ },
+ {
+  "episode": 6,
+  "step": 75,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread003",
+  "offset_pos": [
+   0.01053217553227892,
+   -0.01997808834050782,
+   0.03388715815392018
+  ],
+  "offset_quat": [
+   0.025828917001598704,
+   -0.023049316977909885,
+   0.8197946330593157,
+   0.5716103179969012
+  ],
+  "offset_dist": 0.04072333757113565,
+  "tilt_deg": 61.6612758858022
+ },
+ {
+  "episode": 7,
+  "step": 46,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread003",
+  "offset_pos": [
+   -0.0025839980031846163,
+   -0.017555946903268893,
+   0.0559697076053447
+  ],
+  "offset_quat": [
+   0.03483530462217584,
+   -0.017662848153388092,
+   0.9855083245452336,
+   0.16506928120954886
+  ],
+  "offset_dist": 0.05871538543498322,
+  "tilt_deg": 19.425059571211285
+ },
+ {
+  "episode": 8,
+  "step": 46,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread006",
+  "offset_pos": [
+   0.003465710329003724,
+   -0.029205244570986,
+   0.049143561865484076
+  ],
+  "offset_quat": [
+   0.03916502198426237,
+   -0.02203904838358535,
+   0.905890285151082,
+   0.4211213277289689
+  ],
+  "offset_dist": 0.05727169572626893,
+  "tilt_deg": 42.554793416425454
+ },
+ {
+  "episode": 9,
+  "step": 60,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread004",
+  "offset_pos": [
+   -0.00027162313801998295,
+   -0.05101250798551323,
+   0.027869848528684127
+  ],
+  "offset_quat": [
+   0.04394863338959487,
+   -0.06049680398172065,
+   0.9643044121549937,
+   0.2540190052527493
+  ],
+  "offset_dist": 0.05812983921458029,
+  "tilt_deg": 28.138627851489776
+ },
+ {
+  "episode": 10,
+  "step": 138,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread003",
+  "offset_pos": [
+   0.006312555792245184,
+   -0.031493067368783656,
+   0.0481838106565351
+  ],
+  "offset_quat": [
+   0.03915884300659106,
+   -0.04723125615898333,
+   0.8826895110862736,
+   0.46593456673046363
+  ],
+  "offset_dist": 0.05790804143044193,
+  "tilt_deg": 49.03841098842621
+ },
+ {
+  "episode": 11,
+  "step": 78,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread002",
+  "offset_pos": [
+   0.015986363853987322,
+   -0.061071256760526715,
+   0.040761207828562185
+  ],
+  "offset_quat": [
+   -0.014435200239383402,
+   0.08856596379665062,
+   0.9355269927965206,
+   0.34166788084325145
+  ],
+  "offset_dist": 0.07514478222222414,
+  "tilt_deg": 39.99421547991607
+ },
+ {
+  "episode": 12,
+  "step": 86,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread005",
+  "offset_pos": [
+   -0.018690540029763447,
+   -0.04916829233105508,
+   0.03906841352078261
+  ],
+  "offset_quat": [
+   -0.011773634298015232,
+   -0.024656477498060807,
+   0.8480606587002338,
+   0.5291942543317433
+  ],
+  "offset_dist": 0.06552250142040633,
+  "tilt_deg": 63.91974654755098
+ },
+ {
+  "episode": 13,
+  "step": 56,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread003",
+  "offset_pos": [
+   0.00183803368414992,
+   -0.03899001815148778,
+   0.03882341068788442
+  ],
+  "offset_quat": [
+   0.05284192320583407,
+   -0.03555914326012762,
+   0.918910089046025,
+   0.38929105657841784
+  ],
+  "offset_dist": 0.05505322062075528,
+  "tilt_deg": 42.31183472247959
+ },
+ {
+  "episode": 14,
+  "step": 79,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread004",
+  "offset_pos": [
+   0.0024247238133772164,
+   -0.03299019314047513,
+   0.041126190942470275
+  ],
+  "offset_quat": [
+   0.017201594930053084,
+   -0.019396558900424927,
+   0.8827039657278313,
+   0.4692137972428394
+  ],
+  "offset_dist": 0.05277874297909657,
+  "tilt_deg": 47.02763080342053
+ },
+ {
+  "episode": 15,
+  "step": 92,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread004",
+  "offset_pos": [
+   0.011273716685361014,
+   -0.044772406987958036,
+   0.030698949116032992
+  ],
+  "offset_quat": [
+   -8.737930474063038e-06,
+   0.025875878906633697,
+   0.9257266095961737,
+   0.3773071468976319
+  ],
+  "offset_dist": 0.05544448207194223,
+  "tilt_deg": 44.33395927863686
+ },
+ {
+  "episode": 16,
+  "step": 55,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread004",
+  "offset_pos": [
+   -9.826534553746685e-05,
+   -0.03880779596087347,
+   0.03257956764330472
+  ],
+  "offset_quat": [
+   0.0072022734137734985,
+   -0.018863683378782567,
+   0.902452388223103,
+   0.43031613460045404
+  ],
+  "offset_dist": 0.05067033561408084,
+  "tilt_deg": 46.0192828700469
+ },
+ {
+  "episode": 17,
+  "step": 85,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread006",
+  "offset_pos": [
+   0.015340256341614653,
+   -0.03561572024625281,
+   0.031023496106598714
+  ],
+  "offset_quat": [
+   0.03499320786965574,
+   0.07562437506434057,
+   0.863471259930276,
+   0.49746739850319927
+  ],
+  "offset_dist": 0.049661456925486354,
+  "tilt_deg": 51.810091065760595
+ },
+ {
+  "episode": 18,
+  "step": 127,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread007",
+  "offset_pos": [
+   -0.0012293532397234935,
+   -0.04078762700710081,
+   0.038495792791857664
+  ],
+  "offset_quat": [
+   0.007185049184870345,
+   -0.02435215909651934,
+   0.9300209088011789,
+   0.36662849944893566
+  ],
+  "offset_dist": 0.05609873339864314,
+  "tilt_deg": 35.36616487227739
+ },
+ {
+  "episode": 19,
+  "step": 54,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread005",
+  "offset_pos": [
+   -0.0222618390255791,
+   -0.017167593712974008,
+   0.03575327099240044
+  ],
+  "offset_quat": [
+   -0.02639203235618305,
+   -0.02804013885060203,
+   0.998629184573222,
+   -0.035453673434086876
+  ],
+  "offset_dist": 0.04548199794809551,
+  "tilt_deg": 5.066418908068585
+ },
+ {
+  "episode": 21,
+  "step": 84,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread004",
+  "offset_pos": [
+   4.8572968340737654e-05,
+   -0.03585859542379488,
+   0.03888548110466483
+  ],
+  "offset_quat": [
+   0.08312898109068875,
+   -0.03681522474607804,
+   0.9094921998807857,
+   0.4056576759852186
+  ],
+  "offset_dist": 0.052895386054380045,
+  "tilt_deg": 41.34007716966817
+ },
+ {
+  "episode": 22,
+  "step": 91,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread006",
+  "offset_pos": [
+   0.002633419666231096,
+   -0.04270806230427544,
+   0.03145128449089807
+  ],
+  "offset_quat": [
+   0.015246719342476527,
+   -0.043292969520229076,
+   0.8969504001545544,
+   0.43974223813729457
+  ],
+  "offset_dist": 0.053104583427909226,
+  "tilt_deg": 48.075780280493895
+ },
+ {
+  "episode": 23,
+  "step": 61,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread007",
+  "offset_pos": [
+   0.010993819900114832,
+   -0.028501950900212042,
+   0.046237454057807215
+  ],
+  "offset_quat": [
+   0.02925684978726402,
+   -0.06651727355488078,
+   0.9105706901183844,
+   0.40691584800383446
+  ],
+  "offset_dist": 0.05541775382368083,
+  "tilt_deg": 42.133326449720904
+ },
+ {
+  "episode": 24,
+  "step": 104,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread004",
+  "offset_pos": [
+   0.01698009198826078,
+   -0.026160827877850176,
+   0.038732049847863825
+  ],
+  "offset_quat": [
+   -0.010746623969150106,
+   -0.04399608611081775,
+   0.8763854340613236,
+   0.4794761990394733
+  ],
+  "offset_dist": 0.049728101960578676,
+  "tilt_deg": 52.728855507001285
+ },
+ {
+  "episode": 25,
+  "step": 86,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread007",
+  "offset_pos": [
+   -0.0018687699078453804,
+   -0.05391651928811925,
+   0.0372420685557322
+  ],
+  "offset_quat": [
+   -0.022344830589273574,
+   0.004188794992976387,
+   0.9176123108407906,
+   0.3968259184275489
+  ],
+  "offset_dist": 0.06555497710642923,
+  "tilt_deg": 46.83828961936514
+ },
+ {
+  "episode": 26,
+  "step": 90,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread006",
+  "offset_pos": [
+   -0.0014326936027218018,
+   -0.0292379084698714,
+   0.0239457692855507
+  ],
+  "offset_quat": [
+   0.05614348778811912,
+   -0.03849515265982412,
+   0.8928490673582741,
+   0.44518150783488547
+  ],
+  "offset_dist": 0.037819409954792806,
+  "tilt_deg": 45.321850791649254
+ },
+ {
+  "episode": 27,
+  "step": 84,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread005",
+  "offset_pos": [
+   0.0142830457409866,
+   -0.036693196547686636,
+   0.040747116152082485
+  ],
+  "offset_quat": [
+   -0.0027021449360870296,
+   -0.07913377501266702,
+   0.9484877272964671,
+   0.3067598005491782
+  ],
+  "offset_dist": 0.05666324684694286,
+  "tilt_deg": 35.729591631368635
+ },
+ {
+  "episode": 28,
+  "step": 64,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread003",
+  "offset_pos": [
+   -0.00013275055692223842,
+   -0.035227134673903926,
+   0.026197017334570027
+  ],
+  "offset_quat": [
+   0.016331251344707837,
+   -0.030772728369602376,
+   0.9063650190266459,
+   0.4210567440417439
+  ],
+  "offset_dist": 0.04390048242640951,
+  "tilt_deg": 35.14704208982123
+ },
+ {
+  "episode": 29,
+  "step": 142,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread007",
+  "offset_pos": [
+   0.020755893500915407,
+   -0.045724550485538806,
+   0.02007468391063072
+  ],
+  "offset_quat": [
+   0.019441351488512074,
+   0.03530578295240233,
+   0.8824935042563748,
+   0.4685944413751852
+  ],
+  "offset_dist": 0.054078966024117596,
+  "tilt_deg": 47.8546639883216
+ },
+ {
+  "episode": 30,
+  "step": 133,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread006",
+  "offset_pos": [
+   -0.0018469807604519772,
+   -0.04016760108641684,
+   0.03522294547805771
+  ],
+  "offset_quat": [
+   0.0025848139654757437,
+   -0.02339598247345257,
+   0.8992494169752617,
+   0.4368025100780875
+  ],
+  "offset_dist": 0.05345562087486424,
+  "tilt_deg": 44.46079424260714
+ },
+ {
+  "episode": 31,
+  "step": 82,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread007",
+  "offset_pos": [
+   0.013778525647865969,
+   -0.029373784203111625,
+   0.021823861864609606
+  ],
+  "offset_quat": [
+   0.008678632589989304,
+   -0.038620218826295495,
+   0.8387607348633892,
+   0.5430594715918362
+  ],
+  "offset_dist": 0.03910176356797008,
+  "tilt_deg": 54.71755532748711
+ },
+ {
+  "episode": 32,
+  "step": 93,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread005",
+  "offset_pos": [
+   -0.017790084557424007,
+   -0.03737213124068184,
+   0.03939043106705098
+  ],
+  "offset_quat": [
+   -0.11322217482838408,
+   -0.1478346375265311,
+   0.9034801134290269,
+   0.38606909189004346
+  ],
+  "offset_dist": 0.05713816029309256,
+  "tilt_deg": 38.91483634357598
+ },
+ {
+  "episode": 33,
+  "step": 74,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread002",
+  "offset_pos": [
+   0.006605517142301398,
+   -0.030054486884521003,
+   0.03243203955064078
+  ],
+  "offset_quat": [
+   0.026922798751188668,
+   -0.002633368080084893,
+   0.913767350626709,
+   0.40533622735773683
+  ],
+  "offset_dist": 0.044707295020202355,
+  "tilt_deg": 29.271101855808528
+ },
+ {
+  "episode": 34,
+  "step": 104,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread004",
+  "offset_pos": [
+   0.007115617212714365,
+   -0.0317106126911732,
+   0.041988953091827375
+  ],
+  "offset_quat": [
+   0.03126028798351188,
+   -0.0743607581454711,
+   0.9120220446249999,
+   0.4021306530982854
+  ],
+  "offset_dist": 0.053096771533824465,
+  "tilt_deg": 39.078764144447184
+ },
+ {
+  "episode": 35,
+  "step": 65,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread003",
+  "offset_pos": [
+   -6.661794656526859e-05,
+   -0.03986177359817322,
+   0.03748811326636292
+  ],
+  "offset_quat": [
+   -0.015062567802841756,
+   -0.042324740694432844,
+   0.9595236511596241,
+   0.27802175857590333
+  ],
+  "offset_dist": 0.05472041729203534,
+  "tilt_deg": 28.532067399963783
+ },
+ {
+  "episode": 36,
+  "step": 57,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread003",
+  "offset_pos": [
+   -0.008134308439393056,
+   -0.05793061421140511,
+   0.025279225403892935
+  ],
+  "offset_quat": [
+   0.06714227941334498,
+   -0.04040866466715618,
+   0.9653674189200948,
+   0.2488469421603407
+  ],
+  "offset_dist": 0.06372724906755868,
+  "tilt_deg": 28.875817785737876
+ },
+ {
+  "episode": 37,
+  "step": 96,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread005",
+  "offset_pos": [
+   -0.010513728566922786,
+   -0.030919253595749152,
+   0.02690386039318904
+  ],
+  "offset_quat": [
+   0.04276622236688895,
+   -0.04015263597090306,
+   0.8582047422946353,
+   0.5099445424279514
+  ],
+  "offset_dist": 0.042312603741124,
+  "tilt_deg": 56.28359423600619
+ },
+ {
+  "episode": 38,
+  "step": 89,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread002",
+  "offset_pos": [
+   0.01738440167857018,
+   -0.039119268549819175,
+   0.03946909065854731
+  ],
+  "offset_quat": [
+   -0.014696519636084227,
+   -0.006748343579157537,
+   0.9373139531477058,
+   0.3481106510926436
+  ],
+  "offset_dist": 0.05822665807864446,
+  "tilt_deg": 40.78150585326422
+ },
+ {
+  "episode": 39,
+  "step": 110,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread006",
+  "offset_pos": [
+   -0.004632158435105005,
+   -0.029088885400740713,
+   0.04247549473507006
+  ],
+  "offset_quat": [
+   0.0012484114790034168,
+   -0.011236293806121879,
+   0.9783314909527878,
+   0.20673577576311522
+  ],
+  "offset_dist": 0.05168933931299863,
+  "tilt_deg": 23.87484121339417
+ },
+ {
+  "episode": 40,
+  "step": 57,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread007",
+  "offset_pos": [
+   0.018825175523225476,
+   0.007248314604733519,
+   0.050484713169666406
+  ],
+  "offset_quat": [
+   -0.03786893943914778,
+   -0.0010075309910945465,
+   0.9885490374455227,
+   0.14606754900588545
+  ],
+  "offset_dist": 0.05436572046715586,
+  "tilt_deg": 17.35777941303354
+ },
+ {
+  "episode": 42,
+  "step": 141,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread004",
+  "offset_pos": [
+   -0.0053977122399313515,
+   -0.04924516512021691,
+   0.04486095942690871
+  ],
+  "offset_quat": [
+   0.0016968009331047545,
+   -0.06153949966424168,
+   0.9138719737251125,
+   0.4013078948730455
+  ],
+  "offset_dist": 0.06683357887952195,
+  "tilt_deg": 47.32038024834915
+ },
+ {
+  "episode": 43,
+  "step": 142,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread002",
+  "offset_pos": [
+   0.0019235850469952343,
+   -0.03392912925739466,
+   0.04238247431806119
+  ],
+  "offset_quat": [
+   0.03363692776229806,
+   -0.0074146011843761895,
+   0.9104782509944239,
+   0.4121200495561039
+  ],
+  "offset_dist": 0.054324581184939984,
+  "tilt_deg": 39.29214906400707
+ },
+ {
+  "episode": 44,
+  "step": 104,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread005",
+  "offset_pos": [
+   -0.0008172067281746089,
+   -0.060804833490043286,
+   0.041747664347361324
+  ],
+  "offset_quat": [
+   -0.021049876920846186,
+   -0.036626379542496444,
+   0.8885307079467452,
+   0.4568682436314459
+  ],
+  "offset_dist": 0.07376152846198625,
+  "tilt_deg": 54.432861031871916
+ },
+ {
+  "episode": 45,
+  "step": 85,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread004",
+  "offset_pos": [
+   0.005382981801348219,
+   -0.03419147235040884,
+   0.022265806361231544
+  ],
+  "offset_quat": [
+   0.008248596418920026,
+   -0.03262879639285057,
+   0.8638060788985426,
+   0.5026990952458504
+  ],
+  "offset_dist": 0.04115579433662139,
+  "tilt_deg": 52.303640615741166
+ },
+ {
+  "episode": 46,
+  "step": 116,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread005",
+  "offset_pos": [
+   0.0021652994897962685,
+   -0.02270095773807837,
+   0.04515782016615466
+  ],
+  "offset_quat": [
+   0.0030960566416605123,
+   -0.10505991491185475,
+   0.8996698859616814,
+   0.423729778285266
+  ],
+  "offset_dist": 0.05058903760959776,
+  "tilt_deg": 45.20607365808735
+ },
+ {
+  "episode": 47,
+  "step": 86,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread007",
+  "offset_pos": [
+   0.02569235655369706,
+   -0.03974728115609902,
+   0.036764935683841315
+  ],
+  "offset_quat": [
+   0.00837905214433921,
+   -0.04133951631727021,
+   0.8676327820660014,
+   0.4954131521873711
+  ],
+  "offset_dist": 0.05992999282847673,
+  "tilt_deg": 56.02229607286278
+ },
+ {
+  "episode": 48,
+  "step": 142,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread005",
+  "offset_pos": [
+   -0.006272689679415189,
+   -0.027881555342897046,
+   0.023088053448063084
+  ],
+  "offset_quat": [
+   -0.025175283209352986,
+   -0.010962640516532174,
+   0.9301013500589014,
+   0.3662751755809331
+  ],
+  "offset_dist": 0.03673943353093363,
+  "tilt_deg": 42.179865827154785
+ },
+ {
+  "episode": 49,
+  "step": 91,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread006",
+  "offset_pos": [
+   -0.0063674105039265745,
+   -0.05041813436279963,
+   0.020075140133704483
+  ],
+  "offset_quat": [
+   -0.009873810415524351,
+   -0.01808249759392881,
+   0.9105511596635593,
+   0.4128826913107299
+  ],
+  "offset_dist": 0.05464012665192773,
+  "tilt_deg": 48.786948262474574
+ },
+ {
+  "episode": 50,
+  "step": 103,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread005",
+  "offset_pos": [
+   0.005116709048633035,
+   -0.030937955414872764,
+   0.03866436674364526
+  ],
+  "offset_quat": [
+   -0.011477728125378367,
+   -0.035375308081026936,
+   0.9003089912408174,
+   0.43365950886172694
+  ],
+  "offset_dist": 0.04978223631405202,
+  "tilt_deg": 51.41937439571322
+ },
+ {
+  "episode": 51,
+  "step": 105,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread005",
+  "offset_pos": [
+   -0.001839658557812207,
+   -0.00933369955255281,
+   0.045243471685786574
+  ],
+  "offset_quat": [
+   0.019667455685411096,
+   0.0791747970800647,
+   0.8047011751293834,
+   0.5880480944953247
+  ],
+  "offset_dist": 0.04623282406612458,
+  "tilt_deg": 62.0624800714481
+ },
+ {
+  "episode": 52,
+  "step": 141,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread004",
+  "offset_pos": [
+   0.003990463942046496,
+   -0.015257579713411698,
+   0.0336473385879823
+  ],
+  "offset_quat": [
+   -0.014764463808701268,
+   -0.05532295784480707,
+   0.9912276177833916,
+   0.11911838937462886
+  ],
+  "offset_dist": 0.0371599372340456,
+  "tilt_deg": 13.789034242749626
+ },
+ {
+  "episode": 53,
+  "step": 110,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread006",
+  "offset_pos": [
+   0.001279189374969828,
+   -0.03591644429000285,
+   0.053099596944012006
+  ],
+  "offset_quat": [
+   0.029560373131465267,
+   0.13126575423041434,
+   0.9500020973207651,
+   0.2817649750994548
+  ],
+  "offset_dist": 0.06411859708002385,
+  "tilt_deg": 32.91586980818392
+ },
+ {
+  "episode": 54,
+  "step": 99,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread005",
+  "offset_pos": [
+   0.012323414143543857,
+   -0.05740184854462749,
+   0.02154211449346155
+  ],
+  "offset_quat": [
+   -0.027273623520121255,
+   -0.011724453537532957,
+   0.8545856620122804,
+   0.5184612164206319
+  ],
+  "offset_dist": 0.06253720052371273,
+  "tilt_deg": 62.55426637101728
+ },
+ {
+  "episode": 55,
+  "step": 81,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread006",
+  "offset_pos": [
+   -0.00397476970466859,
+   -0.0673659454374933,
+   0.043510590661617776
+  ],
+  "offset_quat": [
+   0.027942779195800255,
+   -0.0749494481360249,
+   0.9227076860834671,
+   0.3771104710259499
+  ],
+  "offset_dist": 0.08029409006032347,
+  "tilt_deg": 44.43756529917643
+ },
+ {
+  "episode": 56,
+  "step": 99,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread004",
+  "offset_pos": [
+   0.018087708764326808,
+   -0.0657882876869893,
+   0.027004057686075056
+  ],
+  "offset_quat": [
+   0.037022279197396084,
+   -0.013539295764225,
+   0.9313381132660482,
+   0.3620156862503013
+  ],
+  "offset_dist": 0.07337903744695785,
+  "tilt_deg": 42.680281872115096
+ },
+ {
+  "episode": 57,
+  "step": 64,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread005",
+  "offset_pos": [
+   0.010510105278545309,
+   -0.03375105949086965,
+   0.04094915265584942
+  ],
+  "offset_quat": [
+   0.00915483023867315,
+   -0.07021198519786948,
+   0.9161357743255032,
+   0.3945652154193095
+  ],
+  "offset_dist": 0.05409648263015247,
+  "tilt_deg": 46.490949697737854
+ },
+ {
+  "episode": 58,
+  "step": 65,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread007",
+  "offset_pos": [
+   0.0076153859510599275,
+   -0.04545642229178814,
+   0.03690939365531687
+  ],
+  "offset_quat": [
+   0.061235271236395994,
+   -0.025023976020191272,
+   0.9285220690190451,
+   0.3653365701997783
+  ],
+  "offset_dist": 0.05904730113016275,
+  "tilt_deg": 42.02863549164881
+ },
+ {
+  "episode": 59,
+  "step": 53,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread005",
+  "offset_pos": [
+   -0.0009202499050994775,
+   -0.030663188667125363,
+   0.03969374919775581
+  ],
+  "offset_quat": [
+   -0.017238555693221604,
+   -0.03994585887178109,
+   0.9423387295332181,
+   0.33182055297755136
+  ],
+  "offset_dist": 0.05016644022150566,
+  "tilt_deg": 38.81298787071481
+ },
+ {
+  "episode": 60,
+  "step": 77,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread006",
+  "offset_pos": [
+   0.0001866887694155217,
+   -0.0396723620798349,
+   0.03620127210287194
+  ],
+  "offset_quat": [
+   0.00737651173393068,
+   -0.029636234093580054,
+   0.9111277762539315,
+   0.41099082233300005
+  ],
+  "offset_dist": 0.05370719940153575,
+  "tilt_deg": 45.6102938993505
+ },
+ {
+  "episode": 61,
+  "step": 111,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread006",
+  "offset_pos": [
+   -0.001779486914121206,
+   -0.03855812185421903,
+   0.02336759810884015
+  ],
+  "offset_quat": [
+   -0.00846306823997112,
+   0.004699308617208416,
+   0.9087416228679852,
+   0.4172468763714673
+  ],
+  "offset_dist": 0.0451213915563184,
+  "tilt_deg": 43.33226292883303
+ },
+ {
+  "episode": 62,
+  "step": 102,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread007",
+  "offset_pos": [
+   -0.0005440484378916258,
+   -0.04094907455998531,
+   0.03752764783205298
+  ],
+  "offset_quat": [
+   -0.00279545485853645,
+   -0.005849629152688997,
+   0.8918635363258669,
+   0.45225811197061905
+  ],
+  "offset_dist": 0.05554680051837909,
+  "tilt_deg": 45.422902200354
+ },
+ {
+  "episode": 63,
+  "step": 135,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread006",
+  "offset_pos": [
+   0.00911144290868078,
+   -0.04320392405850934,
+   0.025725616109332217
+  ],
+  "offset_quat": [
+   -0.007398911950349291,
+   -0.032010759277144654,
+   0.8942352456683941,
+   0.4463898439669507
+  ],
+  "offset_dist": 0.051101905738791434,
+  "tilt_deg": 43.97461604774696
+ },
+ {
+  "episode": 64,
+  "step": 73,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread002",
+  "offset_pos": [
+   0.010845077827878654,
+   -0.04435926267292878,
+   0.021045256352708153
+  ],
+  "offset_quat": [
+   0.01522779950683241,
+   0.028507460145315862,
+   0.9298435908090403,
+   0.3665328572851185
+  ],
+  "offset_dist": 0.05028183283184733,
+  "tilt_deg": 37.17806482725837
+ },
+ {
+  "episode": 65,
+  "step": 84,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread002",
+  "offset_pos": [
+   0.004683516976387678,
+   -0.03163162733890523,
+   0.04215594367514419
+  ],
+  "offset_quat": [
+   0.024532895129642445,
+   -0.00034070691075017284,
+   0.9299862285637271,
+   0.3667746387867816
+  ],
+  "offset_dist": 0.052911423780856795,
+  "tilt_deg": 36.91919147772787
+ },
+ {
+  "episode": 66,
+  "step": 108,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread003",
+  "offset_pos": [
+   0.009580818452830606,
+   -0.02589663395185904,
+   0.02658369919376269
+  ],
+  "offset_quat": [
+   0.018197694301092485,
+   -0.04074663331709675,
+   0.8461169058693927,
+   0.5311259148238309
+  ],
+  "offset_dist": 0.038329111587501435,
+  "tilt_deg": 51.39230387942844
+ },
+ {
+  "episode": 67,
+  "step": 82,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread006",
+  "offset_pos": [
+   -0.0022330016855818258,
+   -0.0228359617947394,
+   0.04141888250152359
+  ],
+  "offset_quat": [
+   0.011388767765237688,
+   -0.01620490722169214,
+   0.8496394537047781,
+   0.5269919313034803
+  ],
+  "offset_dist": 0.04734967027650379,
+  "tilt_deg": 47.914800245760716
+ },
+ {
+  "episode": 68,
+  "step": 58,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread004",
+  "offset_pos": [
+   0.0017544837554002157,
+   -0.029113758357666074,
+   0.04485682893936738
+  ],
+  "offset_quat": [
+   0.021915820369091583,
+   -0.08056831872006946,
+   0.989934453978475,
+   0.1142725674101609
+  ],
+  "offset_dist": 0.05350536647339406,
+  "tilt_deg": 13.363598324531063
+ },
+ {
+  "episode": 69,
+  "step": 127,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread002",
+  "offset_pos": [
+   -0.0021913069351738416,
+   -0.04756290653899198,
+   0.024735729963147435
+  ],
+  "offset_quat": [
+   0.019689527335777075,
+   -0.07023124346534956,
+   0.918746808926839,
+   0.3880517955651731
+  ],
+  "offset_dist": 0.05365527226033595,
+  "tilt_deg": 44.20035322961215
+ },
+ {
+  "episode": 70,
+  "step": 66,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread005",
+  "offset_pos": [
+   0.0014283352167783203,
+   -0.034209517819932866,
+   0.031569954364833785
+  ],
+  "offset_quat": [
+   0.021417718491620864,
+   -0.08247266203450182,
+   0.9386533225552978,
+   0.3341698391648426
+  ],
+  "offset_dist": 0.04657245183111451,
+  "tilt_deg": 36.6437482056012
+ },
+ {
+  "episode": 71,
+  "step": 56,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread006",
+  "offset_pos": [
+   -0.001211190944702345,
+   -0.022743309075083595,
+   0.0507596680301885
+  ],
+  "offset_quat": [
+   -0.03180137107031675,
+   -0.00028556780605369685,
+   0.8624099451626709,
+   0.5052105281301996
+  ],
+  "offset_dist": 0.055635141679735566,
+  "tilt_deg": 52.37920216674885
+ },
+ {
+  "episode": 72,
+  "step": 54,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread006",
+  "offset_pos": [
+   0.005082436506963939,
+   -0.03964121438748771,
+   0.029430715645398342
+  ],
+  "offset_quat": [
+   -0.021564068123185693,
+   -0.021369905015562986,
+   0.9206907861121139,
+   0.38911026007272353
+  ],
+  "offset_dist": 0.04963289294774562,
+  "tilt_deg": 43.06163188543452
+ },
+ {
+  "episode": 73,
+  "step": 75,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread002",
+  "offset_pos": [
+   -0.008924466276023058,
+   -0.027505927046375556,
+   0.044631125882810485
+  ],
+  "offset_quat": [
+   0.036207309918710386,
+   0.009548919046696715,
+   0.9492421298501582,
+   0.31230950637312554
+  ],
+  "offset_dist": 0.05318044300830601,
+  "tilt_deg": 25.615187134115935
+ },
+ {
+  "episode": 74,
+  "step": 49,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread002",
+  "offset_pos": [
+   -0.02036457261060116,
+   -0.04110036086746183,
+   0.038669704969294116
+  ],
+  "offset_quat": [
+   0.06227636897460883,
+   -0.06709566617624113,
+   0.9848006796003108,
+   0.1476057143421992
+  ],
+  "offset_dist": 0.05999417941317545,
+  "tilt_deg": 18.437648481156955
+ },
+ {
+  "episode": 75,
+  "step": 68,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread006",
+  "offset_pos": [
+   -0.0013554771110316083,
+   -0.038306779127941226,
+   0.02144172491727181
+  ],
+  "offset_quat": [
+   0.010613511912266914,
+   -0.030795821315894874,
+   0.8749376240026311,
+   0.48313882565883526
+  ],
+  "offset_dist": 0.043920316628906025,
+  "tilt_deg": 51.51335217175133
+ },
+ {
+  "episode": 76,
+  "step": 50,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread007",
+  "offset_pos": [
+   0.0062742112021927365,
+   -0.04107655484607628,
+   0.041140384887354164
+  ],
+  "offset_quat": [
+   0.054974462380815305,
+   0.0011464936588003688,
+   0.9285277278992394,
+   0.3671685615088888
+  ],
+  "offset_dist": 0.058473757814185956,
+  "tilt_deg": 40.97708367341498
+ },
+ {
+  "episode": 77,
+  "step": 128,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread007",
+  "offset_pos": [
+   0.001663349542317949,
+   -0.036750856863239534,
+   0.03746153772970806
+  ],
+  "offset_quat": [
+   0.03990836777439604,
+   -0.06937337801585242,
+   0.8663833680690828,
+   0.4929244527689059
+  ],
+  "offset_dist": 0.052504847594832524,
+  "tilt_deg": 50.55005299866142
+ },
+ {
+  "episode": 78,
+  "step": 81,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread007",
+  "offset_pos": [
+   -0.016655006122009847,
+   -0.06813143490839213,
+   0.020252450389219412
+  ],
+  "offset_quat": [
+   -0.03695152613847284,
+   -0.009413729762811409,
+   0.9269591783859179,
+   0.3732193028423028
+  ],
+  "offset_dist": 0.0730030369119563,
+  "tilt_deg": 44.05408058993564
+ },
+ {
+  "episode": 79,
+  "step": 41,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread004",
+  "offset_pos": [
+   -0.006833792528109339,
+   -0.033403787768273456,
+   0.06327060147941976
+  ],
+  "offset_quat": [
+   0.021055529942879063,
+   -0.04172151024665696,
+   0.9785423986997842,
+   0.20067574389655418
+  ],
+  "offset_dist": 0.07187268444376245,
+  "tilt_deg": 23.28182058857082
+ },
+ {
+  "episode": 80,
+  "step": 71,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread004",
+  "offset_pos": [
+   -0.004235892614049774,
+   -0.048976147140574605,
+   0.010036404948130961
+  ],
+  "offset_quat": [
+   0.018988774566712583,
+   0.0011246764188737888,
+   0.9336597899892516,
+   0.3576556417849916
+  ],
+  "offset_dist": 0.05017305252080885,
+  "tilt_deg": 40.301162281686906
+ },
+ {
+  "episode": 82,
+  "step": 102,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread002",
+  "offset_pos": [
+   0.014703983967105483,
+   -0.02790127888415153,
+   0.03714680535010484
+  ],
+  "offset_quat": [
+   -0.013474241564853636,
+   -0.05449416836720713,
+   0.8224242574765508,
+   0.5660981992043098
+  ],
+  "offset_dist": 0.04872959732641624,
+  "tilt_deg": 58.778052490489074
+ },
+ {
+  "episode": 83,
+  "step": 67,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread007",
+  "offset_pos": [
+   -0.0006731083685469486,
+   -0.03429967654212298,
+   0.016331624049069737
+  ],
+  "offset_quat": [
+   -0.016773472015157716,
+   0.01374888924675923,
+   0.8905211932701402,
+   0.454424496498332
+  ],
+  "offset_dist": 0.037995300102120814,
+  "tilt_deg": 44.947554863478295
+ },
+ {
+  "episode": 85,
+  "step": 66,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread005",
+  "offset_pos": [
+   0.01266824890247209,
+   -0.028358766467527358,
+   0.03830959481704954
+  ],
+  "offset_quat": [
+   0.0388420864212169,
+   -0.0545372379949677,
+   0.917580304860657,
+   0.39187161944462223
+  ],
+  "offset_dist": 0.04931864982804424,
+  "tilt_deg": 40.11562311179926
+ },
+ {
+  "episode": 86,
+  "step": 106,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread006",
+  "offset_pos": [
+   -0.0034874484750167245,
+   -0.03606373065707125,
+   0.04055711341175705
+  ],
+  "offset_quat": [
+   0.05220068406233899,
+   -0.07493534170880457,
+   0.9146373384347422,
+   0.3938252433344257
+  ],
+  "offset_dist": 0.0543841375224964,
+  "tilt_deg": 44.10977549637862
+ },
+ {
+  "episode": 87,
+  "step": 106,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread007",
+  "offset_pos": [
+   0.004227753404939083,
+   -0.049600388252554674,
+   0.02590456219845083
+  ],
+  "offset_quat": [
+   0.07599015168858132,
+   -0.010055178055055911,
+   0.8983404161383751,
+   0.43256084771157755
+  ],
+  "offset_dist": 0.05611700951004557,
+  "tilt_deg": 52.103771364808935
+ },
+ {
+  "episode": 88,
+  "step": 81,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread002",
+  "offset_pos": [
+   0.006644568559618206,
+   -0.035115608917756114,
+   0.03961408727182536
+  ],
+  "offset_quat": [
+   0.007517085489843449,
+   -0.024399349824856472,
+   0.8893475613968148,
+   0.4565184335724039
+  ],
+  "offset_dist": 0.05335290237079943,
+  "tilt_deg": 44.26374116835511
+ },
+ {
+  "episode": 89,
+  "step": 67,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread005",
+  "offset_pos": [
+   0.0021686855804636807,
+   -0.0365064885758834,
+   0.02985529807388576
+  ],
+  "offset_quat": [
+   -0.002798737313771152,
+   -0.03408583810773838,
+   0.9370688577460293,
+   0.34746550699672846
+  ],
+  "offset_dist": 0.047209805426082656,
+  "tilt_deg": 27.186163439759707
+ },
+ {
+  "episode": 90,
+  "step": 69,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread007",
+  "offset_pos": [
+   -0.004198718231841481,
+   -0.043526136791892905,
+   0.02272393763810787
+  ],
+  "offset_quat": [
+   -0.020829205527431383,
+   -0.046355398281542566,
+   0.8779395957838346,
+   0.4760665787494147
+  ],
+  "offset_dist": 0.04928012947017882,
+  "tilt_deg": 49.12000535623497
+ },
+ {
+  "episode": 91,
+  "step": 82,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread005",
+  "offset_pos": [
+   -0.01690408606028143,
+   0.0018526963866447588,
+   0.04387367625424976
+  ],
+  "offset_quat": [
+   0.03836099051401526,
+   -0.02904326782951494,
+   0.916301056537368,
+   0.3975893569866652
+  ],
+  "offset_dist": 0.04705401234217128,
+  "tilt_deg": 46.95759412926651
+ },
+ {
+  "episode": 93,
+  "step": 138,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread004",
+  "offset_pos": [
+   0.016236752366946185,
+   -0.0035363370752135026,
+   0.041916211179829466
+  ],
+  "offset_quat": [
+   0.0005013954744326376,
+   -0.040291482158292015,
+   0.9558415150408016,
+   0.29110709917927347
+  ],
+  "offset_dist": 0.045089983000741116,
+  "tilt_deg": 33.849379083760915
+ },
+ {
+  "episode": 94,
+  "step": 74,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread007",
+  "offset_pos": [
+   0.006663013202884427,
+   -0.047770861646633134,
+   0.03155894240286017
+  ],
+  "offset_quat": [
+   -0.009976454895862208,
+   0.027415606248604295,
+   0.9167250444632441,
+   0.39845206453925586
+  ],
+  "offset_dist": 0.05764041822359222,
+  "tilt_deg": 41.51245106598122
+ },
+ {
+  "episode": 95,
+  "step": 97,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread007",
+  "offset_pos": [
+   0.014193139632820095,
+   -0.03201543266971557,
+   0.04792800956844068
+  ],
+  "offset_quat": [
+   0.021801497658146016,
+   -0.02971624097219127,
+   0.8402140797760382,
+   0.5410008686392747
+  ],
+  "offset_dist": 0.0593593062868693,
+  "tilt_deg": 57.9833284472345
+ },
+ {
+  "episode": 96,
+  "step": 82,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread004",
+  "offset_pos": [
+   0.005624508436821607,
+   -0.032563342252391186,
+   0.037991151258582656
+  ],
+  "offset_quat": [
+   0.011406674866586712,
+   -0.041699578025108555,
+   0.8774773140540896,
+   0.477665778846922
+  ],
+  "offset_dist": 0.05035209953670997,
+  "tilt_deg": 48.026912989930494
+ },
+ {
+  "episode": 97,
+  "step": 75,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread006",
+  "offset_pos": [
+   0.011626252982291752,
+   -0.040237088173383624,
+   0.049236530362424924
+  ],
+  "offset_quat": [
+   0.02769442625687018,
+   -0.04763907236113235,
+   0.9406768641978728,
+   0.3347993051093903
+  ],
+  "offset_dist": 0.0646407684453928,
+  "tilt_deg": 39.25975517441494
+ },
+ {
+  "episode": 99,
+  "step": 62,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread007",
+  "offset_pos": [
+   0.0022828714571870583,
+   -0.03952412224485258,
+   0.030932584660643414
+  ],
+  "offset_quat": [
+   0.035187779527332694,
+   -0.020365589872151563,
+   0.8832437414754117,
+   0.4671483234108961
+  ],
+  "offset_dist": 0.05024134288714785,
+  "tilt_deg": 52.0047615051884
+ },
+ {
+  "episode": 100,
+  "step": 67,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread006",
+  "offset_pos": [
+   0.007686104696384977,
+   -0.02159169106508957,
+   0.03172072544544524
+  ],
+  "offset_quat": [
+   0.03895636513684409,
+   -0.024155104426166342,
+   0.8437266938806333,
+   0.5348123021946504
+  ],
+  "offset_dist": 0.03913415070292669,
+  "tilt_deg": 49.50688241400542
+ },
+ {
+  "episode": 101,
+  "step": 80,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread002",
+  "offset_pos": [
+   0.003233921881985513,
+   -0.035661138492486144,
+   0.030517625165462636
+  ],
+  "offset_quat": [
+   0.0366685344232415,
+   -0.05235820405673713,
+   0.8744644882727889,
+   0.48085953853595764
+  ],
+  "offset_dist": 0.04704785324601687,
+  "tilt_deg": 46.72382526787926
+ },
+ {
+  "episode": 102,
+  "step": 78,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread005",
+  "offset_pos": [
+   -0.005588775676598878,
+   -0.036480047999446485,
+   0.028479956820583796
+  ],
+  "offset_quat": [
+   0.015757579017451628,
+   -0.026266065666785958,
+   0.9107910258701685,
+   0.4117298868096207
+  ],
+  "offset_dist": 0.04661690955123023,
+  "tilt_deg": 40.47192072938008
+ },
+ {
+  "episode": 103,
+  "step": 69,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread004",
+  "offset_pos": [
+   0.0017096202545840988,
+   -0.04168767980850452,
+   0.03345080613471896
+  ],
+  "offset_quat": [
+   -0.020653988484027826,
+   -0.01470274645691429,
+   0.9087779112802173,
+   0.4165092435654829
+  ],
+  "offset_dist": 0.05347655449160717,
+  "tilt_deg": 49.29330723027403
+ },
+ {
+  "episode": 104,
+  "step": 69,
+  "task": "PickPlaceToasterToCounter",
+  "object": "sandwich_bread",
+  "model": "SandwichBread004",
+  "offset_pos": [
+   -0.0061962252382452565,
+   -0.0277227358999311,
+   0.03866347617460497
+  ],
+  "offset_quat": [
+   0.0216016124500701,
+   -0.021504319427455464,
+   0.908783648862812,
+   0.4161528735274
+  ],
+  "offset_dist": 0.047977157928379234,
+  "tilt_deg": 45.50438345949843
+ }
+]

@@ -15,6 +15,26 @@ from typing import Any
 from .base_env import BaseManipulationEnv
 
 
+def _make_libero(**kw):
+    raise RuntimeError("unreachable: LIBERO is constructed inline below")
+
+
+# Backends this build can construct. A backend registers a callable taking the
+# same keyword arguments as make_env_from_scene_context; LIBERO stays inline
+# because it is the default path and predates the hook.
+_BACKENDS: dict[str, Any] = {"libero": _make_libero}
+
+
+def register_backend(name: str, factory) -> None:
+    """Register an additional System 1 backend (e.g. RoboCasa).
+
+    Deliberately a registry rather than an import: the RoboCasa backend needs
+    robosuite 1.5 while LIBERO pins 1.4, so the two cannot be imported into one
+    process. The caller that has the right environment registers its own.
+    """
+    _BACKENDS[str(name)] = factory
+
+
 def make_env_from_scene_context(
     scene_context: dict[str, Any],
     runtime: dict[str, Any],
@@ -26,11 +46,21 @@ def make_env_from_scene_context(
     """Build the LIBERO backend env for the platform declared in scene_context."""
     platform = scene_context.get("platform", {})
     backend = platform.get("backend", "libero")
-    if backend != "libero":
+    if backend not in _BACKENDS:
         raise ValueError(
-            f"Unsupported platform.backend {backend!r}: this build of STeP only "
-            "implements the LIBERO backend. (The 'sim'/'real'/'vlabench' backends "
-            "were removed in the System 1 cleanup -- see git history.)"
+            f"Unsupported platform.backend {backend!r}. Known backends: "
+            f"{sorted(_BACKENDS)}. (The 'sim'/'real'/'vlabench' backends were "
+            "removed in the System 1 cleanup -- see git history.)"
+        )
+    if backend != "libero":
+        # Non-LIBERO backends build their own env and then run the *same*
+        # System 1: the motion pipeline addresses MuJoCo through SceneQuery and
+        # robosuite's standard Panda names, so nothing below the scene-context
+        # layer is backend-specific. Keeping the construction behind this hook
+        # is what makes that claim checkable rather than assumed.
+        return _BACKENDS[backend](
+            scene_context=scene_context, runtime=runtime, render=render,
+            env_horizon=env_horizon, debug_dir=debug_dir,
         )
 
     perception_cfg = platform.get("perception", {}) or {}

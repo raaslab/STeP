@@ -33,12 +33,18 @@ Three complementary checks:
 from __future__ import annotations
 
 import math
+import os
 from enum import Enum
 
 import mujoco
 import numpy as np
 
 from .config import CollisionConfig
+
+# VLM-MPC-cost baseline: keep the zones visible to the motion layer but stop
+# them from being hard validity failures. Read once at import; the benchmark
+# driver sets it per process.
+_KEEPOUT_SOFT_ONLY = os.environ.get("STEP_KEEPOUT_SOFT_ONLY", "").strip() not in ("", "0")
 from .scene_query import SceneQuery, quat_to_rotmat_wxyz
 from .types import AttachedObjectState, CollisionResult, Contact
 
@@ -148,6 +154,13 @@ class CollisionChecker:
         # MuJoCo's own soft contact) have a little give; a rigid wrist/palm
         # assembly doesn't, so the palm never gets any tolerance.
         self.finger_geom_ids: set[int] = {g for g in self.gripper_geom_ids if "finger" in scene.geom_name(g)}
+        # The hand/palm shell: every gripper geom that is not part of a finger.
+        # Kept separate because contact here means something different -- a
+        # finger closing through an object is the grasp, a palm reaching it is
+        # the object being pressed into the hand.
+        self.palm_geom_ids: set[int] = {
+            g for g in self.gripper_geom_ids if g not in self.finger_geom_ids
+        }
         self.robot_geom_ids |= self.gripper_geom_ids
         self.robot_body_ids: set[int] = {scene.body_id(b) for b in set(robot_body_names) | set(gripper_body_names)}
         # Every other body with real geometry -- candidate obstacles for the
@@ -228,6 +241,33 @@ class CollisionChecker:
         if other not in target_object_geom_ids:
             return False
         return dist >= -self.config.finger_overlap_tolerance_m
+
+    def _palm_overlap_within_tolerance(
+        self,
+        g1: int,
+        g2: int,
+        phase: CollisionPhase,
+        target_object_geom_ids: set[int],
+        dist: float,
+    ) -> bool:
+        """The finger allowance above, for the palm, against the target only.
+
+        Off unless ``palm_overlap_tolerance_m`` is set, so nothing changes for a
+        caller that does not ask. Where it is set, it is bounded by what real
+        successful grasps do: RoboCasa's own demonstrations close on an eggplant
+        with the palm 1-7 mm inside it and lift it, so a pose reproducing that is
+        a grasp, not a fault. Still only ever the grasp target -- the palm meeting
+        the counter, a neighbouring object or the robot stays a hard collision.
+        """
+        if phase != CollisionPhase.TERMINAL_APPROACH or self.config.palm_overlap_tolerance_m <= 0.0:
+            return False
+        palm_touch = g1 in self.palm_geom_ids or g2 in self.palm_geom_ids
+        if not palm_touch:
+            return False
+        other = g2 if g1 in self.palm_geom_ids else g1
+        if other not in target_object_geom_ids:
+            return False
+        return dist >= -self.config.palm_overlap_tolerance_m
 
     def _attached_world_spheres(
         self, scratch: SceneQuery, attached: AttachedObjectState
@@ -392,6 +432,8 @@ class CollisionChecker:
                 continue
             if self._finger_overlap_within_tolerance(g1, g2, phase, target_object_geom_ids, dist):
                 continue
+            if self._palm_overlap_within_tolerance(g1, g2, phase, target_object_geom_ids, dist):
+                continue
             violations.append(Contact(g1_name, g2_name, dist))
 
         if check_margin:
@@ -405,6 +447,8 @@ class CollisionChecker:
                     d = mujoco.mj_geomDistance(scratch.model, scratch.data, g1, g2, margin, None)
                     min_clearance = min(min_clearance, d)
                     if d < margin and not self._finger_overlap_within_tolerance(
+                        g1, g2, phase, target_object_geom_ids, d
+                    ) and not self._palm_overlap_within_tolerance(
                         g1, g2, phase, target_object_geom_ids, d
                     ):
                         violations.append(Contact(scratch.geom_name(g1), scratch.geom_name(g2), d))
@@ -431,7 +475,12 @@ class CollisionChecker:
                     continue
                 d = zone.clearance(ee_xy)
                 min_clearance = min(min_clearance, d)
-                if d < 0.0:
+                if d < 0.0 and not _KEEPOUT_SOFT_ONLY:
+                    # Soft-only is the VLM-MPC-cost baseline: the zone still
+                    # reaches the motion layer (so the MPC's keep-out cost can
+                    # bend the trajectory) but is never a hard validity failure,
+                    # which is what separates "a cost the optimizer trades off"
+                    # from "a specification the planner must satisfy".
                     violations.append(Contact(self.ee_site, f"keepout:{zone.name}", d))
                 # The carried object is deliberately NOT checked. The benchmark
                 # scores the end effector against the zone, so enforcing the
@@ -539,6 +588,10 @@ class CollisionChecker:
             if self._permitted(g1, g2, CollisionPhase.TERMINAL_APPROACH, target_object_geom_ids):
                 continue
             if self._finger_overlap_within_tolerance(
+                g1, g2, CollisionPhase.TERMINAL_APPROACH, target_object_geom_ids, dist
+            ):
+                continue
+            if self._palm_overlap_within_tolerance(
                 g1, g2, CollisionPhase.TERMINAL_APPROACH, target_object_geom_ids, dist
             ):
                 continue

@@ -909,6 +909,15 @@ class SceneQuery:
         # sim.render()-derived frames).
         seg = np.asarray(seg)[::-1]
         depth_normalized = np.asarray(depth_normalized, dtype=np.float32)[::-1]
+        # robosuite 1.5 asserts the normalized buffer lies in [0, 1]; 1.4 did
+        # not. A wrist camera whose near plane is clipped by the object it is
+        # about to grasp returns values a hair outside that range, which aborts
+        # the whole grasp capture on an assertion rather than losing a few
+        # pixels. Clamping keeps the geometry identical everywhere the buffer
+        # was already valid and degrades gracefully where it was not -- the
+        # out-of-range pixels are discarded downstream by the depth_max_m mask
+        # anyway.
+        depth_normalized = np.clip(depth_normalized, 0.0, 1.0)
         depth = np.asarray(get_real_depth_map(sim, depth_normalized), dtype=np.float32)
 
         obj_type, geom_id = seg[:, :, 0], seg[:, :, 1]

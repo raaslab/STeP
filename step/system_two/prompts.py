@@ -374,3 +374,43 @@ def build_no_stl_developer_prompt(scene_context: dict[str, Any] | None = None) -
         "Plan the skills you would anyway; the requirement is not part of the "
         "output.\n"
     )
+
+
+def build_mpc_cost_developer_prompt(scene_context: dict[str, Any] | None = None) -> str:
+    """Developer prompt for the VLM-MPC-Cost baseline.
+
+    System 2 writes a direct MPC cost function over the predicate set instead of
+    compiling the task into STL. The controller then minimizes that weighted sum
+    rather than maximizing STL robustness, and the history log records costs
+    instead of robustness traces.
+
+    The point of the baseline is what a cost function cannot say. A weighted sum
+    of predicate terms expresses "be near this" and "stay off that", but it has
+    no interval, no ordering operator, and no notion of "after" -- so a timing or
+    sequencing requirement in the instruction has nowhere to go except into the
+    order the subtasks happen to be listed in, and into the weights.
+    """
+    base = build_developer_prompt(scene_context)
+    return (
+        base
+        + "\n\nVLM-MPC-COST BASELINE -- NO TEMPORAL LOGIC. This overrides every "
+        "instruction above about formulas, intervals, always/eventually/until, "
+        "and robustness:\n"
+        "C1. Do NOT emit a `formula` field. Emit `cost_terms` instead: a list of "
+        "{predicate, args, weight} objects that are SUMMED into the controller's "
+        "running cost for that subtask. The controller minimizes this sum.\n"
+        "C2. Use the same predicate names and argument shapes as before, but as "
+        "cost terms only. A larger weight means the controller cares more about "
+        "that term. Terms naming a region to stay out of (Safe) push the arm "
+        "away; terms naming a target (PreGrasp, Grasped, OverGoal, Placed) pull "
+        "it toward that target.\n"
+        "C3. There are NO intervals and NO temporal operators available. You "
+        "cannot express a deadline, a wait, a dwell, or an ordering constraint as "
+        "a cost term. Do not try to encode one by inventing a predicate. If the "
+        "instruction asks for timing or ordering, express what you can through "
+        "the subtask order and the weights, and accept that the rest is not "
+        "representable in this output format.\n"
+        "C4. Also emit `failure_threshold` per subtask: the cost value above "
+        "which System 1 should give up on that subtask and recall to you. Pick a "
+        "number on the same scale as the cost terms you wrote.\n"
+    )

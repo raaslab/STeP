@@ -1,63 +1,65 @@
 {
-  "note": "Reviewer verdicts that override the automatic scorer, recorded explicitly so a reported number is never quietly different from what the scorer computes. score.py applies these and reports how many rows were adjudicated. Each entry says who decided and why.",
-  "reviewer": "Anukriti Singh",
-  "date": "2026-09-15",
-  "verdicts": {
-    "libero_10/0/C-zone-order": {
-      "constraint_held": true,
-      "why": "Reviewed on video. The automatic scorer flags the keep-out as broken on 6 steps of 982 (13 mm past a 3 cm rim); judged a graze rather than an incursion."
-    },
-    "libero_10/1/C-zone-order": {
-      "constraint_held": true,
-      "why": "Reviewed on video. Scorer flags the keep-out (7 steps of 971) and the ordering; judged acceptable."
-    },
-    "libero_10/2/C-zone-wait": {
-      "constraint_held": true,
-      "why": "The robot held 56 steps (2.8 s) of the 4 s asked. The shortfall is the formula's absolute interval being eaten by turn_on overrunning its own bound, not the robot ignoring the wait; judged satisfied."
-    },
-    "libero_10/4/C-offset-dwell": {
-      "constraint_held": true,
-      "why": "The offset and dwell halves are not jointly measurable as defined -- placing the object 5 cm off-centre stops over_goal firing, so the dwell clock never starts. Judged satisfied rather than scored against a contradiction."
-    },
-    "libero_10/9/C-zone-wait": {
-      "constraint_held": false,
-      "why": "The task itself failed, and the robot never paused: 0 steps held against the 4 s asked."
-    },
-    "libero_goal/3/C-zone-wait": {
-      "constraint_held": true,
-      "why": "Reviewed on video; keep-out flagged on 5 steps of 1290 (11 mm). Judged a graze."
-    },
-    "libero_goal/8/C-offset-dwell": {
-      "constraint_held": true,
-      "why": "Same unmeasurable offset/dwell pairing as libero_10/4."
-    },
-    "libero_10/2/T-wait": {
-      "constraint_held": true,
-      "why": "Reviewed on video: the pause after turning on the stove is clearly there. The scorer counted 56 of the 80 steps asked, because turn_on overran its own F[0,150] bound to 174 steps and ate part of the gap the formula had left. The robot waited; the absolute interval lost the rest."
-    },
-    "libero_spatial/2/S-zone": {
-      "constraint_held": true,
-      "why": "Reviewed on video. The planned path routes around the zone; the gripper overshoots it for 5 steps of 527 (0.95% of the run), 13 mm past a 45 mm rim. Judged tracking overshoot, not an incursion."
-    },
-    "libero_10/7/S-zone": {
-      "constraint_held": true,
-      "why": "Reviewed on video. 1 step of 982, 1 mm past a 55 mm rim -- below the 5 mm graze tolerance the codebase already uses for contact noise."
-    },
-    "libero_10/0/S-zone": {
-      "constraint_held": true,
-      "why": "Reviewed on video. 6 steps of 982 (0.61%), 13 mm past a 30 mm rim. Judged tracking overshoot."
-    },
-    "libero_10/1/S-zone": {
-      "constraint_held": true,
-      "why": "Reviewed on video. 7 steps of 971 (0.72%), 33 mm past a 45 mm rim. Brief, and the planned route clears the zone."
-    },
-    "libero_spatial/0/S-offset": {
-      "constraint_held": true,
-      "why": "Reviewed on video. The bowl is placed off-centre on the plate as asked. The scorer measured +1.5 cm against a requested -5 cm; the sign convention of 'left' relative to the plate is not settled, so the automatic verdict is not trusted here."
-    },
-    "libero_goal/8/S-offset": {
-      "constraint_held": true,
-      "why": "Reviewed on video. Placed 4.8 cm off the plate's centre, the requested magnitude, but the scorer read the opposite sign. Same unsettled left/right convention as libero_spatial/0."
-    }
+ "note": "Reviewer verdicts that override the automatic scorer, recorded explicitly so a reported number is never quietly different from what the scorer computes. score.py applies these and reports how many rows were adjudicated. Each entry says who decided and why.",
+ "reviewer": "Anukriti Singh",
+ "date": "2026-09-15",
+ "manifest": "tasks.json",
+ "manifest_note": "Each verdict was watched against this manifest's own task parameters -- the 4 s wait, the 2 s dwell, that zone radius. A variant manifest re-issues a task with different numbers, so these verdicts do not transfer to it and score.py will not apply them there.",
+ "verdicts": {
+  "libero_10/0/C-zone-order": {
+   "constraint_held": true,
+   "why": "Reviewed on video. The automatic scorer flags the keep-out as broken on 6 steps of 982 (13 mm past a 3 cm rim); judged a graze rather than an incursion."
+  },
+  "libero_10/1/C-zone-order": {
+   "constraint_held": true,
+   "why": "Reviewed on video. Scorer flags the keep-out (7 steps of 971) and the ordering; judged acceptable."
+  },
+  "libero_10/2/C-zone-wait": {
+   "constraint_held": true,
+   "why": "The robot held 56 steps (2.8 s) of the 4 s asked. The shortfall is the formula's absolute interval being eaten by turn_on overrunning its own bound, not the robot ignoring the wait; judged satisfied."
+  },
+  "libero_10/4/C-offset-dwell": {
+   "constraint_held": true,
+   "why": "The offset and dwell halves are not jointly measurable as defined -- placing the object 5 cm off-centre stops over_goal firing, so the dwell clock never starts. Judged satisfied rather than scored against a contradiction."
+  },
+  "libero_10/9/C-zone-wait": {
+   "constraint_held": false,
+   "why": "The task itself failed, and the robot never paused: 0 steps held against the 4 s asked."
+  },
+  "libero_goal/3/C-zone-wait": {
+   "constraint_held": true,
+   "why": "Reviewed on video; keep-out flagged on 5 steps of 1290 (11 mm). Judged a graze."
+  },
+  "libero_goal/8/C-offset-dwell": {
+   "constraint_held": true,
+   "why": "Same unmeasurable offset/dwell pairing as libero_10/4."
+  },
+  "libero_10/2/T-wait": {
+   "constraint_held": true,
+   "why": "Reviewed on video: the pause after turning on the stove is clearly there. The scorer counted 56 of the 80 steps asked, because turn_on overran its own F[0,150] bound to 174 steps and ate part of the gap the formula had left. The robot waited; the absolute interval lost the rest."
+  },
+  "libero_spatial/2/S-zone": {
+   "constraint_held": true,
+   "why": "Reviewed on video. The planned path routes around the zone; the gripper overshoots it for 5 steps of 527 (0.95% of the run), 13 mm past a 45 mm rim. Judged tracking overshoot, not an incursion."
+  },
+  "libero_10/7/S-zone": {
+   "constraint_held": true,
+   "why": "Reviewed on video. 1 step of 982, 1 mm past a 55 mm rim -- below the 5 mm graze tolerance the codebase already uses for contact noise."
+  },
+  "libero_10/0/S-zone": {
+   "constraint_held": true,
+   "why": "Reviewed on video. 6 steps of 982 (0.61%), 13 mm past a 30 mm rim. Judged tracking overshoot."
+  },
+  "libero_10/1/S-zone": {
+   "constraint_held": true,
+   "why": "Reviewed on video. 7 steps of 971 (0.72%), 33 mm past a 45 mm rim. Brief, and the planned route clears the zone."
+  },
+  "libero_spatial/0/S-offset": {
+   "constraint_held": true,
+   "why": "Reviewed on video. The bowl is placed off-centre on the plate as asked. The scorer measured +1.5 cm against a requested -5 cm; the sign convention of 'left' relative to the plate is not settled, so the automatic verdict is not trusted here."
+  },
+  "libero_goal/8/S-offset": {
+   "constraint_held": true,
+   "why": "Reviewed on video. Placed 4.8 cm off the plate's centre, the requested magnitude, but the scorer read the opposite sign. Same unsettled left/right convention as libero_spatial/0."
   }
+ }
 }
