@@ -30,7 +30,6 @@ _DEFAULT_SCHEMA_FOR_MODE = {
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run minimal STeP on a LIBERO task.")
-    p.add_argument("--legacy-vlm-stl-root", default="../vlm-stl")
     p.add_argument("--base-scene-context", default="configs/libero_template.json")
     p.add_argument(
         "--schema",
@@ -152,36 +151,6 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     return p.parse_args()
-
-
-def _add_legacy_root(path: str | Path) -> Path:
-    root = Path(path).expanduser().resolve()
-    for candidate in (root / "LIBERO", root):
-        if candidate.exists() and str(candidate) not in sys.path:
-            sys.path.insert(0, str(candidate))
-    return root
-
-
-def _configure_libero_paths(legacy_root: Path, outdir: Path) -> None:
-    benchmark_root = legacy_root / "LIBERO" / "libero" / "libero"
-    if not benchmark_root.is_dir():
-        return
-
-    config_dir = outdir / "libero_config"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    (config_dir / "config.yaml").write_text(
-        "\n".join(
-            [
-                f"assets: {benchmark_root / 'assets'}",
-                f"bddl_files: {benchmark_root / 'bddl_files'}",
-                f"benchmark_root: {benchmark_root}",
-                f"datasets: {benchmark_root.parent / 'datasets'}",
-                f"init_states: {benchmark_root / 'init_files'}",
-                "",
-            ]
-        )
-    )
-    os.environ.setdefault("LIBERO_CONFIG_PATH", str(config_dir))
 
 
 def _resolve_prompt(args: argparse.Namespace, scene_context: dict[str, Any]) -> str:
@@ -619,9 +588,7 @@ def _load_or_create_plan(
 def main() -> int:
     args = parse_args()
     benchmark_task = _apply_benchmark_task(args)
-    legacy_root = _add_legacy_root(args.legacy_vlm_stl_root)
     outdir = Path(args.outdir)
-    _configure_libero_paths(legacy_root, outdir)
 
     scene_context, scene_path, prompt, prompt_path = _prepare_libero_scene(args, outdir)
     print(f"[step] scene context: {scene_path}")

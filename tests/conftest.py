@@ -15,11 +15,7 @@ from pathlib import Path
 import pytest
 
 STEP_ROOT = Path(__file__).resolve().parents[1]
-VLM_STL_ROOT = (STEP_ROOT / ".." / "vlm-stl").resolve()
 
-for _candidate in (VLM_STL_ROOT / "LIBERO", VLM_STL_ROOT):
-    if _candidate.exists() and str(_candidate) not in sys.path:
-        sys.path.insert(0, str(_candidate))
 if str(STEP_ROOT) not in sys.path:
     sys.path.insert(0, str(STEP_ROOT))
 

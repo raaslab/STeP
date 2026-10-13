@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import random
 import subprocess
 import sys
@@ -37,7 +36,6 @@ LIBERO_PRO_PERTURBATIONS = ("swap", "task", "object", "lan")
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run STeP over a LIBERO benchmark suite.")
-    p.add_argument("--legacy-vlm-stl-root", default="../vlm-stl")
     p.add_argument("--base-scene-context", default="configs/libero_template.json")
     p.add_argument("--schema", default="schemas/stl_plan_schema.json")
     p.add_argument("--safety-json", default="configs/libero_safety.json")
@@ -99,32 +97,6 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--dry-run", action="store_true")
     return p.parse_args()
-
-
-def _add_paths(legacy_root_arg: str | Path, outdir: Path) -> Path:
-    legacy_root = Path(legacy_root_arg).expanduser().resolve()
-    for candidate in (Path.cwd(), legacy_root / "LIBERO", legacy_root):
-        if candidate.exists() and str(candidate) not in sys.path:
-            sys.path.insert(0, str(candidate))
-
-    benchmark_root = legacy_root / "LIBERO" / "libero" / "libero"
-    if benchmark_root.is_dir():
-        config_dir = outdir / "libero_config"
-        config_dir.mkdir(parents=True, exist_ok=True)
-        (config_dir / "config.yaml").write_text(
-            "\n".join(
-                [
-                    f"assets: {benchmark_root / 'assets'}",
-                    f"bddl_files: {benchmark_root / 'bddl_files'}",
-                    f"benchmark_root: {benchmark_root}",
-                    f"datasets: {benchmark_root.parent / 'datasets'}",
-                    f"init_states: {benchmark_root / 'init_files'}",
-                    "",
-                ]
-            )
-        )
-        os.environ.setdefault("LIBERO_CONFIG_PATH", str(config_dir))
-    return legacy_root
 
 
 def _suite_names(selected: str) -> list[str]:
@@ -247,8 +219,6 @@ def _build_command(
     cmd = [
         sys.executable,
         "scripts/run_libero_step.py",
-        "--legacy-vlm-stl-root",
-        str(Path(args.legacy_vlm_stl_root)),
         "--base-scene-context",
         args.base_scene_context,
         "--schema",
@@ -309,7 +279,6 @@ def main() -> int:
         args.outdir = f"outputs/{args.suite}{suffix}_{timestamp}"
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
-    _add_paths(args.legacy_vlm_stl_root, outdir)
 
     resolved_suites = [_resolve_suite(s, perturbation) for s in _suite_names(args.suite)]
     for suite in resolved_suites:

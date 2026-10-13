@@ -7,7 +7,7 @@ from step.system_one.motion.config import MotionConfig, PlannerConfig
 from step.system_one.motion.kinematics import IKSolver
 from step.system_one.motion.ompl_planner import MotionPlanner
 from step.system_one.motion.scene_query import resolve_body_name
-from step.system_one.motion.skills.transport_skill import TransportSkill
+from step.system_one.skills.transport.transport_skill import TransportSkill
 
 
 def _attach_object_near_gripper(scene, ik, object_body, joint_names):
@@ -89,7 +89,7 @@ def test_transport_skill_reaches_hover_pose_above_measured_container_top(libero_
     skill = TransportSkill(ik, planner, checker, config)
     goal_body = resolve_body_name(attach_scene, "wooden_cabinet_1_base")
 
-    from step.system_one.motion.skills.place_skill import _support_floor_and_rim_z
+    from step.system_one.skills.place.place_skill import _support_floor_and_rim_z
 
     top_z, _ = _support_floor_and_rim_z(attach_scene, goal_body)
     result = skill.execute(attach_scene, attached, goal_body, start_q, place_surface="top")

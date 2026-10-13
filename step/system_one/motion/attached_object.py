@@ -5,18 +5,16 @@ pre-grasp resting pose.
 
 Mirrors Cap-X's ``curobo_api.attach_objects_to_robot``/``plan_with_grasped_
 object`` pattern in spirit (record a grasp-relative transform, stop treating
-the object as a free-standing world obstacle, use its geometry attached to
-the end effector for collision during transport) but adapted to
-``CollisionChecker``/``SceneQuery`` instead of cuRobo's ``WorldConfig`` sphere-
-fit representation -- see ``collision.py``'s ``compose_world_pose``, which is
-what actually re-derives the object's hypothetical world pose from the
-gripper's current FK pose plus the stored transform on every collision check,
-so there's no separate "remove from world" bookkeeping needed: as long as an
+the object as a free-standing world obstacle) but adapted to
+``CollisionChecker``/``SceneQuery`` instead of cuRobo's sphere-fit
+``WorldConfig``. See ``collision.py``'s ``compose_world_pose``, which
+re-derives the object's hypothetical world pose from the gripper's current FK
+pose plus the stored transform on every collision check -- so there's no
+separate "remove from world" bookkeeping needed: once an
 ``AttachedObjectState`` is passed into ``CollisionChecker.check(...,
-attached=...)``, the object is repositioned to follow the gripper for that
-check and its *original* resting-pose geoms are simply not queried as a
-free-standing obstacle (the caller stops passing ``target_object_body`` for
-free-space obstacle treatment once attached).
+attached=...)``, the object follows the gripper for that check and its
+original resting-pose geoms are simply not queried as a free-standing
+obstacle.
 """
 
 from __future__ import annotations
@@ -32,28 +30,21 @@ def attached_sphere_infeasible_for_goal(attached: AttachedObjectState, goal_radi
     too large to ever fit within a goal region of radius ``goal_radius_m``,
     regardless of how the arm approaches it.
 
-    The sphere fit (see ``fit_spheres_from_geoms``'s own docstring) bins the
-    object along its *longest* local axis -- correct for an elongated
-    object (a can, a box lying flat) but structurally unable to shrink for
-    a flat, plate-shaped one resting on its edge (a book standing upright):
-    every cross-section perpendicular to its own height stays close to its
-    full face, so no number of bins tightens it. Confirmed on a real
-    STUDY_SCENE1 rollout: a real, successfully grasped book (radius 5.7cm
-    per sphere) was carried toward a caddy compartment (radius 2.2cm) --
-    geometrically impossible for the sphere to ever clear, so the MPC's own
-    clearance cost fought it for the entire transport (repeated replanning,
-    a final settle 76cm/156 degrees off target) and the book was shaken
-    loose, even though the real, thin book would likely have fit the actual
-    slot fine.
+    The sphere fit (see ``fit_spheres_from_geoms``) bins the object along its
+    longest local axis -- correct for an elongated object but structurally
+    unable to shrink for a flat, plate-shaped one resting on its edge (e.g. a
+    book standing upright), since every cross-section perpendicular to its
+    height stays close to its full face. A thin book carried toward a narrow
+    caddy slot can then be geometrically impossible for the *sphere* to
+    clear even though the real object would fit fine, and the MPC's
+    clearance cost fights that unwinnable conflict for the whole transport.
 
-    Conservative in the safe direction: if every one of the object's own
-    fitted spheres already exceeds the goal's radius, no sphere among them
-    could ever satisfy a clearance test there, so continuing to weigh
-    sphere-vs-goal distance in the motion cost only fights a fight that
-    cannot be won -- better to stop treating the (over-approximated) carried
-    object as an obstacle for the rest of this leg and let the arm actually
-    reach the goal, than to keep contorting the plan away from a conflict
-    the real object may not even have.
+    Conservative in the safe direction: if every one of the object's fitted
+    spheres already exceeds the goal's radius, no sphere among them could
+    ever satisfy a clearance test there, so it's better to stop treating the
+    (over-approximated) carried object as an obstacle for the rest of this
+    leg and let the arm reach the goal, than to keep contorting the plan
+    away from a conflict the real object may not even have.
     """
     if goal_radius_m is None or not attached.collision_spheres_object_frame:
         return False
@@ -65,15 +56,14 @@ def fit_spheres_to_extent(extent: BodyExtent, n_spheres: int = 3) -> list[tuple[
     """Approximate a body's AABB as ``n_spheres`` spheres spread along its
     longest axis, each sized to circumscribe the cross-section rectangle
     perpendicular to that axis (radius = hypotenuse of the other two half-
-    extents) -- this can only over-cover the true geometry, never
-    under-cover it, matching the "must not underestimate the object" rule
-    used everywhere else in this pipeline (grasp width estimation, etc.).
+    extents) -- can only over-cover the true geometry, never under-cover it,
+    matching the "must not underestimate the object" rule used elsewhere in
+    this pipeline.
 
     A single sphere (n_spheres=1) is fine for roughly cube-shaped/round
-    objects, but is very conservative for anything elongated (e.g. treats a
-    30cm-long object as a 30cm-diameter ball); more spheres tighten the
-    approximation along the long axis. Returned offsets are in the body's own
-    local frame (i.e. relative to its origin, already including
+    objects but very conservative for anything elongated; more spheres
+    tighten the approximation along the long axis. Returned offsets are in
+    the body's own local frame (relative to its origin, already including
     ``extent.center_offset``).
     """
     he = np.asarray(extent.half_extents, dtype=np.float64)
@@ -99,27 +89,22 @@ def fit_spheres_from_geoms(scene: SceneQuery, body_name: str, n_spheres: int = 3
     along the body's longest local axis; each bin sphere is sized to
     enclose every sample point that falls in it.
 
-    Tighter than ``fit_spheres_to_extent``'s single "treat the whole merged
-    AABB as a worst-case rectangle at every slice, use its diagonal" formula
-    whenever the true shape is round or irregular. LIBERO objects are
-    commonly convex-decomposed into a dozen-plus thin wedge-shaped pieces
-    circling a round profile; the union of their individually-rotated AABBs
-    describes a shape close to a square, not the circle those wedges
-    actually tile, so taking that square's diagonal as the fitted radius
-    (what ``fit_spheres_to_extent`` does) came out ~50% too large for a real
-    soup can -- ~6cm for a can whose real cross-section is ~4cm -- on its
-    own enough to make every placement candidate above a modestly-sized
-    basket read as colliding with the rim. Sampling real corner/surface
-    points instead and fitting directly to *those* (rather than to each
-    geom's own already-inflated bounding sphere) avoids compounding that
-    error across neighboring pieces.
+    Tighter than ``fit_spheres_to_extent``'s "treat the whole merged AABB as
+    a worst-case rectangle, use its diagonal" formula whenever the true
+    shape is round or irregular. LIBERO objects are commonly
+    convex-decomposed into many thin wedge-shaped pieces circling a round
+    profile, and the union of their individually-rotated AABBs describes a
+    shape closer to a square than the circle those wedges actually tile --
+    taking that square's diagonal as the fitted radius overestimates enough
+    to make placement candidates above a modestly-sized basket read as
+    colliding with the rim. Sampling real surface points and fitting
+    directly to those avoids compounding that error across neighboring
+    pieces.
 
-    Still guaranteed to never under-cover the real geometry: every sampled
-    point is a true point on (or, for the round-primitive ring, very close
-    to and outside) the geom's surface, so a sphere containing all of them
-    contains the geom. Falls back to ``fit_spheres_to_extent`` if the body
-    has no discrete collision geoms to inspect. Offsets returned in the
-    body's local frame.
+    Still guaranteed to never under-cover the real geometry, since every
+    sampled point is a true point on (or just outside, for the
+    round-primitive ring) the geom's surface. Falls back to
+    ``fit_spheres_to_extent`` if the body has no discrete collision geoms.
     """
     points = scene.body_surface_points_local(body_name)
     if len(points) == 0:

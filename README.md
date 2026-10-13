@@ -12,18 +12,15 @@ same STL formula JSON that System 1 already executes.
 2. Capture a LIBERO scene image unless `--image` is supplied.
 3. Ask the LLM for a direct STL skill graph JSON.
 4. Validate the direct STL plan shape.
-5. Execute it with the legacy LIBERO System 1 executor.
-
-The legacy executor is still reused from `../vlm-stl` for now, but STeP owns
-its default LIBERO configuration in `configs/`.
+5. Execute it with System 1 (`step/system_one/`).
 
 ## Installation
 
 STeP's own [pyproject.toml](pyproject.toml) only declares `openai` -- all the
 heavy lifting (LIBERO, robosuite, MuJoCo, contact-graspnet, OMPL) comes from
 a sibling [cap-x](https://github.com/capgym/cap-x) checkout that every
-`scripts/run_libero_*.py` / `scripts/tune_*.py` adds to `sys.path` at
-runtime. Concretely, that means:
+`scripts/run_libero_*.py` adds to `sys.path` at runtime. Concretely, that
+means:
 
 - STeP and cap-x are expected to live next to each other, e.g.
   `~/Documents/step/{STeP,cap-x}`.
@@ -56,9 +53,9 @@ it creates (or reuses) a small `ompl_bridge` conda env just to fetch
 prebuilt binaries, then copies the `ompl` package plus its own
 libstdc++/libgcc_s/boost into `.venv-libero` so it never touches your
 system's libstdc++. This needs `conda` on `PATH` once; nothing conda-related
-is required afterwards to run STeP. If `conda` isn't available, see
-[cluster/environment.yml](cluster/environment.yml) for a conda-only
-environment that pulls OMPL from conda-forge directly (no bridging step).
+is required afterwards to run STeP. If `conda` isn't available, you'll need
+to get OMPL's Python bindings into `.venv-libero` some other way (e.g.
+building it from source against that venv's Python).
 
 ### Before running anything
 
@@ -75,13 +72,6 @@ python -c "from libero.benchmark import get_benchmark; print(get_benchmark('libe
 ```
 
 Should print `10`.
-
-### Cluster / conda alternative
-
-For a cluster (SLURM + conda, no uv, no OMPL bridging needed) see
-[cluster/README.md](cluster/README.md) and `cluster/setup_env.sh` instead --
-it builds the whole stack as a conda environment pulling OMPL straight from
-conda-forge.
 
 Local LIBERO configs:
 

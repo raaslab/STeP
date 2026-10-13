@@ -29,6 +29,7 @@ from .base_env import BaseManipulationEnv
 from .execution_types import SkillExecutionRecord, StepCallback
 from .scene_resolver import SceneResolver
 from .env_factory import make_env_from_scene_context
+from .skills.registry import OMPL_MPC_SKILL_HANDLERS
 from .stl_monitor import STLMonitorMixin
 from .video_overlay import VideoOverlayMixin
 from .recall_controller import RecallControllerMixin
@@ -38,20 +39,12 @@ from .history_log import STLHistoryLog
 class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin):
     """Runs a compiled STL plan against any :class:`BaseManipulationEnv`."""
 
-    # Times to re-attempt a drawer-handle grip that missed. See
-    # _run_open_drawer_with_motion_pipeline for why a miss is safely
-    # repeatable and why only this failure mode is retried.
+    # Retries for a drawer-handle grip that missed -- see
+    # _run_open_drawer_with_motion_pipeline for why a miss is safely repeatable.
     OPEN_DRAWER_GRIP_ATTEMPTS = 3
-    # Same reasoning, for a pick that failed in a way a fresh candidate
-    # search can plausibly fix on its own -- see
-    # _run_pick_with_motion_pipeline for exactly which failures qualify.
-    # Nothing was ever carried anywhere in either case, so a fresh attempt
-    # starts from a scene barely different from the first. Higher than
-    # OPEN_DRAWER_GRIP_ATTEMPTS: measured per-attempt success against a
-    # cluttered scene (a neighboring object close enough to collide) at
-    # roughly 1-in-2 to 1-in-3, so 3 attempts alone still fails close to a
-    # third of the time -- 5 pushes real cumulative success noticeably
-    # higher for the same "just try again" cost.
+    # Retries for a pick that failed in a recoverable way (see
+    # _run_pick_with_motion_pipeline for which failures qualify). Higher than
+    # OPEN_DRAWER_GRIP_ATTEMPTS since per-attempt success is lower here.
     PICK_GRASP_STABILITY_ATTEMPTS = 5
 
     def __init__(
@@ -144,22 +137,17 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         self.video_state_overlay: bool = bool(
             exec_proxy.get("video_state_overlay", True)
         )
-        # Reflection still runs after every high-level subtask, but the LLM is
-        # not allowed to structurally rewrite the remaining plan after every
-        # successful subtask. Otherwise it can get stuck repeatedly replacing
-        # the remaining plan with another transport subtask.
-        #
-        # Default policy:
-        #   - failed subtask: may replace/insert/modify remaining subtasks
-        #   - successful pick/transport: may update parameters only
-        #   - successful place: may structurally repair only for object-relation
-        #     or placement failures observed after the place action
+        # Reflection runs after every subtask, but by default can't
+        # structurally rewrite the plan after a *successful* one (prevents
+        # e.g. repeated transport->transport->transport loops). Default
+        # "conservative" policy: failed subtasks may be freely repaired;
+        # successful pick/transport may only update params; successful place
+        # may structurally repair only for post-place object/placement issues.
         self.reflection_success_plan_edit_policy: str = str(
             exec_proxy.get("reflection_success_plan_edit_policy", "conservative")
         ).lower()
-        # Hard loop breaker. By default, reflection may NOT repair a failed
-        # subtask by putting the exact same skill first again. This especially
-        # prevents transport -> transport -> transport loops.
+        # Loop breaker: by default, reflection can't repair a failed subtask
+        # by repeating the same skill.
         self.reflection_max_same_skill_repairs: int = int(
             exec_proxy.get("reflection_max_same_skill_repairs", 0)
         )
@@ -423,11 +411,9 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         if not isinstance(status, dict):
             return
 
-        # Record the keep-out radius once. safe_ee/safe_object are measured from
-        # the zone *boundary*, so they shift whenever the margin is changed. The
-        # radius lets us recover the margin-independent distance to the obstacle
-        # itself, which is a property of the trajectory alone. That is what makes
-        # a run re-scorable at any margin later without executing it again.
+        # Record the keep-out radius once: safe_ee/safe_object are measured
+        # from the zone boundary (margin-dependent), so this lets a run be
+        # re-scored at any margin later without re-executing it.
         if self._constraint_radius_m is None:
             for c in getattr(env, "sdf_constraints", []) or []:
                 if str(getattr(c, "role", "")) in {"obstacle", "keepout"}:
@@ -437,13 +423,9 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                         self._constraint_obstacle = str(getattr(c, "name", "") or "")
                         break
 
-        # Every scene object's position, not only the carried one. Two things
-        # need this and neither works without it:
-        #   * scene-disturbance scoring -- whether the arm knocked anything it
-        #     was not manipulating (the planner already treats every object as
-        #     an obstacle, so this measures whether that actually held).
-        #   * arrangement scoring -- alphabetical/size ordering, "next to X",
-        #     "is the drawer empty", all of which are read off final positions.
+        # Every scene object's position, not just the carried one: needed for
+        # both disturbance scoring (did the arm knock anything else) and
+        # arrangement scoring ("next to X", "is the drawer empty", etc).
         try:
             if self._object_names is None:
                 self._object_names = sorted(
@@ -558,19 +540,12 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                 "depth_integral_m_steps": round(rec["depth_integral_m_steps"], 5),
                 "total_steps": rec["samples"],
             }
-        # The headline verdict is the END EFFECTOR's, not the carried object's.
-        #
-        # An object hanging under a closed gripper swings and sits lower than the
-        # grasp pose implies, so it clips a zone the gripper itself cleared: six
-        # of eleven violations in the first sweep were the object alone, while the
-        # gripper stayed outside for every step. Charging those as violations
-        # scores the grasp's geometry rather than whether the robot respected the
-        # region, and it is not something the planner can act on either -- it
-        # positions the object by its nominal grasp transform, which differs from
-        # the true pose by around a centimetre.
-        #
-        # The object's own figures stay in the report under "object", so a
-        # stricter reading can be recovered without re-running anything.
+        # The headline verdict is the END EFFECTOR's, not the carried object's:
+        # a carried object hangs/swings below the nominal grasp pose and can
+        # clip a zone the gripper itself cleared, which the planner can't act
+        # on anyway (it positions the object via the nominal grasp transform).
+        # Per-object figures stay in the report under "object" for a stricter
+        # reading if needed.
         ee = out.get("ee") or {}
         out["violated"] = bool(ee.get("violated")) if ee else any_violation
         out["scored_on"] = "ee" if ee else "any"
@@ -662,24 +637,12 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         kx, ky, _default_keepout_radius = self.resolver.resolve_keepout(keepout_name)
         active_keepout_radius = 0.0
 
-        # Choose active_object_name from the plan itself, not from a fixed
-        # legacy default. This is important for real scenes with arbitrary
-        # object names / colors: "pick yellow_cube" should initialize the env
-        # around yellow_cube, not whichever object happens to sort first.
-        #
-        # Trust any subtask's own explicit object reference as long as it
-        # resolves to a *known* scene entity -- checking against the full
-        # entity set (self.resolver.entity_roles), not just the
-        # "manipulated_object"-role subset. role_for_object_name's heuristic
-        # (libero_scene.py) checks _GOAL_OR_SUPPORT_HINTS before
-        # _MOVABLE_HINTS, and both lists contain "bowl"/"plate" -- so a task
-        # whose actual target *is* a bowl or plate (e.g. "pick up the black
-        # bowl...") always gets classified support_object, never
-        # manipulated_object. Gating on manipulated_object_names() alone then
-        # silently falls through to the "first manipulated object" fallback,
-        # which for an all-support_object scene means "no fallback" -- and a
-        # confirmed real rollout showed this landing on an arbitrary,
-        # never-touched object instead of the one actually picked.
+        # Choose active_object_name from the plan's own subtask references
+        # (checked against the full entity set, not just manipulated_object
+        # role) rather than a fixed/sorted default -- the role-classification
+        # heuristic can misclassify a real pick target (e.g. a bowl/plate) as
+        # support_object, which would otherwise fall through to an arbitrary
+        # "first manipulated" default.
         known_entities = set(self.resolver.entity_roles)
         manipulated = sorted(self.resolver.manipulated_object_names())
         active_object_name = None
@@ -764,10 +727,8 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         elif skill == "transport":
             cond = float(status["over_goal"]) > 0.0 or int(status["stage"]) >= 5
         elif skill == "place":
-            # Do not mark place complete immediately when the object is released.
-            # Stage 6 means "released / holding near the placement contact".
-            # Stage 7 now targets a generic post-place retreat: lift to retreat_z
-            # and move laterally away from the localized placement/support region.
+            # Don't mark place complete on release alone (stage 6) -- wait for
+            # the stage-7 retreat (lift to retreat_z, move clear of the target).
             stage = int(status.get("stage", 0))
             released = not bool(status.get("grasped", False))
             eef = np.asarray(status.get("eef_pos", [0.0, 0.0, -999.0]), dtype=np.float32)
@@ -871,7 +832,7 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         if attached is None or not hasattr(env, "carry_z"):
             return
         try:
-            from .motion.skills.place_skill import _container_floor_and_rim_z
+            from .skills.place.place_skill import _container_floor_and_rim_z
             from .motion.scene_query import SceneQuery, resolve_body_name
 
             scene = SceneQuery.from_robosuite_sim(env.env.sim)
@@ -887,25 +848,11 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                 _, rim_top_z = _container_floor_and_rim_z(scene, goal_container_body)
                 candidate_carry_zs.append(rim_top_z + float(attached.collision_radius_m) + margin)
 
-            # Also clear the surface the object is being picked *up from*,
-            # not just the goal it's headed *to* -- confirmed via a real
-            # rollout ("pick up the black bowl on the wooden cabinet"): the
-            # bowl rests on the cabinet's own top (measured ~1.128m), almost
-            # exactly at the *default* carry_z (table_z + 0.17 ~= 1.07-1.14m
-            # depending on table_z). With no real lift margin between "where
-            # the object already is" and "carry_z", stage 2->3's own
-            # transition condition (cube_pos[2] >= carry_z - 0.02) was
-            # already satisfied the instant transport began -- skipping any
-            # deliberate vertical lift and going straight to stage 4's
-            # horizontal travel while the bowl (held only by its rim) was
-            # still resting right at the cabinet's edge, catching on it as
-            # the arm swung sideways and losing the grip entirely (confirmed
-            # on video: the bowl never moves at all while the arm travels
-            # away without it). Use the *attached object's own current
-            # height* (wherever it's actually resting -- table, cabinet top,
-            # drawer, whatever) plus its collision radius as a second lower
-            # bound, so there's always a real, deliberate clearance lift
-            # before any horizontal travel starts.
+            # Also clear the surface the object is being picked *up from*, not
+            # just the goal it's headed to -- if the pickup surface is already
+            # near the default carry_z, the stage 2->3 lift condition can be
+            # satisfied instantly, skipping straight to horizontal travel
+            # while a rim-held object still catches on the edge it started on.
             try:
                 object_pos, _ = scene.body_pose(attached.object_name)
                 candidate_carry_zs.append(float(object_pos[2]) + float(attached.collision_radius_m) + margin)
@@ -939,12 +886,12 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         self,
         env: BaseManipulationEnv,
         sub: dict[str, Any],
-        outdir: str | Path | None = None,
         *,
         task_steps_so_far: int = 0,
+        outdir: str | Path | None = None,
     ) -> tuple[bool, int, dict[str, Any]]:
         from .motion.config import MotionConfig
-        from .motion.skills.libero_pick_adapter import LiberoPickAdapter
+        from .skills.pick.libero_pick_adapter import LiberoPickAdapter
         from .motion.types import SkillFailureReason
 
         params = sub.get("params", {}) or {}
@@ -962,38 +909,18 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         )
 
         # Point the env's grasp check at THIS pick's object before running,
-        # not just after it succeeds (further down). LiberoManipulationEnv.
-        # _is_grasped() resolves its object geoms from _active_pick_object(),
-        # so while the active object still names whatever a *previous* subtask
-        # picked, every grasp verification during this pick tests contact
-        # against the wrong body -- reporting "gripper closed but
-        # _is_grasped() reported False" for a grasp that is physically fine.
-        # Confirmed directly on the two-object libero_object task: with the
-        # active object left at the first object, picking the second reported
-        # failure with both finger pads visibly in contact with it; setting it
-        # first, the identical pick succeeds and survives the test lift.
-        # Only for an unambiguous single-object pick -- an OR-set ("pick any
-        # cup") has no single answer until PickSkill has chosen one, and the
-        # post-success assignment below still covers that case.
+        # not just after success: _is_grasped() resolves geoms from the
+        # active object, which otherwise still names a previous subtask's
+        # object and fails verification even on a physically fine grasp.
+        # Only for an unambiguous single-object pick -- an OR-set has no
+        # single answer until PickSkill chooses one (handled post-success).
         if len(object_set) == 1:
             env.set_active_object(object_set[0])
 
-        # Retry a pick that failed in a way a fresh candidate search can
-        # plausibly do better on next time -- as opposed to a genuine
-        # planning failure (NO_FEASIBLE_CANDIDATE/PLANNER_UNAVAILABLE), which
+        # Retry only failures where a candidate was found and attempted but
+        # didn't hold (GRASP_VERIFICATION_FAILED/EXECUTION_FAILED) -- a
+        # genuine planning failure (NO_FEASIBLE_CANDIDATE/PLANNER_UNAVAILABLE)
         # would just reproduce identically and burn the budget for nothing.
-        # Gated on failure_reason, not a growing list of exact detail
-        # strings: every GRASP_VERIFICATION_FAILED/EXECUTION_FAILED from
-        # this adapter means a candidate WAS found and actually attempted
-        # but didn't hold -- confirmed by real rollouts for three distinct
-        # causes so far (bilateral contact never settling; the grasp
-        # breaking under the post-grasp test lift; the arm ending up wedged
-        # against a real neighboring object, e.g. a milk carton parked next
-        # to the target can, instead of the target itself) -- and nothing
-        # was ever actually carried anywhere in any of them, so a fresh
-        # attempt starts from a scene barely different from the first. A
-        # new failure mode added to that adapter later needs no new case
-        # here as long as it keeps using one of these two reasons.
         RETRIABLE_REASONS = (SkillFailureReason.GRASP_VERIFICATION_FAILED, SkillFailureReason.EXECUTION_FAILED)
         steps = wait_steps_used
         for attempt in range(self.PICK_GRASP_STABILITY_ATTEMPTS):
@@ -1034,10 +961,15 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         return bool(result.success), steps, status
 
     def _run_place_with_motion_pipeline(
-        self, env: BaseManipulationEnv, sub: dict[str, Any], *, task_steps_so_far: int = 0
+        self,
+        env: BaseManipulationEnv,
+        sub: dict[str, Any],
+        *,
+        task_steps_so_far: int = 0,
+        outdir: str | Path | None = None,
     ) -> tuple[bool, int, dict[str, Any]]:
         from .motion.config import MotionConfig
-        from .motion.skills.libero_place_adapter import LiberoPlaceAdapter
+        from .skills.place.libero_place_adapter import LiberoPlaceAdapter
 
         attached_state = getattr(self, "_motion_attached_state", None)
         if attached_state is None:
@@ -1098,10 +1030,15 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         return bool(result.success), steps, status
 
     def _run_transport_with_motion_pipeline(
-        self, env: BaseManipulationEnv, sub: dict[str, Any], *, task_steps_so_far: int = 0
+        self,
+        env: BaseManipulationEnv,
+        sub: dict[str, Any],
+        *,
+        task_steps_so_far: int = 0,
+        outdir: str | Path | None = None,
     ) -> tuple[bool, int, dict[str, Any]]:
         from .motion.config import MotionConfig
-        from .motion.skills.libero_transport_adapter import LiberoTransportAdapter
+        from .skills.transport.libero_transport_adapter import LiberoTransportAdapter
 
         attached_state = getattr(self, "_motion_attached_state", None)
         if attached_state is None:
@@ -1129,11 +1066,8 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                 "detail": "transport (ompl_mpc backend) subtask has no resolvable params.goal_region",
             }
         place_surface = params.get("place_surface", "inside")
-        # For the same reason _resolve_point_goal itself needs the radius
-        # (measuring goal-clearance feasibility, see LiberoTransportAdapter's
-        # own comment on attached_sphere_infeasible_for_goal) -- re-parsed
-        # here rather than threaded through _resolve_point_goal's own return
-        # value, which intentionally only returns (surface_name, xyz).
+        # Re-parsed here since _resolve_point_goal only returns (surface, xyz)
+        # -- needed separately for goal-clearance feasibility checks.
         point_target = self._point_target_from_goal_region(raw_goal_region)
         goal_radius_m = params.get("goal_radius")
         if goal_radius_m is None and point_target is not None:
@@ -1172,10 +1106,15 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         return bool(result.success), steps, status
 
     def _run_open_drawer_with_motion_pipeline(
-        self, env: BaseManipulationEnv, sub: dict[str, Any]
+        self,
+        env: BaseManipulationEnv,
+        sub: dict[str, Any],
+        *,
+        task_steps_so_far: int = 0,
+        outdir: str | Path | None = None,
     ) -> tuple[bool, int, dict[str, Any]]:
         from .motion.config import MotionConfig
-        from .motion.skills.libero_open_drawer_adapter import LiberoOpenDrawerAdapter
+        from .skills.open_drawer.libero_open_drawer_adapter import LiberoOpenDrawerAdapter
 
         params = sub.get("params", {}) or {}
         drawer_ref = self.resolver.canonical(params.get("object")) or params.get("object")
@@ -1186,17 +1125,10 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         adapter = LiberoOpenDrawerAdapter(env, motion_config)
         max_steps = int(self.max_subtask_steps) if self.max_subtask_steps is not None else 600
 
-        # Retry a missed handle grip. Landing the gripper on a drawer handle
-        # is this skill's genuinely unreliable step (its own notes record a
-        # measured ~3/10-3/8 grip rate, and a real rollout missed by 0.10m
-        # with dz=-0.083m -- almost exactly the 0.073m spacing to the next
-        # handle down). The attempt is safely repeatable now that the pull is
-        # gated on actually holding the handle: a miss changes nothing in the
-        # scene, and adapter.run() begins by homing the arm, so each attempt
-        # starts from the same known configuration rather than from wherever
-        # the last one gave up. Only the grip miss is retried -- a planning
-        # failure re-plans identically (see MotionPlanner.plan's note on
-        # repeated identical calls) and would just burn the budget.
+        # Retry a missed handle grip -- the pull is gated on actually holding
+        # the handle, so a miss changes nothing in the scene, and adapter.run()
+        # re-homes each attempt. Only grip misses are retried; a planning
+        # failure would just re-plan identically and burn the budget.
         steps = 0
         for attempt in range(self.OPEN_DRAWER_GRIP_ATTEMPTS):
             result, attempt_steps, open_verification = adapter.run(
@@ -1220,10 +1152,15 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         return bool(result.success), steps, status
 
     def _run_close_with_motion_pipeline(
-        self, env: BaseManipulationEnv, sub: dict[str, Any]
+        self,
+        env: BaseManipulationEnv,
+        sub: dict[str, Any],
+        *,
+        task_steps_so_far: int = 0,
+        outdir: str | Path | None = None,
     ) -> tuple[bool, int, dict[str, Any]]:
         from .motion.config import MotionConfig
-        from .motion.skills.libero_close_adapter import LiberoCloseAdapter
+        from .skills.close.libero_close_adapter import LiberoCloseAdapter
 
         params = sub.get("params", {}) or {}
         target_ref = self.resolver.canonical(params.get("object")) or params.get("object")
@@ -1253,10 +1190,15 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         return bool(result.success), steps, status
 
     def _run_turn_knob_with_motion_pipeline(
-        self, env: BaseManipulationEnv, sub: dict[str, Any]
+        self,
+        env: BaseManipulationEnv,
+        sub: dict[str, Any],
+        *,
+        task_steps_so_far: int = 0,
+        outdir: str | Path | None = None,
     ) -> tuple[bool, int, dict[str, Any]]:
         from .motion.config import MotionConfig
-        from .motion.skills.libero_stove_adapter import LiberoStoveAdapter
+        from .skills.turn_knob.libero_stove_adapter import LiberoStoveAdapter
 
         params = sub.get("params", {}) or {}
         knob_ref = self.resolver.canonical(params.get("object")) or params.get("object")
@@ -1460,13 +1402,9 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
             env.goal_reference_name = None
             _, goal_xy, resolved_z, resolved_radius, _ = self.resolver.resolve_goal(goal_name)
             # An explicit params.goal_z always wins; otherwise fall back to
-            # the entity's own measured height (see resolve_goal's own
-            # docstring) rather than leaving this None -- a static fixture
-            # (a cabinet's frame body, say) has no live per-step pose for
-            # base_env._goal_anchor's *other* z fallback to read, so None
-            # here left legacy transport aiming at bare table height,
-            # confirmed driving a carried object straight into the
-            # fixture's solid top instead of onto it.
+            # the entity's own measured height, not None -- a static fixture
+            # has no live per-step pose for base_env's own z fallback, which
+            # left legacy transport aiming at bare table height instead.
             env.goal_z_override = float(goal_z) if goal_z is not None else resolved_z
             env.goal_xy = np.asarray(goal_xy, dtype=np.float32)
             env.goal_radius = float(goal_radius) if goal_radius is not None else float(resolved_radius)
@@ -2058,20 +1996,10 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                 self._set_video_subtask_overlay(sub)
                 skill = sub["skill"]
                 # Only trust this subtask's own object reference if it
-                # resolves to a *known* scene entity. resolver.canonical()
-                # falls back to returning its input unchanged when nothing
-                # matches -- so a generic placeholder like "object" or
-                # "goal_region" (transport/place's own params, never meant to
-                # name a concrete body) comes back as that literal string,
-                # not None. Calling set_active_object() with it anyway
-                # overwrote whatever a prior pick had just correctly set via
-                # its own result.selected_object -- confirmed by a real
-                # rollout where transport immediately reported
-                # active_object_name='object' (a nonexistent body) right
-                # after pick had established 'glazed_rim_porcelain_ramekin_1',
-                # causing _is_grasped() to falsely report no grasp and the
-                # legacy transport stage machine to release and restart its
-                # own naive top-down grasp attempt.
+                # resolves to a *known* scene entity: resolver.canonical()
+                # returns its input unchanged when nothing matches, so a
+                # generic placeholder like "object"/"goal_region" would
+                # otherwise overwrite whatever a prior pick had already set.
                 object_name = self.resolver.canonical(sub.get("params", {}).get("object"))
                 if object_name is not None and object_name in self.resolver.entity_roles:
                     env.set_active_object(object_name)
@@ -2128,16 +2056,9 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
 
                 dwell_counts.clear()
 
-                # Honour the gap the formula asks for before this subtask starts.
-                #
-                # Asked to "wait 4 seconds after turning on the stove", System 2
-                # encodes the delay in STL's own timing -- F[0,150] for the first
-                # subtask, then F[230,320] for the next, an 80-step gap at 20 Hz.
-                # That is a correct specification, but System 1 ran subtasks back
-                # to back and the absolute bounds were only ever used as
-                # deadlines, so the delay silently evaporated between the plan and
-                # the robot. Holding here is what makes the formula's timing
-                # something the robot actually obeys.
+                # Honor the gap the formula asks for before this subtask starts
+                # (STL timing intervals were previously only used as deadlines,
+                # so a "wait N seconds" gap between subtasks silently evaporated).
                 start_step = self._subtask_interval_start(sub)
                 timing_hold_steps = 0
                 if start_step is not None and task_steps_so_far < start_step:
@@ -2169,22 +2090,12 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                         env.set_grasp_offset_override(None)
                     if hasattr(env, "set_active_object_height"):
                         env.set_active_object_height(None)
-                    # Mirror _begin_new_pick_skill's own "already grasped ->
-                    # skip straight to carry" logic. "transport" always runs
-                    # on the legacy step_nominal() stage machine (see
-                    # _motion_backend's docstring), whose self.stage the new
-                    # ompl_mpc pick pipeline never touches at all -- so after
-                    # a successful ompl_mpc pick, self.stage is still sitting
-                    # at its env.reset() default of 0 ("move to pregrasp,
-                    # gripper OPEN"). Dispatching transport without this sync
-                    # made stage 0 immediately open the gripper -- releasing
-                    # the real grasp pick just established -- and restart the
-                    # legacy stage machine's own naive top-down close from
-                    # scratch, which (confirmed by a real rollout: cube_pos
-                    # slid along the table at ~constant z instead of lifting,
-                    # eef-cube distance never closed to a real grip range)
-                    # only pushes a shallow object like a bowl/ramekin rather
-                    # than actually gripping it.
+                    # Sync the legacy stage machine's own self.stage before
+                    # dispatching to it: the ompl_mpc pick pipeline never
+                    # touches it, so after a successful ompl_mpc pick it's
+                    # still at its reset default (0, "approach, gripper open")
+                    # -- without this sync, transport would immediately
+                    # re-open the gripper and restart a naive top-down grasp.
                     if hasattr(env, "_is_grasped") and hasattr(env, "stage"):
                         env.stage = 3 if env._is_grasped() else 0
                         env.close_counter = 0
@@ -2192,23 +2103,13 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                         self._boost_carry_height_for_goal_container(env, sub)
                     self._refresh_subtask_bookkeeping(env)
                 motion_backend = self._motion_backend(env)
-                if skill == "pick" and motion_backend == "ompl_mpc":
-                    done, steps, last_status = self._run_pick_with_motion_pipeline(
-                        env, sub, outdir=outdir, task_steps_so_far=task_steps_so_far
-                    )
-                elif skill == "place" and motion_backend == "ompl_mpc":
-                    done, steps, last_status = self._run_place_with_motion_pipeline(
-                        env, sub, task_steps_so_far=task_steps_so_far
-                    )
-                elif skill == "open" and motion_backend == "ompl_mpc":
-                    done, steps, last_status = self._run_open_drawer_with_motion_pipeline(env, sub)
-                elif skill == "close" and motion_backend == "ompl_mpc":
-                    done, steps, last_status = self._run_close_with_motion_pipeline(env, sub)
-                elif skill == "turn_on" and motion_backend == "ompl_mpc":
-                    done, steps, last_status = self._run_turn_knob_with_motion_pipeline(env, sub)
-                elif skill == "transport" and motion_backend == "ompl_mpc":
-                    done, steps, last_status = self._run_transport_with_motion_pipeline(
-                        env, sub, task_steps_so_far=task_steps_so_far
+                # See skills/registry.py: adding a new ompl_mpc-backed skill
+                # means adding one entry there, not a new elif branch here.
+                handler_name = OMPL_MPC_SKILL_HANDLERS.get(skill) if motion_backend == "ompl_mpc" else None
+                if handler_name is not None:
+                    handler = getattr(self, handler_name)
+                    done, steps, last_status = handler(
+                        env, sub, task_steps_so_far=task_steps_so_far, outdir=outdir
                     )
                 else:
                     steps = 0
@@ -2321,23 +2222,12 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
             post_steps_run = 0
             post_last_status: dict[str, Any] = {}
             if success and self.post_success_steps > 0:
-                # Same class of bug as the per-subtask stage sync above, one
-                # more place it was missing: this loop calls the legacy
-                # stage machine's own step_nominal() directly, completely
-                # outside the per-subtask dispatch loop that normally does
-                # this sync -- so if the *last* subtask (e.g. "place")
-                # actually ran on the new ompl_mpc pipeline, env.stage is
-                # still sitting at its env.reset() default of 0 ("approach
-                # pregrasp, gripper open"). Confirmed via a real rollout:
-                # these "settle" steps then restarted a brand-new pick
-                # attempt on whatever the legacy _cube_pos() tracks (the
-                # object that had just been correctly placed, now resting
-                # inside the goal container) and dove the arm back down,
-                # catching and lifting the whole basket. Stage 7 (retreat,
-                # gripper open, falls back to a computed generic retreat
-                # target if retreat_anchor_xy was never set by this
-                # backend) is the correct "we're already done" state here,
-                # not stage 0's "start a fresh pick".
+                # Same stage-sync issue as above, outside the normal dispatch
+                # loop: these post-success settle steps call the legacy stage
+                # machine directly, so if the last subtask ran on ompl_mpc,
+                # env.stage is still at its reset default (0, "start a fresh
+                # pick") instead of 7 ("already done, retreat") -- left as-is,
+                # settling restarts a pick on whatever was just placed.
                 if hasattr(env, "stage"):
                     env.stage = 7
                     env.close_counter = 0

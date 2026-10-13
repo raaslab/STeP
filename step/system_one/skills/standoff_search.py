@@ -20,25 +20,19 @@ def standoff_candidates(
     n_directions: int,
 ) -> list[np.ndarray]:
     """Candidate standoff positions to try, in order: the plain straight-line
-    standoff first (directly opposite the approach direction, e.g. straight
-    up for a top-down grasp, at the nominal distance), then increasingly
-    wide rings of positions offset sideways in the plane perpendicular to
-    the approach, *and* at increasingly larger standoff distances -- see
-    ``GraspSampleConfig.standoff_lateral_offsets_m``'s docstring for why a
-    single fixed standoff isn't always enough (something else can be sitting
-    in that airspace, e.g. an object left on the table between the robot and
-    a drawer handle).
+    standoff first (directly opposite the approach direction at the nominal
+    distance), then increasingly wide rings of positions offset sideways in
+    the plane perpendicular to the approach, *and* at increasingly larger
+    standoff distances -- see ``GraspSampleConfig.standoff_lateral_offsets_m``
+    for why a single fixed standoff isn't always enough (something else can
+    be sitting in that airspace).
 
     Distance matters independently of lateral direction: an obstacle
     hovering over the object can block every horizontal direction at the
-    *nominal* standoff height simply because reaching that height at all
-    requires sweeping an arm link (elbow/forearm, not just the gripper)
-    through the obstacle's footprint -- measured directly against a real
-    drawer-overhang scene, widening the lateral search alone left most
-    angles still blocked at the standoff stage. A taller standoff (further
-    back along the approach direction -- higher above the object, for a
-    top-down grasp) can clear the obstacle's own height entirely, letting
-    the final descent come down past it instead of trying to detour around
+    *nominal* standoff height, since reaching that height at all requires
+    sweeping an arm link (not just the gripper) through the obstacle's
+    footprint. A taller standoff can clear the obstacle's height entirely,
+    letting the final descent come down past it instead of detouring around
     it at the same blocked altitude.
     """
     approach = approach_direction_world / np.linalg.norm(approach_direction_world)

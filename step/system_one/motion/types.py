@@ -20,32 +20,25 @@ import numpy as np
 class GraspCandidate:
     """One candidate 6-DoF grasp for a named object.
 
-    Quaternion convention: **WXYZ** everywhere in this package (matches Cap-X's
-    ``libero_privileged.py`` and robosuite's own ``convert_quat``/obs conventions
-    for LIBERO). Convert to XYZW only at the boundary of a library that requires it
-    (e.g. ``scipy.spatial.transform.Rotation`` uses XYZW).
+    Quaternion convention: WXYZ everywhere in this package (matches Cap-X's
+    ``libero_privileged.py`` and robosuite's own conventions for LIBERO).
+    Convert to XYZW only at the boundary of a library that requires it (e.g.
+    ``scipy.spatial.transform.Rotation``).
 
-    ``grasp_pose_world`` is the **panda_hand / TCP frame** target (i.e. what
+    ``grasp_pose_world`` is the panda_hand / TCP frame target (i.e. what
     ``robot0_eef_pos``/the ``gripper0_right_grip_site`` reports), already
     converted from any fingertip-frame grasp-net-style output -- see
     ``grasp_generator.hand_from_fingertip_pose``.
 
     There is no separate pregrasp pose stored here -- ``PickSkill`` derives an
     internal standoff point (this grasp pose offset back along
-    ``approach_direction_world``) itself, plans the long-range approach to it
-    under strict ``CollisionPhase.FREE_SPACE`` (no target contact permitted),
-    and then *validates* -- via ``CollisionChecker.check_edge``, never blind
-    execution -- a short final descent from there to this grasp pose under
-    ``TERMINAL_APPROACH``. An earlier version executed that final segment as
-    raw, unvalidated joint-space linear interpolation; a later attempt
-    replaced the whole two-leg structure with a single OMPL plan directly to
-    the grasp pose under ``TERMINAL_APPROACH`` for its entire length, which
-    fixed the missing validation but introduced a worse bug -- permitting
-    gripper<->target contact for the *entire* approach let RRTConnect bump or
-    shove the object anywhere along a long path, confirmed by a real run
-    where a bowl ended up ~5cm from its recorded position after a
-    "successful" plan. See ``PickSkill``'s module docstring for the full
-    history.
+    ``approach_direction_world``), plans the long-range approach to it under
+    strict ``CollisionPhase.FREE_SPACE``, then validates (via
+    ``CollisionChecker.check_edge``, never blind execution) a short final
+    descent from there under ``TERMINAL_APPROACH``. Permitting gripper<->
+    target contact for the entire approach instead (rather than just this
+    short final leg) lets RRTConnect bump or shove the object anywhere along
+    a long path. See ``PickSkill``'s module docstring for more.
     """
 
     object_name: str

@@ -18,16 +18,15 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..collision import CollisionChecker, CollisionPhase
-from ..config import MotionConfig
-from ..kinematics import IKSolver
-from ..mpc import JointSpaceMPC, MPCContext
-from ..ompl_planner import MotionPlanner
-from ..panda import EE_SITE, FINGER_JOINT_NAMES, GRIPPER_BODIES, HAND_SITE, JOINT_NAMES, ROBOT_BODIES
-from ..scene_query import SceneQuery
-from ..servo import MotionTraceRecorder, _ServoMixin, is_settle_stalled, real_nonpermitted_contacts
-from ..time_parameterize import TimeParameterizer
-from ..types import MPCCostConfig, SkillFailureReason, SkillResult
+from ...motion.collision import CollisionChecker
+from ...motion.config import MotionConfig
+from ...motion.kinematics import IKSolver
+from ...motion.ompl_planner import MotionPlanner
+from ...motion.panda import EE_SITE, FINGER_JOINT_NAMES, GRIPPER_BODIES, HAND_SITE, JOINT_NAMES, ROBOT_BODIES
+from ...motion.scene_query import SceneQuery
+from ...motion.servo import MotionTraceRecorder, _ServoMixin, track_and_settle
+from ...motion.time_parameterize import TimeParameterizer
+from ...motion.types import MPCCostConfig, SkillFailureReason, SkillResult
 from .close_skill import CloseSkill
 
 
@@ -96,119 +95,63 @@ class LiberoCloseAdapter(_ServoMixin):
 
         approach_positions = np.asarray(plan_result.planned_trajectory.metadata["approach_positions"])
         push_positions = np.asarray(plan_result.planned_trajectory.metadata["push_positions"])
-        # One continuous reference: FREE_SPACE up to the standoff, then the
+        # One continuous reference: FREE_SPACE up to the standoff, then
         # descent onto the fixture, then the push through to closed -- no
-        # gripper-state change happens partway (unlike open's separate pull
-        # leg, gated on closing the gripper only after reaching the handle),
-        # so there is nothing to split this into two tracked legs for.
+        # gripper-state change happens partway, unlike open's separate pull
+        # leg, so there's nothing to split into two tracked legs for.
         full_reference = np.concatenate([traj.positions, approach_positions[1:], push_positions[1:]], axis=0)
         approach_start_idx = len(traj.positions)
 
         checker = skill.collision_checker
-        mpc = JointSpaceMPC(
-            self.joint_names,
-            self.ee_site,
-            horizon=int(self.config.mpc.get("horizon", 16)),
-            cost_config=MPCCostConfig(**{k: v for k, v in self.config.mpc.items() if k in MPCCostConfig.__dataclass_fields__}),
-        )
-        ctx = MPCContext(reference=full_reference)
-        mpc.reset()
-
         cfg = self.config.execution
-        max_hold_steps = max_steps if max_steps is not None else len(full_reference) + cfg.max_settle_steps
-        tracking_budget = min(max_hold_steps, len(full_reference) + cfg.max_settle_steps)
-
         steps = pre_home_steps
-        # Open the entire time -- there is nothing to grasp, so there is no
-        # reason to close the fist at all; contact is made by the palm/wrist
-        # structure, same as CloseSkill's own planning-time collision checks
-        # already assume (they never override finger qpos, so they validate
-        # against the default/open posture -- keeping the real gripper open
-        # here keeps execution consistent with what was actually checked).
+        # Open the entire time -- there is nothing to grasp, contact is made
+        # by the palm/wrist, and CloseSkill's own planning-time collision
+        # checks never override finger qpos, so they validate against the
+        # default/open posture that execution must match.
         gripper_cmd = self.env.open_gripper_cmd
-        pos_err = ori_err = float("inf")
-        converged = False
-        stalled = False
-        recent_pos_errs: list[float] = []
-        t0 = 0
         trace = MotionTraceRecorder()
-        while t0 < tracking_budget:
-            phase = CollisionPhase.FREE_SPACE if t0 < approach_start_idx else CollisionPhase.TERMINAL_APPROACH
-            live_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
-            q_current = live_scene.get_qpos(self.joint_names)
-            if phase == CollisionPhase.FREE_SPACE:
-                mpc_result = mpc.step(
-                    live_scene,
-                    q_current,
-                    ctx,
-                    t0_step=t0,
-                    collision_checker=checker,
-                    collision_phase=phase,
-                    target_object_body=target_body,
-                    replan_config=self.config.replan,
-                )
-                joint_target = mpc_result.joint_command
-                step_min_clearance = mpc_result.min_clearance
-                step_replan_requested = mpc_result.replan_requested
-            else:
-                # Plain joint-space tracking, no MPC optimization, once
-                # TERMINAL_APPROACH starts (descent onto and push through
-                # the fixture) -- descent and push are contact BY DESIGN,
-                # and the MPC's own cost function was measured fighting
-                # that even with collision-avoidance disabled: tracking a
-                # real predefined-point close, the whole reference stalled
-                # 11.5cm short of its final (push) target -- real, sustained
-                # contact (min_clearance -0.024m) the MPC's smoothness/
-                # effort cost apparently traded off against, rather than
-                # driving firmly through it the way a plain reference-
-                # following servo does. The planning stage (CloseSkill)
-                # already decided this point and push are the ones to use;
-                # an execution-time controller second-guessing that against
-                # its own cost function only ever produces a worse outcome.
-                ref_idx = min(t0, len(full_reference) - 1)
-                joint_target = full_reference[ref_idx]
-                step_min_clearance = float("inf")
-                step_replan_requested = False
-            cart_pos, cart_ori = self._servo_toward_joint_target(live_scene, joint_target)
-            self._step_env(cart_pos, cart_ori, gripper_cmd)
-            steps += 1
-            t0 += 1
-            if step_callback is not None:
-                step_callback()
-            post_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
-            trace.record_step(
-                t0,
-                post_scene.site_pose(self.ee_site)[0],
-                step_min_clearance,
-                step_replan_requested,
-                real_nonpermitted_contacts(post_scene, checker, phase, target_body, target_geom_ids),
-            )
-            if steps >= max_steps:
-                break
-
-            if t0 >= len(full_reference):
-                _, _, pos_err, ori_err = self._servo_toward_cartesian_pose(final_target_pos, contact_quat_wxyz)
-                if pos_err <= cfg.settle_position_tol_m and ori_err <= cfg.settle_orientation_tol_rad:
-                    converged = True
-                    break
-                recent_pos_errs.append(pos_err)
-                if is_settle_stalled(recent_pos_errs, cfg.stall_window_steps, cfg.stall_position_tol_m):
-                    # Same reasoning as open_drawer's own stall break: the
-                    # target sits right at/through the fixture's own closed
-                    # end (a real mechanical stop), so continuing to command
-                    # at full gain just pushes into it repeatedly without
-                    # getting any closer.
-                    stalled = True
-                    break
-
-        settle_steps = max(0, t0 - len(full_reference))
-        plan_result.diagnostics["settle"] = {
-            "steps": settle_steps,
-            "converged": converged,
-            "stalled": stalled,
-            "position_error_m": pos_err,
-            "orientation_error_rad": ori_err,
-        }
+        # See ``track_and_settle``'s own docstring (servo.py) for the shared
+        # loop this wraps. ``terminal_approach_uses_mpc=False`` is this
+        # skill's real divergence from the others: once TERMINAL_APPROACH
+        # starts, track the planned reference directly with no MPC
+        # optimization -- descent and push are contact BY DESIGN, and the
+        # MPC's smoothness/effort cost was measured trading off against that
+        # sustained contact instead of driving firmly through it. The
+        # planning stage already decided this point and push are the ones to
+        # use; a controller second-guessing that only produces a worse
+        # outcome.
+        result = track_and_settle(
+            self,
+            full_reference,
+            joint_names=self.joint_names,
+            ee_site=self.ee_site,
+            approach_start_idx=approach_start_idx,
+            target_pos=final_target_pos,
+            target_quat_wxyz=contact_quat_wxyz,
+            collision_checker=checker,
+            mpc_horizon=int(self.config.mpc.get("horizon", 16)),
+            mpc_cost_config=MPCCostConfig(
+                **{k: v for k, v in self.config.mpc.items() if k in MPCCostConfig.__dataclass_fields__}
+            ),
+            replan_config=self.config.replan,
+            gripper_cmd=gripper_cmd,
+            settle_position_tol_m=cfg.settle_position_tol_m,
+            settle_orientation_tol_rad=cfg.settle_orientation_tol_rad,
+            stall_window_steps=cfg.stall_window_steps,
+            stall_position_tol_m=cfg.stall_position_tol_m,
+            max_settle_steps=cfg.max_settle_steps,
+            mpc_step_kwargs={"target_object_body": target_body},
+            steps_so_far=steps,
+            max_steps=max_steps,
+            step_callback=step_callback,
+            terminal_approach_uses_mpc=False,
+            target_object_body=target_body,
+            permitted_contact_geom_ids=target_geom_ids,
+            trace=trace,
+        )
+        steps += result.steps
+        plan_result.diagnostics["settle"] = result.as_diagnostics()
         plan_result.diagnostics["motion_trace"] = {"push": trace.summary()}
 
         # Structural success check: how far the joint's qpos actually ended

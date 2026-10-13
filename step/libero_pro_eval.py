@@ -39,7 +39,6 @@ def parse_args() -> argparse.Namespace:
             "swap/task, every task, all 50 init-state trials per task."
         )
     )
-    p.add_argument("--legacy-vlm-stl-root", default="../vlm-stl")
     p.add_argument("--base-scene-context", default="configs/libero_template.json")
     p.add_argument("--schema", default="schemas/stl_plan_schema.json")
     p.add_argument("--suites", nargs="+", default=list(CAPX_SUITES), choices=list(LIBERO_SUITES))
@@ -91,8 +90,6 @@ def _build_command(args: argparse.Namespace, suite: str, perturbation: str, comb
         sys.executable,
         "-m",
         "step.libero_suite_runner",
-        "--legacy-vlm-stl-root",
-        args.legacy_vlm_stl_root,
         "--base-scene-context",
         args.base_scene_context,
         "--schema",

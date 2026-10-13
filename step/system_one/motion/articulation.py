@@ -3,20 +3,15 @@ drawers/cabinet levels in LIBERO's kitchen scenes. Pure MuJoCo introspection, no
 LIBERO Python API dependency, so it works for any slide-joint fixture the loaded
 model happens to contain, not just ``WoodenCabinet`` by name.
 
-A drawer's handle has no dedicated geom or site in LIBERO's assets (see
-``wooden_cabinet.xml``). The joint's own named "region" site (e.g.
-``wooden_cabinet_1_top_region``) is **not** a handle anchor either -- measured
-directly against the real model, it sits *behind* the drawer's own front-face
-panel (it's the interior placement-goal region LIBERO's ``In`` BDDL predicate
-uses for "put the bowl inside", not a grasp point). The handle is instead
-*located* geometrically in ``locate_handle_position_world``: it's whichever of
-the drawer body's own geoms protrudes furthest toward the measured "open"
-direction, which is what a handle physically is by construction. Everything
-here (which direction "open" moves, how far, where the handle is) is measured
-from real forward kinematics/geometry rather than inferred from naming
-conventions or the joint's local axis sign convention -- mirroring
-``scene_query.py``'s general preference for measured geometry over inferred
-constants.
+A drawer's handle has no dedicated geom or site in LIBERO's assets, and the
+joint's own named "region" site is not a handle anchor either -- it sits
+behind the drawer's front-face panel (it's the interior placement-goal region
+LIBERO's ``In`` predicate uses, not a grasp point). The handle is instead
+*located* geometrically in ``locate_handle_position_world``: whichever of the
+drawer body's own geoms protrudes furthest toward the measured "open"
+direction. Everything here (open direction, travel, handle location) is
+measured from real forward kinematics/geometry rather than inferred from
+naming conventions or axis sign conventions.
 """
 
 from __future__ import annotations
@@ -77,30 +72,23 @@ def discover_drawers(scene: SceneQuery) -> list[DrawerHandle]:
 
 def discover_cabinet_support_bodies(scene: SceneQuery) -> list[str]:
     """The static (non-sliding) frame body of every drawer/cabinet fixture
-    discovered by ``discover_drawers`` -- e.g. ``wooden_cabinet_1_base``,
-    the fixed frame a set of slide-jointed drawer levels all hang off of.
+    discovered by ``discover_drawers`` -- the fixed frame a set of
+    slide-jointed drawer levels all hang off of.
 
-    This is a *different* body from any ``DrawerHandle.drawer_body`` (which
-    is the sliding level itself, e.g. ``wooden_cabinet_1_cabinet_top`` --
-    confusingly named "cabinet_top" despite being a drawer, not the
-    cabinet's own top surface). Needed so "place X on top of the cabinet"
-    has a real, resolvable body to target: the cabinet's own flat top slab
-    is one of *this* body's collision geoms, not any drawer's.
+    This is a different body from any ``DrawerHandle.drawer_body`` (the
+    sliding level itself). Needed so "place X on top of the cabinet" has a
+    real, resolvable body to target: the cabinet's own flat top slab is one
+    of this body's collision geoms, not any drawer's.
 
     Found by walking each drawer body's parent chain up and stopping at the
-    first ancestor that actually *owns* collision geoms -- not simply the
-    topmost (world-parented) ancestor, confirmed directly against the real
-    ``wooden_cabinet_1`` asset to be the wrong body: its world-parented
-    root (``wooden_cabinet_1_main``) is an empty pass-through frame with
-    zero geoms of its own, while the real static shell (walls, top slab,
-    the works) lives one level further down, on
-    ``wooden_cabinet_1_base`` -- ``main``'s own direct child. A real
-    rollout confirmed this the hard way: registering ``main`` as the "place
-    on top" target meant its own real top slab (owned by ``base``) was
-    never excluded from the attached-object collision check, since that
-    exclusion matches by body name -- so *every* placement candidate
-    directly on the cabinet's own top read as "in collision with the thing
-    you're trying to place it on."
+    first ancestor that actually owns collision geoms, not simply the
+    topmost (world-parented) ancestor -- a cabinet's world-parented root can
+    be an empty pass-through frame with zero geoms of its own, one level
+    above the real static shell. Registering the empty root as the target
+    instead would mean its own top slab is never excluded from the
+    attached-object collision check (which matches by body name), so every
+    placement candidate directly on the cabinet's own top would read as
+    colliding with the thing it's being placed on.
     """
     return list(dict.fromkeys(discover_drawer_support_frames(scene).values()))
 
@@ -134,11 +122,11 @@ def _handle_cluster_geom_ids(
     """Geoms making up the handle assembly: among everything owned directly
     by the drawer body (front panel, side walls, handle), the handle is
     whichever cluster protrudes furthest toward the measured "open"
-    direction -- a handle is, by physical necessity, the part of a drawer
-    that sticks out toward whoever pulls it. Includes every geom within
-    ``cluster_tolerance_m`` of the outermost projection (the real handle is
-    usually a small multi-geom assembly: a bar/knob plus one or two
-    mounting studs, all at roughly the same depth)."""
+    direction -- the part of a drawer that physically sticks out toward
+    whoever pulls it. Includes every geom within ``cluster_tolerance_m`` of
+    the outermost projection, since the real handle is usually a small
+    multi-geom assembly (bar/knob plus mounting studs) at roughly the same
+    depth."""
     gids = scene.body_geom_ids(drawer.drawer_body, include_children=False)
     if not gids:
         raise KeyError(f"drawer body {drawer.drawer_body!r} has no geoms to locate a handle from")
@@ -154,16 +142,13 @@ def locate_handle_position_world(
     handle assembly found by ``_handle_cluster_geom_ids``, but at the depth
     of its *most protruding* geom rather than the assembly's mean depth.
 
-    The assembly is a graspable bar plus the one or two studs mounting it to
-    the drawer front, and those studs sit behind the bar (measured on the
-    real wooden_cabinet asset: bar at y=-0.136, studs at y=-0.154). Averaging
-    all three puts the target ~1.4cm *behind* the bar -- inside the space the
-    bar occupies -- so the fingers close behind the thing they are meant to
-    hold and the palm arrives at the bar instead. That is not a near miss
-    that merely fails: a real rollout descended, missed the top handle, and
-    dragged the *middle* drawer 94% open. Aiming at the bar's own depth is
-    also just what "grasp the handle" means physically -- you grip the part
-    that protrudes, not the mounting behind it.
+    The assembly is a graspable bar plus the studs mounting it to the drawer
+    front, and those studs sit behind the bar. Averaging all of them puts
+    the target behind the bar -- inside the space it occupies -- so the
+    fingers close behind the thing they're meant to hold and the palm
+    arrives at the bar instead, missing the handle entirely. Aiming at the
+    bar's own depth is also just what "grasp the handle" means physically:
+    you grip the part that protrudes, not the mounting behind it.
     """
     outer = _handle_cluster_geom_ids(scene, drawer, pull_axis_world, cluster_tolerance_m)
     positions = np.asarray([scene.data.geom_xpos[g] for g in outer], dtype=np.float64)
@@ -185,31 +170,25 @@ def estimate_handle_closing_width_m(
 ) -> float:
     """How wide the handle assembly is along ``closing_axis_world`` -- the
     real quantity the gripper's fingers close around, needed so a candidate
-    grasp's "closed" finger position can be validated (and later commanded)
-    at the width the handle *actually* has there, not the joint's own
-    mechanical closing limit (which corresponds to a zero gap -- fine for
-    "nothing between the fingers", wrong and physically impossible for any
-    real object of nonzero width; see ``CollisionChecker.check_gripper_
-    closure``'s docstring for why that distinction matters). Conservative
-    (never under-covers): for each handle-assembly geom, projects its own
-    real half-extent onto the closing axis and takes the largest single-geom
-    span, mirroring this package's general "the fitted measure must not be
-    smaller than the true geometry" rule (e.g. ``attached_object.
-    fit_spheres_from_geoms``).
+    grasp's "closed" finger position can be validated at the width the
+    handle actually has there, not the joint's own mechanical closing limit
+    (a zero gap, physically impossible for any real object; see
+    ``CollisionChecker.check_gripper_closure``). Conservative: projects each
+    handle-assembly geom's own half-extent onto the closing axis and takes
+    the largest single-geom span, mirroring this package's "never
+    under-cover the true geometry" rule (e.g.
+    ``attached_object.fit_spheres_from_geoms``).
     """
     handle_gids = _handle_cluster_geom_ids(scene, drawer, pull_axis_world, cluster_tolerance_m)
     axis = np.asarray(closing_axis_world, dtype=np.float64)
     axis = axis / np.linalg.norm(axis)
     # Measure the bar the fingers actually close on -- the most protruding
-    # geom -- not the widest thing in the cluster. "Largest single-geom span"
-    # sounds conservative, but the cluster also holds the mounting studs and,
-    # depending on how the assembly decomposes, slabs of the drawer front:
-    # measured on the middle drawer it returned 0.219m for a bar that is
-    # 1.6cm thick. Half of that clips to the gripper's own 0.04m limit, i.e.
-    # "close to fully open", so the gripper never closed at all and the pull
-    # slipped off the handle after 13% of travel. Same reasoning as
-    # locate_handle_position_world: the graspable part is the bit that
-    # sticks out.
+    # geom -- not the widest thing in the cluster. The cluster also holds
+    # mounting studs and drawer-front slabs, so "largest single-geom span"
+    # over the whole cluster can return a width far larger than the bar
+    # itself, clipping the gripper to near-fully-open and letting the pull
+    # slip off the handle. Same reasoning as locate_handle_position_world:
+    # the graspable part is the bit that sticks out.
     axis_pull = np.asarray(pull_axis_world, dtype=np.float64)
     axis_pull = axis_pull / np.linalg.norm(axis_pull)
     if handle_gids:
@@ -298,11 +277,9 @@ def discover_knobs(scene: SceneQuery) -> list[KnobHandle]:
     """Every hinge-jointed knob/dial in the loaded model -- mirrors
     ``discover_drawers``' generic (not name-hardcoded) discovery, just for
     ``mjJNT_HINGE`` instead of ``mjJNT_SLIDE``. LIBERO's flat_stove knob is
-    itself named "button" in the source asset despite being a rotary dial
-    (confirmed against the real XML: a hinge joint with range [-0.005, 2.1]
-    rad, not a slide) -- so this discovers by joint *type*, the same
-    measured-not-assumed philosophy as the rest of this module, rather than
-    trusting either object's own naming."""
+    itself named "button" in the source asset despite being a rotary dial,
+    so this discovers by joint type rather than trusting either object's
+    own naming."""
     model = scene.model
     out: list[KnobHandle] = []
     for jid in range(model.njnt):
@@ -341,16 +318,13 @@ def measure_knob_rotation(scene: SceneQuery, knob: KnobHandle) -> tuple[np.ndarr
     Mirrors ``measure_pull_axis_and_travel``'s own reasoning: rather than
     trusting the joint's local ``jnt_axis``/the body's own frame convention
     (which depends on how the body happens to be re-oriented in its parent's
-    frame -- confirmed against the real flat_stove asset: its knob body
-    carries a 90-degree mounting quat, so the local +Z the XML defines the
-    hinge about is *not* the world axis it actually spins about), extract the
-    real rotation axis from the *measured* delta rotation between the two
-    range endpoints.
+    frame -- a body's mounting quat can make the XML-defined hinge axis not
+    the actual world axis it spins about), extract the real rotation axis
+    from the measured delta rotation between the two range endpoints.
 
     Returns ``(axis_world, center_world, qpos_lo, qpos_hi)`` -- the raw joint
     range endpoints, not assumed ordered "off -> on" (callers compare against
-    the object's own known "on" threshold, e.g. flat_stove's qpos >= 0.5, to
-    decide which direction to turn).
+    the object's own known "on" threshold to decide which direction to turn).
     """
     lo, hi = scene.joint_qpos_range([knob.joint_name])
     lo, hi = float(lo[0]), float(hi[0])
@@ -376,10 +350,10 @@ def measure_knob_rotation(scene: SceneQuery, knob: KnobHandle) -> tuple[np.ndarr
     norm = float(np.linalg.norm(axis))
     axis_world = axis / norm if norm > 1e-9 else np.array([0.0, 0.0, 1.0])
     # A hinge's own body origin doesn't translate as its qpos changes (only
-    # rotates about the joint's pivot, which -- for a knob mounted flush to
-    # its own body frame, confirmed against flat_stove -- coincides with the
-    # body origin); pos_lo and pos_hi should already match; averaging is a
-    # cheap safety net against float drift, not a real translation.
+    # rotates about the joint's pivot, which for a knob mounted flush to its
+    # own body frame coincides with the body origin); pos_lo and pos_hi
+    # should already match, so averaging is just a safety net against float
+    # drift, not a real translation.
     center_world = 0.5 * (pos_lo + pos_hi)
     return axis_world, center_world, lo, hi
 
@@ -399,12 +373,10 @@ def estimate_knob_radius_m(scene: SceneQuery, knob: KnobHandle, axis_world: np.n
 
 # --------------------------------------------------------------------- doors (hinged)
 
-# Hinge-type alone can't tell a door from a knob (both mjJNT_HINGE) -- unlike
-# discover_knobs, which discovers purely by joint type, a door additionally
-# needs a name hint. LIBERO's microwave asset names its door joint literally
-# "microjoint" (see microwave.xml), so that substring is enough to keep this
-# out of discover_knobs' own name space rather than double-discovering the
-# same joint as both a door and a knob.
+# Hinge-type alone can't tell a door from a knob (both mjJNT_HINGE), so unlike
+# discover_knobs (pure joint type), a door additionally needs a name hint --
+# LIBERO's microwave door joint is named "microjoint", which keeps it out of
+# discover_knobs' own name space instead of being double-discovered as both.
 _DOOR_NAME_HINTS = ("micro",)
 
 
@@ -450,13 +422,11 @@ def resolve_microwave_door(scene: SceneQuery, canonical_name: str) -> MicrowaveD
 def _door_hinge_frame(scene: SceneQuery, door: MicrowaveDoor) -> tuple[np.ndarray, np.ndarray]:
     """World-frame (pivot, axis) of a door's hinge, read directly from
     MuJoCo's own forward kinematics (``xanchor``/``xaxis``) rather than
-    inferred from the body's own origin/orientation convention like
-    ``measure_knob_rotation`` does. That function's delta-rotation trick
-    exists to sidestep a knob body's own mounting quat, but still assumes
-    the pivot coincides with the body's origin -- true for a knob mounted
-    flush to its frame, not necessarily true for a door hinged at its edge.
-    ``xanchor``/``xaxis`` are already the real world-frame joint anchor/axis
-    MuJoCo's own solver uses, with no such assumption."""
+    inferred from the body's origin/orientation like ``measure_knob_rotation``
+    does -- that function's delta-rotation trick assumes the pivot coincides
+    with the body's origin, true for a flush-mounted knob but not necessarily
+    for a door hinged at its edge. ``xanchor``/``xaxis`` make no such
+    assumption."""
     jid = scene.joint_id(door.joint_name)
     pivot_world = np.array(scene.data.xanchor[jid], dtype=np.float64)
     axis_world = np.array(scene.data.xaxis[jid], dtype=np.float64)
@@ -469,11 +439,9 @@ def _door_push_point_local(
 ) -> np.ndarray:
     """Body-local offset (from the door body's own origin) of the door's
     outermost geom, measured perpendicular to the hinge axis -- the point a
-    push naturally contacts first (the door's handle/outer edge, farthest
-    from the hinge). Mirrors ``locate_handle_position_world``/
-    ``estimate_knob_radius_m``'s "measure the actual geometry" approach,
-    returning a body-local point (invariant to qpos) rather than a
-    world-frame one, so it can be re-projected at any qpos via FK."""
+    push naturally contacts first (the handle/outer edge, farthest from the
+    hinge). Returned body-local (invariant to qpos) rather than world-frame,
+    so it can be re-projected at any qpos via FK."""
     gids = scene.body_geom_ids(door.door_body, include_children=False)
     if not gids:
         raise KeyError(f"door body {door.door_body!r} has no geoms to locate a push point from")
@@ -492,11 +460,10 @@ def measure_door_close_arc(
     scene: SceneQuery, door: MicrowaveDoor, num_waypoints: int = 10
 ) -> tuple[np.ndarray, float, float, np.ndarray, np.ndarray]:
     """Measure the real swept arc a push-contact point on the door travels
-    from its *current* qpos to the joint's closed end, via FK on
-    ``num_waypoints`` scratch clones -- not just the two range endpoints like
-    ``measure_pull_axis_and_travel``/``measure_knob_rotation`` use, since a
-    hinge's travel is a genuine arc, not well-approximated by a single chord
-    the way a drawer's straight-line slide is.
+    from its current qpos to the joint's closed end, via FK on
+    ``num_waypoints`` scratch clones -- not just the two range endpoints,
+    since a hinge's travel is a genuine arc, not well-approximated by a
+    single chord the way a drawer's straight-line slide is.
 
     Returns ``(waypoints_world (N, 3), qpos_current, qpos_closed, axis_world,
     pivot_world)``.

@@ -6,16 +6,13 @@ reference point), convert that to a hand target via the fixed grasp
 transform, and servo straight there in small steps. No OMPL plan, no
 MPC-tracked reference, no separate raw-proportional "settle" phase.
 
-This replaces an earlier OMPL-planned/MPC-tracked/settle pipeline that hit a
-real, repeated bug: the carried object separating from the gripper mid-
-descent with zero contacts recorded anywhere -- not a collision, not a weak
-grip, some kind of abrupt commanded discontinuity buried in that machinery
-that resisted several targeted fixes (widening the settle loop's speed cap,
-etc.). Going straight to the target in small, bounded steps (the same dense-
-ramp pattern already proven safe for PickSkill's post-grasp carry lift) is a
-much smaller surface area for that class of bug, at the cost of not routing
-around obstacles the way a real motion plan would -- acceptable since
-transport already leaves the arm hovering clear above the goal first.
+This replaces an earlier OMPL-planned/MPC-tracked/settle pipeline that
+occasionally separated the carried object from the gripper mid-descent with
+no contacts recorded anywhere -- not a collision, not a weak grip. Servoing
+straight to the target in small, bounded steps (the same pattern already
+used for PickSkill's post-grasp carry lift) is a much smaller surface area
+for that class of bug, at the cost of not routing around obstacles -- fine
+here since transport already leaves the arm hovering clear above the goal.
 """
 
 from __future__ import annotations
@@ -23,15 +20,21 @@ from __future__ import annotations
 import numpy as np
 
 from ...orientation_utils import orientation_error_rotvec
-from ..collision import required_hand_pose_for_object_pose
-from ..config import MotionConfig
-from ..panda import EE_SITE, JOINT_NAMES
+from ...motion.collision import required_hand_pose_for_object_pose
+from ...motion.config import MotionConfig
+from ...motion.panda import EE_SITE, JOINT_NAMES
 from .place_skill import _container_floor_and_rim_z, _support_floor_and_rim_z
-from ..scene_query import SceneQuery, quat_to_rotmat_wxyz, resolve_body_name
-from ..types import AttachedObjectState, SkillFailureReason, SkillResult
+from ...motion.scene_query import SceneQuery, quat_to_rotmat_wxyz, resolve_body_name
+from ...motion.servo import _ServoMixin
+from ...motion.types import AttachedObjectState, SkillFailureReason, SkillResult
 
 
-class LiberoPlaceAdapter:
+class LiberoPlaceAdapter(_ServoMixin):
+    """Uses only ``_ServoMixin``'s ``_step_env`` -- no MPC/OMPL reference
+    here (see module docstring). ``_servo_toward_cartesian_target`` below
+    takes a Cartesian target directly, instead of the joint-space commands
+    ``_ServoMixin``'s other helpers expect."""
+
     def __init__(self, env, motion_config: MotionConfig | None = None) -> None:
         self.env = env
         self.config = motion_config or MotionConfig()
@@ -40,12 +43,6 @@ class LiberoPlaceAdapter:
 
     def _build_scene(self) -> SceneQuery:
         return SceneQuery.from_robosuite_sim(self.env.env.sim)
-
-    def _step_env(self, cart_pos: np.ndarray, cart_ori: np.ndarray, gripper_cmd: float) -> dict:
-        full_action = self.env._compose_full_action(cart_pos, cart_ori, gripper_cmd)
-        obs, _reward, _terminated, info = self.env._step_backend(full_action)
-        self.env.last_raw_obs = obs
-        return info
 
     def _servo_toward_cartesian_target(
         self, target_pos: np.ndarray, target_R: np.ndarray, pos_scale_m: float
@@ -74,9 +71,8 @@ class LiberoPlaceAdapter:
 
         # Desired final object pose: goal XY (or an explicit point) at the
         # target surface's real height, raised by however far the carried
-        # object's own collision geometry (not its visual mesh -- see
-        # config.py's settle_pos_scale_m comment for why that distinction
-        # keeps recurring) extends below its own reference point.
+        # object's own collision geometry (not its visual mesh) extends
+        # below its own reference point.
         container_pos, _ = scene.body_pose(goal_container_body)
         floor_fn = _support_floor_and_rim_z if place_surface == "top" else _container_floor_and_rim_z
         floor_z, _rim_z = floor_fn(scene, goal_container_body)
@@ -92,14 +88,9 @@ class LiberoPlaceAdapter:
             # A large open support (e.g. "table") has no single right spot
             # to default to -- but by the time `place` runs, `transport` has
             # already carried the object to a clear, reachable spot of its
-            # own choosing (see TransportSkill's own "furthest reachable
-            # from current position" search). Defaulting to the support
-            # body's own geometric center here threw that away every time:
-            # confirmed on a real rollout (libero_goal task 3, moving the
-            # bowl clear before opening the drawer) -- transport carried the
-            # bowl to ~(-0.03, 0.07), then this line sent it back to the
-            # table's exact center (0, 0), which the plate already occupied,
-            # undoing the clear placement transport had just found.
+            # own choosing. Defaulting to the support body's own geometric
+            # center here would throw that away (and likely collide with
+            # whatever else is already on the surface).
             target_xy = scene.body_pose(attached.object_name)[0][:2]
         else:
             target_xy = container_pos[:2]
@@ -117,16 +108,13 @@ class LiberoPlaceAdapter:
 
         # Bounded-step descent straight to the target -- see module
         # docstring. Deliberately closed-loop, not a precomputed linspace: a
-        # fixed schedule of waypoints assumes the arm covers ~1cm per control
-        # step, which it often doesn't (measured real per-step motion as low
-        # as 1-2mm under load) -- advancing through the schedule regardless
-        # of how far the arm actually got left the *next* waypoint further
-        # and further ahead of the real position, compounding into the exact
-        # same large, sustained-high-speed residual error (and resulting
-        # zero-contact grasp separation) this rewrite was meant to avoid.
-        # Recomputing a small step from wherever the arm *actually* is, every
-        # iteration, means the commanded action is always small regardless of
-        # how slowly or unevenly the real motion tracks it.
+        # fixed waypoint schedule assumes a roughly constant per-step
+        # distance covered, which doesn't hold under load, and advancing
+        # through it regardless of actual progress is what produced the
+        # large tracking error (and grasp separation) this rewrite avoids.
+        # Recomputing a small step from wherever the arm actually is each
+        # iteration keeps the commanded action small regardless of how
+        # unevenly the real motion tracks it.
         gripper_cmd = self.env.close_gripper_cmd
         max_step_m = 0.01
         descent_tol_m = 0.002
@@ -182,17 +170,13 @@ class LiberoPlaceAdapter:
                 step_callback()
 
         # Withdraw before judging the release, not while still parked at the
-        # place pose. _is_grasped() is a *contact* test, so an object that has
-        # genuinely been let go still reads as grasped whenever it stays
-        # touching the open fingers -- which is the normal case when placing
-        # into an already-occupied container, where the object comes to rest
-        # higher than the empty-container floor this pose was aimed at.
-        # Confirmed on the real two-object libero_10 basket task: placing the
-        # second object (onto the first, already in the basket) failed with
-        # "gripper opened but object is still reported grasped" while the
-        # place itself was fine. Lifting the hand clear first makes the test
-        # measure what it is actually trying to measure -- did the object stay
-        # behind -- rather than incidental contact.
+        # place pose. _is_grasped() is a contact test, so a genuinely
+        # released object still reads as grasped while it stays touching the
+        # open fingers -- the normal case when placing into an
+        # already-occupied container, where the object rests higher than the
+        # empty-container floor this pose aimed at. Lifting the hand clear
+        # first makes the test measure what it's meant to -- did the object
+        # stay behind -- rather than incidental contact.
         withdraw_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
         withdraw_from, withdraw_quat = withdraw_scene.site_pose(self.ee_site)
         withdraw_R = quat_to_rotmat_wxyz(withdraw_quat)
@@ -216,15 +200,11 @@ class LiberoPlaceAdapter:
             result.diagnostics["detail"] = "gripper opened but object is still reported grasped"
             return result, steps
 
-        # Where the object *actually* came to rest, not where we aimed. Until
-        # now this skill verified only that it released the gripper at a pose
-        # it had planned -- which reports success just as readily when the
-        # object rolls out of a drawer, is nudged off by the retreating hand,
-        # or never sat where it was dropped. The same "verify the outcome,
-        # not the intent" gap let a drawer skill report the target drawer's
-        # own opening fraction while it had actually dragged a different
-        # drawer open. Cheap to measure, and the only honest basis for
-        # calling a place successful.
+        # Where the object *actually* came to rest, not where we aimed --
+        # verifying only that the gripper released at the planned pose would
+        # report success just as readily if the object rolled out of a
+        # drawer or was nudged off by the retreating hand. Cheap to measure,
+        # and the only honest basis for calling a place successful.
         rest_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
         object_rest_xyz = np.asarray(rest_scene.body_pose(attached.object_name)[0], dtype=float)
         planned_xyz = np.asarray(result.diagnostics.get("object_xyz", object_rest_xyz), dtype=float)

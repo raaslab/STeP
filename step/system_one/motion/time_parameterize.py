@@ -1,27 +1,19 @@
 """Time-parameterization of an OMPL geometric path under joint velocity/
 acceleration limits.
 
-This is a **simplified** per-joint trapezoidal scaling, not a full Time-
-Optimal Path Parameterization (TOPP) solver -- no ``toppra`` dependency was
-added (not installed in this environment, and the task explicitly says to
-avoid adding heavy new dependencies where an existing stack suffices). The
-``TimeParameterizer`` interface is the seam to swap in a real TOPP solver
-later without touching callers.
+This is a simplified per-joint trapezoidal scaling, not a full Time-Optimal
+Path Parameterization (TOPP) solver -- no ``toppra`` dependency was added,
+since the existing stack suffices. The ``TimeParameterizer`` interface is the
+seam to swap in a real TOPP solver later without touching callers.
 
 Algorithm: segment durations are set purely by each joint's velocity limit
-(``|dq| / v_limit``, max across joints) -- this is exactly cumulative
-normalized arc length, so total duration only depends on the path's actual
-geometry, not on how densely it happens to be sampled (an earlier version of
-this module instead gave every segment an independent from-rest-to-rest
-trapezoidal profile, which made duration scale with the *number* of waypoints
-instead of distance -- see ``tests/test_time_parameterize.py::
-test_duration_scales_with_distance_not_number_of_waypoints``). Acceleration
-limits are then enforced by clipping the finite-differenced acceleration
-profile after resampling, rather than folded into segment-duration
-allocation -- simpler, and avoids re-integrating positions (which would drift
-off the planned path's exact endpoints). This is a genuine simplification,
-not a full time-optimal solve: a real TOPP pass would jointly optimize the
-whole velocity profile instead of clipping after the fact.
+(``|dq| / v_limit``, max across joints) -- exactly cumulative normalized arc
+length, so total duration depends only on the path's geometry, not on how
+densely it's sampled. Acceleration limits are then enforced by clipping the
+finite-differenced acceleration profile after resampling, rather than folded
+into segment-duration allocation -- simpler, and avoids re-integrating
+positions (which would drift off the planned path's exact endpoints). A real
+TOPP pass would instead jointly optimize the whole velocity profile.
 """
 
 from __future__ import annotations

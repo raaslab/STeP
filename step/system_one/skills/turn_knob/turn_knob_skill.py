@@ -2,81 +2,95 @@
 outer edge and plan a rotation about its own measured axis -- e.g. LIBERO's
 ``flat_stove_1`` control ("turn on the stove").
 
-Mirrors ``OpenDrawerSkill``'s own reasoning almost exactly, just for a
-rotational joint instead of a prismatic one (see that module's docstring for
-why a fixture gets its own small, purpose-built skill instead of being forced
-through ``PickSkill``'s free-object OR-set machinery): a knob has exactly one
-physically correct rotation axis (measured, see ``articulation.
-measure_knob_rotation``) and exactly one physically correct motion after
-grasping (a rotation about that axis, not a free 6-DoF carry).
+Mirrors ``OpenDrawerSkill``'s reasoning for a rotational joint instead of a
+prismatic one: a knob has exactly one physically correct rotation axis
+(measured, see ``articulation.measure_knob_rotation``) and exactly one
+correct motion after grasping (a rotation about that axis), so it gets its
+own small skill rather than being forced through ``PickSkill``.
 
-**Real-world grounding for the "turn on" threshold**: LIBERO's own
-``FlatStove.turn_on(qpos)`` (``libero/envs/objects/articulated_objects.py``)
-returns ``qpos >= 0.5`` -- the object's own joint range is
-``[-0.005, 2.1]`` radians (a hinge, confirmed against the real
-``flat_stove.xml`` asset, despite the joint itself being named "button").
-``KnobConfig.turn_on_qpos_threshold`` defaults to that same 0.5 so this
-skill's own internal success check agrees with LIBERO's ground truth, but
-it's a plain config value, not hardcoded into the skill logic itself, so a
-different knob/threshold can be passed via ``MotionConfig``.
+**"Turn on" threshold**: matches LIBERO's own ``FlatStove.turn_on(qpos)``
+(``qpos >= 0.5``, joint range ``[-0.005, 2.1]`` rad) so this skill's internal
+success check agrees with LIBERO's ground truth. It's a plain config value
+(``KnobConfig.turn_on_qpos_threshold``), overridable for a different knob.
 
-**Grasp geometry**: a knob this size (measured radius ~5.5cm on the real
-flat_stove asset) is *wider* than this gripper's max opening (~8cm giving a
-usable diameter far short of 11cm) -- gripping through its full diameter
-isn't possible. Instead, this grips a narrow chord near the knob's outer
-edge: for a circle of radius R, a chord at perpendicular offset ``d`` from
-the center has length ``2*sqrt(R^2 - d^2)``; solving for the ``d`` that
-produces a target (narrow, comfortably-graspable) chord width places the
-grasp point close to the rim without needing to span the center. The
-gripper's closing axis at that point is *tangential* (perpendicular to the
-radial direction to the chord's midpoint), not radial -- confirmed by
-direct derivation, not assumed by analogy with the hollow-rim (bowl) case in
-``grasp_generator.py``'s ``_rim_edge_candidates``, which closes *radially*
-across a thin wall; a solid knob has no "inside" to straddle.
+**Grasp geometry**: a knob's full diameter is typically wider than the
+gripper's max opening, so gripping spans the full diameter isn't possible.
+Instead this grips a narrow chord near the outer edge: for a circle of radius
+R, a chord at perpendicular offset ``d`` from the center has length
+``2*sqrt(R^2 - d^2)``; solving for ``d`` at a target chord width places the
+grasp near the rim. The closing axis there is tangential (perpendicular to
+the radial direction), not radial like the hollow-rim case in
+``grasp_generator.py`` -- a solid knob has no "inside" to straddle.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
-from ..articulation import (
+from ...motion.articulation import (
     KnobHandle,
     estimate_knob_radius_m,
     measure_knob_rotation,
     resolve_knob,
 )
-from ..collision import CollisionChecker, CollisionPhase
-from ..config import MotionConfig
-from ..kinematics import IKSolver
-from ..ompl_planner import MotionPlanner
-from ..panda import FINGER_JOINT_NAMES
-from ..scene_query import SceneQuery, quat_to_rotmat_wxyz, rotmat_to_quat_wxyz
-from ..types import IKResult, PlannerFailureReason, SkillFailureReason, SkillResult
+from ...motion.collision import CollisionChecker, CollisionPhase
+from ...motion.config import MotionConfig
+from ..ik_utils import solve_ik_robust as _solve_ik_robust
+from ...motion.kinematics import IKSolver
+from ...motion.ompl_planner import MotionPlanner
+from ...motion.panda import FINGER_JOINT_NAMES
+from ...motion.scene_query import SceneQuery, quat_to_rotmat_wxyz, rotmat_to_quat_wxyz
+from ...motion.types import PlannerFailureReason, SkillFailureReason, SkillResult
 
 
-def _solve_ik_robust(
-    ik_solver: IKSolver,
-    scene: SceneQuery,
-    target_pos: np.ndarray,
-    target_quat_wxyz: np.ndarray,
-    seed_q: np.ndarray,
-    rng: np.random.Generator,
-    n_restarts: int = 8,
-    perturb_scale: float = 0.6,
-) -> IKResult:
-    """Same retry-from-perturbed-seeds shape as open_drawer_skill.py's own
-    helper of the same name -- a local DLS solve landing in a bad basin is a
-    generic IK-solver risk, not specific to drawers."""
-    result = ik_solver.solve(scene.clone(), target_pos, target_quat_wxyz, seed_q=seed_q)
-    if result.success:
-        return result
-    lo, hi = scene.joint_qpos_range(ik_solver.joint_names)
-    for _ in range(n_restarts):
-        perturbed = np.clip(seed_q + rng.uniform(-perturb_scale, perturb_scale, size=seed_q.shape), lo, hi)
-        result = ik_solver.solve(scene.clone(), target_pos, target_quat_wxyz, seed_q=perturbed)
-        if result.success:
-            return result
-    return result
+@dataclass
+class KnobConfig:
+    """Tuning for ``TurnKnobSkill``/``LiberoStoveAdapter`` (hinge-jointed
+    knobs/dials only -- see ``motion/articulation.py``'s ``discover_knobs``).
+    """
+
+    approach_standoff_m: float = 0.06
+    # A knob's full diameter is typically wider than the gripper's max
+    # opening, so grasping instead targets a narrow chord near the rim --
+    # see the module docstring's chord-geometry derivation. Must stay
+    # comfortably under the gripper's real max opening.
+    grasp_chord_width_m: float = 0.035
+    # Vertical offsets (m) along the knob's rotation axis, tried together
+    # with the angle search below. A knob's collision mesh is often
+    # non-cylindrical (e.g. a raised pointer on a wider base), so the solid
+    # cross-section at a fixed radius varies with height, and only a real
+    # contact check (``_grip_contact_depth``) can tell which height actually
+    # has material there -- collision-clear alone isn't enough, since some
+    # heights close on empty air. Ordered smallest-margin-first since real
+    # contact was found more reliably close to the knob's base.
+    grasp_height_margins_m: tuple[float, ...] = (0.01, 0.0, 0.02, 0.015, 0.03, 0.005)
+    # Unlike a drawer handle's single measured position, a knob has a full
+    # circle of equally-valid grasp points, so the search also sweeps angle
+    # around the rim (not just IK seed per point). This many evenly-spaced
+    # angles are tried; each delegates its own IK-seed retries to
+    # ``_solve_ik_robust``.
+    radial_angle_samples: int = 16
+    # Same "try a few, take the first feasible" shape as
+    # DrawerConfig.pose_selection_attempts, spent per angle.
+    pose_selection_attempts: int = 6
+    planning_attempts: int = 3
+    # Tried largest-first; the first fraction of the joint's full measured
+    # range (toward its "on" endpoint) that's IK-reachable and
+    # collision-clear wins -- mirrors DrawerConfig.pull_fraction_fallbacks.
+    turn_fraction_fallbacks: tuple[float, ...] = (0.75, 0.6, 0.45, 0.3)
+    # Absolute qpos (radians) at/above which the knob counts as "turned on".
+    # Matches LIBERO's own flat_stove.turn_on() threshold (qpos >= 0.5);
+    # overridable per-scene for a different knob/threshold.
+    turn_on_qpos_threshold: float = 0.5
+    # How far past `turn_on_qpos_threshold` to target turning the knob to,
+    # rather than the joint's full range end -- cranking to the mechanical
+    # stop drags the arm through the surrounding burner grate/table, and a
+    # real stove only needs to turn far enough to "click on".
+    turn_on_safety_margin_rad: float = 0.6
+    retreat_m: float = 0.06
+    retreat_steps: int = 40
 
 
 def _unit(v: np.ndarray) -> np.ndarray:
@@ -115,32 +129,21 @@ def _grip_contact_depth(
     """Does actually closing the fingers here touch real material on
     ``target_body``, not just "closing doesn't collide with anything else"?
 
-    ``CollisionChecker.check_gripper_closure`` only rejects a *bad* contact
-    (anything outside the permitted fingerpad<->target/small-overlap rules)
-    -- it happily reports "not in collision" for a closure that touches
-    nothing at all, since no contact is trivially not a bad one. That gap is
-    invisible for a drawer handle or a normal pick target (their geometry is
-    simple enough that a collision-clear closure at the intended width
-    reliably means "touching it"), but a real knob's collision mesh is not a
-    simple prism -- confirmed directly against the real flat_stove_1 asset,
-    whose solid cross-section at a plausible grasp radius varies sharply
-    with height (see ``KnobConfig.grasp_height_margins_m``'s own comment):
-    several collision-clear (margin, angle) candidates turned out to close
-    on pure empty air. Verified with a real rollout: accepting those left
-    ``knob_grip_verification.gripped=False`` and the knob barely rotated at
-    all. This check closes that gap directly, the same way
-    ``LiberoOpenDrawerAdapter``'s own post-execution ``gripped_handle``
-    diagnostic already does -- just applied here at *plan* time, as a hard
-    acceptance gate instead of an after-the-fact diagnostic.
+    ``CollisionChecker.check_gripper_closure`` only rejects a *bad* contact --
+    it reports "not in collision" just as happily for a closure that touches
+    nothing at all. That gap doesn't matter for simpler geometry like a
+    drawer handle, but a knob's collision mesh is often non-cylindrical, so a
+    collision-clear closure can still close on empty air. This check closes
+    that gap directly as a hard acceptance gate at plan time (rather than an
+    after-the-fact diagnostic like ``LiberoOpenDrawerAdapter``'s
+    ``gripped_handle``).
 
     Returns the deepest (most negative) fingerpad<->target penetration
-    found, or ``None`` if there's no real contact at all -- ``None`` is a
-    hard rejection (no material there at all); the actual depth is used
-    only to break ties between candidates that can turn the knob equally
-    far (see ``TurnKnobSkill.execute``'s own selection comment -- turn
-    reach, not raw grip depth, is what actually determined success in a
-    real rollout, since the single deepest-gripping point available turned
-    out to sit right next to an obstacle that capped its usable rotation).
+    found, or ``None`` if there's no real contact at all (a hard rejection).
+    The depth is only used to break ties between candidates that can turn
+    the knob equally far -- turn reach, not raw grip depth, is what actually
+    determines success, since the deepest-gripping point can sit next to an
+    obstacle that caps its usable rotation.
     """
     scratch = scene.clone()
     scratch.set_qpos(collision_checker.joint_names, arm_q)
@@ -234,31 +237,19 @@ class TurnKnobSkill:
         finger_closed_qpos = np.array([finger_half_travel, -finger_half_travel])
 
         # A knob's grasp point has two free dimensions a drawer handle's
-        # doesn't: which angle around the rim to grip, and at what height
-        # along the rotation axis (see KnobConfig.grasp_height_margins_m's
-        # own comment -- a knob's real collision mesh is not a simple
-        # prism, so the solid cross-section at a given radius genuinely
-        # varies with height). A point offset along the rotation axis from
-        # `center_world` stays on that same axis, so any margin still
-        # rotates identically to the true center for this skill's turn-angle
-        # math below. Per (margin, angle) pair, IK-seed retries are
-        # delegated to `_solve_ik_robust`'s own perturbed-restart search.
+        # doesn't: which angle around the rim, and at what height along the
+        # rotation axis (see KnobConfig.grasp_height_margins_m). A point
+        # offset along the rotation axis from `center_world` stays on that
+        # axis, so any margin still rotates identically to the true center.
         #
-        # Grip choice and turn feasibility are coupled, not separable steps:
-        # confirmed directly against the real flat_stove_1 asset, the
-        # (margin, angle) with the single deepest measured grip sat right
-        # next to the surrounding burner grate, tolerating only ~0.2rad of
-        # rotation before the open gripper swept into it -- nowhere near
-        # enough to cross the "on" threshold -- while a shallower-but-still-
-        # real grip elsewhere on the rim allowed a much larger sweep. So
-        # each candidate here is scored by how much of the *turn* it can
-        # actually deliver (checked right here, not deferred to a later,
-        # separate step), with a real (negative) grip-contact depth as a
-        # hard prerequisite -- not the other way around. And collision-clear
-        # alone isn't a sufficient prerequisite either: several (margin,
-        # angle) pairs were collision-clear yet closed on empty air (see
-        # `_grip_contact_depth`'s own docstring) -- confirmed real contact
-        # is required, not just an extra diagnostic.
+        # Grip choice and turn feasibility are coupled, not separable: the
+        # deepest-gripping point can sit right next to an obstacle that caps
+        # its usable rotation well short of the "on" threshold, while a
+        # shallower-but-real grip elsewhere allows a much larger sweep. So
+        # each candidate is scored by how much of the turn it can actually
+        # deliver, with a real (negative) grip-contact depth as a hard
+        # prerequisite -- collision-clear alone isn't sufficient, since some
+        # candidates close on empty air (see `_grip_contact_depth`).
         best_grasp_ik = best_standoff_ik = best_turn_ik = None
         best_turn_fraction = -1.0
         best_depth = 0.0
@@ -342,11 +333,8 @@ class TurnKnobSkill:
                     last_rejection = "no_feasible_turn_target"
                     continue
 
-                # Largest deliverable turn wins outright; a real grip depth
-                # only breaks ties between candidates that turn equally far
-                # (confirmed with a real rollout: turn reach, not raw grip
-                # depth, is what determined whether the knob actually
-                # crossed the "on" threshold).
+                # Largest deliverable turn wins outright; grip depth only
+                # breaks ties between candidates that turn equally far.
                 if candidate_turn_fraction < best_turn_fraction:
                     continue
                 if candidate_turn_fraction == best_turn_fraction and depth >= best_depth:
@@ -392,12 +380,9 @@ class TurnKnobSkill:
                 diagnostics={"detail": f"planning_failed:{plan.failure_reason}", "knob": knob.knob_body},
             )
 
-        # Only the descent (standoff -> grasp) goes into `approach_positions`
-        # -- matching OpenDrawerSkill's exact convention: the turn leg
-        # (grasp_q -> turned_q) is tracked separately by the adapter, only
-        # after the gripper has actually closed on the knob (see that
-        # module's execute()-comment for why -- driving the turn motion
-        # before the gripper is closed never actually grips anything).
+        # Only the descent (standoff -> grasp) goes into `approach_positions`,
+        # matching OpenDrawerSkill's convention -- the turn leg (grasp_q ->
+        # turned_q) is tracked separately, after the gripper has closed.
         descent_positions = np.linspace(standoff_ik.q, grasp_ik.q, 15)
         plan.metadata["standoff_q"] = standoff_ik.q.tolist()
         plan.metadata["grasp_q"] = grasp_ik.q.tolist()

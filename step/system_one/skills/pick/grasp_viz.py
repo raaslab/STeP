@@ -1,14 +1,11 @@
 """Shared grasp-candidate image rendering, used by both ``scripts/
 visualize_grasp_poses.py`` (manual debugging) and ``LiberoPickAdapter.run()``
-(a permanent, automatic save on every real pick -- see that call site's
-comment) so the two never drift apart.
+(an automatic save on every real pick) so the two stay in sync.
 
-Markers: a colored dot at each candidate's grasp position, plus a short line
-along the gripper's closing axis (the direction the fingers move together)
-so a rim grasp's radial straddle is visible, not just a point. Center-grasp
-candidates are drawn in blue, rim-edge in orange, any other/unlabeled
-strategy (e.g. a learned generator's candidates) in yellow; the candidate
-PickSkill actually selected is highlighted in green and labeled "SELECTED".
+Draws a dot at each candidate's grasp position plus a short line along the
+gripper's closing axis, so a rim grasp's radial straddle is visible. Center
+candidates are blue, rim-edge orange, other/unlabeled strategies yellow; the
+selected candidate is green and labeled "SELECTED".
 """
 
 from __future__ import annotations
@@ -18,15 +15,14 @@ from typing import Any
 
 import numpy as np
 
-from ..scene_query import quat_to_rotmat_wxyz
-from ..types import GraspCandidate
+from ...motion.scene_query import quat_to_rotmat_wxyz
+from ...motion.types import GraspCandidate
 
 
 def camera_project(model: Any, data: Any, camera_name: str, height: int, width: int, points_world: np.ndarray) -> np.ndarray:
     """World (N,3) -> pixel (N,2) [row, col] for a MuJoCo camera, matching the
     same up/down flip ``LiberoManipulationEnv.render_rgb_frame`` applies to
-    its rendered frames (see that method's docstring for why the flip is
-    needed instead of robosuite's private macro file)."""
+    its own rendered frames."""
     import mujoco
 
     cam_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, camera_name)

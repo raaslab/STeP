@@ -98,14 +98,10 @@ class MotionPlanner:
         Note for callers wrapping this in a "retry planning_attempts times"
         loop: retrying this exact (start_q, goal_qs) pair does *not* resample
         a different solution. OMPL seeds its global RNG once per process and
-        refuses later reseeds ("Random number generation already started"),
-        and for a short hop RRTConnect's trees connect on their first
-        extension anyway, so repeated identical calls return byte-identical
-        paths -- measured directly: 8 back-to-back retries of one transport
-        call, all identical. Retries only help when something about the
-        problem itself differs (a different goal configuration, a moved
-        scene); to get a *better* path, give a better goal (see
-        ``TransportSkill``'s nearest-configuration hover-IK selection).
+        refuses later reseeds, so repeated identical calls return
+        byte-identical paths. Retries only help when something about the
+        problem itself differs; to get a better path, give a better goal
+        (see ``TransportSkill``'s nearest-configuration hover-IK selection).
         """
         if not OMPL_AVAILABLE:
             return self.unavailable_plan()
@@ -147,13 +143,11 @@ class MotionPlanner:
 
         # Try the trivial straight-line joint-space path to each goal before
         # invoking a sampling planner at all. RRTConnect returns whatever its
-        # trees happen to connect, which is *feasible* but carries no
-        # guarantee of being direct -- and its own simplification pass can't
-        # recover a direct path it never found. When the straight line is
-        # already collision-free (the common case for a short hop through
-        # open space, e.g. lifting a grasped bowl to a hover point a few cm
-        # away) it is both optimal and deterministic, so there is nothing to
-        # gain from sampling. Costs one edge check per goal on the way in.
+        # trees happen to connect -- feasible, but with no guarantee of being
+        # direct, and simplification can't recover a direct path it never
+        # found. When the straight line is already collision-free (the
+        # common case for a short hop through open space) it's both optimal
+        # and deterministic, so there's nothing to gain from sampling.
         edge_resolution = self.config.validity_resolution * float(
             np.max(self.joint_limits_hi - self.joint_limits_lo)
         )
@@ -211,16 +205,10 @@ class MotionPlanner:
             )
         if str(solved) != "Exact solution":
             # OMPL's "Approximate solution" means RRTConnect's tree never
-            # actually connected start and goal within its budget -- it just
-            # hands back the path to whichever tree node ended up closest to
-            # the goal. Treating that as success (as an earlier version of
-            # this function did) silently executes a trajectory that doesn't
-            # reach the intended target: invisible while every plan call was
-            # a short hop (e.g. hovering a few cm above a container that
-            # `transport` had already carried the object next to), but a real
-            # failure once a single plan call has to cover a much longer
-            # distance (e.g. skipping `transport` entirely) and the default
-            # range/timeout aren't generous enough to fully connect.
+            # actually connected start and goal within budget -- it just
+            # hands back the path to whichever tree node ended up closest.
+            # Treating that as success would silently execute a trajectory
+            # that never reaches the intended target, so it's a failure here.
             reason = (
                 PlannerFailureReason.APPROXIMATE_SOLUTION_ONLY
                 if str(solved) == "Approximate solution"

@@ -1,8 +1,8 @@
 """Grasp-candidate generation.
 
 Starting point is intentionally simple, per Cap-X's privileged-state generator
-(``capx/integrations/franka/libero_privileged.py``, MIT License, Copyright (c)
-2026 Max Fu, https://github.com/capgym/cap-x): ``FrankaLiberoPrivilegedApi.
+(``capx/integrations/franka/libero_privileged.py``, MIT License,
+https://github.com/capgym/cap-x): ``FrankaLiberoPrivilegedApi.
 sample_grasp_pose()`` there is a single hardcoded top-down grasp at the
 object's privileged pose with quaternion **WXYZ** ``[0, 1, 0, 0]`` (gripper
 pointing straight down). This module keeps that same top-down, oracle-pose
@@ -17,27 +17,19 @@ starting point but extends it in two ways:
 
 2. **Rim-edge candidates**: Cap-X has no object-specific grasp logic to
    borrow here -- its privileged generator is a single fixed pose, and its
-   vision path (``libero.py``) delegates entirely to Contact-GraspNet, which
-   finds rim/wall grasps only by sampling antipodal contacts over real
-   geometry, not via a hand-coded rule. Since we don't have Contact-GraspNet
-   available, this generator adds an explicit strategy for objects whose
-   *whole* cross-section is too wide to encompass at any yaw (bowls, mugs,
-   cups): grasp a single point around the object's rim instead, with the
-   wrist yawed so the gripper's closing axis is *radial* at that point (one
-   finger lands just outside the rim, the other just inside) rather than
-   trying to span the object's full diameter. This is the same geometric
-   idea as the legacy stage machine's fixed ``grasp_rim_offset`` (see
-   ``base_env.py``'s ``_effective_grasp_rim_offset``/``modes.py``'s
-   ``RIM_GRASP_KEYWORDS``) -- generalized from one hardcoded direction/object
-   to *every* object, sampled at ``rim_num_angle_samples`` points around the
-   full circumference instead of one fixed direction, so there's always a
-   candidate on the side that's actually IK-reachable and collision-free.
-   Verified against the real ``akita_black_bowl`` mesh: the legacy system's
-   ``[0.0, 0.045, 0.05]`` offset (a Y-offset of 4.5cm) corresponds almost
-   exactly to ``rim_offset_fraction=0.6`` of this generator's AABB-derived
-   radius for that same bowl (measured rim ring radius ~0.047m vs `0.6 *
-   min(half_extents[:2])` = ~0.047m) -- the default wasn't guessed, it was
-   calibrated against the one object we already know a working offset for.
+   vision path delegates entirely to Contact-GraspNet, which this generator
+   doesn't have available. Instead it adds an explicit strategy for objects
+   whose *whole* cross-section is too wide to encompass at any yaw (bowls,
+   mugs, cups): grasp a single point around the object's rim, with the wrist
+   yawed so the gripper's closing axis is *radial* at that point (one finger
+   just outside the rim, one just inside) rather than spanning the full
+   diameter. This generalizes the legacy stage machine's fixed
+   ``grasp_rim_offset`` (``base_env.py``/``modes.py``'s
+   ``RIM_GRASP_KEYWORDS``) from one hardcoded direction to every object,
+   sampled at ``rim_num_angle_samples`` points around the full circumference
+   so there's always a candidate on a reachable, collision-free side. The
+   default ``rim_offset_fraction`` is calibrated against a real bowl mesh
+   with a known-working legacy offset, not guessed.
 
 Multiple orientations across *both* strategies are handed to ``PickSkill``,
 which is responsible for picking a working one via IK/collision/OMPL
@@ -53,13 +45,91 @@ layout -- see ``scene_query.py``'s module docstring.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 import numpy as np
 
 from ...modes import FORCE_MANUAL_KEYWORDS, MANUAL_YAW_OVERRIDE_KEYWORDS, RIM_GRASP_KEYWORDS
-from ..config import GraspSampleConfig
-from ..scene_query import SceneQuery, quat_mul_wxyz, quat_to_rotmat_wxyz
-from ..types import GraspCandidate
+from ..ik_utils import yaw_quat_wxyz
+from ...motion.scene_query import SceneQuery, quat_mul_wxyz, quat_to_rotmat_wxyz
+from ...motion.types import GraspCandidate
+
+
+@dataclass
+class GraspSampleConfig:
+    num_yaw_samples: int = 8
+    # Center-grasp yaws are sampled across [best-half_range, best+half_range],
+    # where "best" is computed from the object's own real geometry (an
+    # oriented-bounding-box fit -- see grasp_generator._object_xy_obb_world),
+    # not blindly across the full [0, pi) world-frame range: the object's
+    # true shape and current orientation already tell us where the good
+    # candidates are, so samples are concentrated there instead of mostly
+    # landing on angles we already know are worse.
+    yaw_search_half_range_rad: float = 0.7853981633974483  # pi/4, i.e. +-45 degrees
+    lift_check_m: float = 0.05
+    # Extra lift after the grasp-verification test lift so the next skill
+    # (usually transport) has enough clearance to plan a path -- starting low
+    # and table-adjacent routinely caused NO_PATH_FOUND. 0 disables it.
+    post_grasp_carry_lift_m: float = 0.10
+    # Standoff distance for the final approach segment (see PickSkill's
+    # module docstring): the long-range approach plans under strict
+    # FREE_SPACE to a point this far from the grasp pose along the approach
+    # direction, then a short final descent from there to the grasp pose is
+    # explicitly collision-validated (never blindly executed) under
+    # TERMINAL_APPROACH. Not a separate caller-visible stage -- PickSkill
+    # is still one atomic plan call -- just where the "no contact yet" ->
+    # "contact with the target is now expected" transition happens.
+    approach_standoff_m: float = 0.08
+    # Lateral offsets (in the plane perpendicular to the approach direction)
+    # tried for the standoff position if the straight-line one (directly
+    # above the object, for a top-down grasp) is unreachable or in collision.
+    # A fixed vertical standoff assumes the airspace above the object is
+    # always clear, which an earlier subtask (e.g. an opened drawer) can
+    # violate; offsetting sideways lets the same validation find a standoff
+    # approaching from a shallow angle instead. `(0.0, 0.0)` (straight up) is
+    # tried implicitly first by the caller before any of these.
+    # Multiples of `approach_standoff_m` tried for the standoff distance
+    # itself (1.0 = nominal), before/alongside the lateral search below: an
+    # obstacle hovering over the object can block every lateral direction at
+    # the nominal standoff height (a non-gripper arm link sweeps through its
+    # footprint regardless of heading), so a taller standoff can clear the
+    # obstacle's height entirely instead. See standoff_search.standoff_candidates.
+    standoff_distance_multipliers: tuple[float, ...] = (1.0, 2.5, 4.0)
+    # More radii and finer angular resolution than a narrower first pass,
+    # which left some candidates blocked when a wide overhanging obstacle
+    # wasn't reliably dodged by a few evenly-spaced directions. Costs a few
+    # extra IK/collision checks per candidate (cheap next to a full OMPL
+    # plan) for meaningfully better odds of a clear approach angle.
+    standoff_lateral_offsets_m: tuple[float, ...] = (0.05, 0.08, 0.12)
+    standoff_lateral_directions: int = 8  # tried around a full circle at each offset magnitude
+    # Rim/edge grasp strategy (bowls, mugs, cups: objects whose full
+    # cross-section doesn't fit the gripper at any yaw). See
+    # grasp_generator.PrivilegedTopDownGraspGenerator's module docstring.
+    rim_num_angle_samples: int = 8
+    rim_offset_fraction: float = 0.6
+    rim_grasp_width_m: float = 0.02
+    # Edge-pinch grasp strategy (plates, saucers, lids: flat/thin objects
+    # whose *height*, not just cross-section, makes the rim-edge wall-
+    # straddle strategy above physically meaningless -- there's no hollow
+    # wall to straddle at any radius, just uniformly solid material all the
+    # way to the edge. See grasp_generator._edge_pinch_candidates).
+    edge_pinch_num_angle_samples: int = 8
+    edge_pinch_offset_fraction: float = 0.92
+    edge_pinch_width_m: float = 0.02
+    # Randomized-seed IK retries for the standoff/grasp solves below (same
+    # pattern as PlaceSampleConfig.pose_selection_attempts): the arm's current
+    # resting pose is a good seed for a top-down grasp but not always for
+    # others, e.g. a rim-edge candidate.
+    pose_selection_attempts: int = 6
+    # Safety margin (m) added on top of the gripper's real measured reach
+    # (see SceneQuery.palm_clearance_above_tcp_m / finger_reach_below_tcp_m)
+    # when raising a grasp height to keep the palm off a short object's top,
+    # or the fingertips off the floor under a thin one.
+    grasp_height_margin_m: float = 0.01
+    # RRTConnect is stochastic (see TransportConfig's own comment on this) --
+    # without a retry, an otherwise-valid candidate that passed IK/collision
+    # can still be rejected outright on a single unlucky NO_PATH_FOUND.
+    planning_attempts: int = 6
 
 # Top-down grasp orientation in the *world* frame, expressed as a quaternion
 # that rotates the gripper's canonical +Z (approach axis) to point straight
@@ -71,20 +141,12 @@ _TOP_DOWN_QUAT_WXYZ = np.array([0.0, 1.0, 0.0, 0.0])
 # a 120-degree rotation about the (1,1,1) world axis that cyclically permutes
 # the local frame -- local +Z (approach) -> world +X, local +Y (closing
 # axis) -> world +Z, local +X -> world +Y. Composing a further world-frame
-# yaw_quat_wxyz(heading) rotation (about world Z, the same axis the closing
+# yaw_quat_wxyz(heading) rotation (about world Z, the axis the closing
 # direction already maps to) sweeps the horizontal approach heading around
-# the full circle while leaving the closing axis exactly vertical throughout
-# -- unlike the top-down base above, where yaw sweeps the *closing* axis and
-# leaves the (vertical) approach direction fixed. Same quaternion the
-# grasp_generator module docstring already references for milk_1 (a
-# clean 90-degree-family rotation mapping local Y to world-vertical).
+# the full circle while leaving the closing axis exactly vertical -- unlike
+# the top-down base above, where yaw sweeps the closing axis instead and
+# leaves the (vertical) approach direction fixed.
 _EDGE_PINCH_BASE_QUAT_WXYZ = np.array([0.5, 0.5, 0.5, 0.5])
-
-
-def yaw_quat_wxyz(yaw_rad: float) -> np.ndarray:
-    """Quaternion for a rotation of ``yaw_rad`` about the world +Z axis."""
-    half = yaw_rad / 2.0
-    return np.array([np.cos(half), 0.0, 0.0, np.sin(half)])
 
 
 def _is_rim_graspable_object_class(object_name: str) -> bool:
@@ -132,21 +194,12 @@ def _object_xy_obb_world(scene: SceneQuery, object_name: str, obj_quat_wxyz: np.
     their Contact-GraspNet path, which needs a separately-deployed CUDA
     inference server this environment doesn't have.
 
-    Fixes a real bug in an earlier version of this generator: sampling
-    wrist yaws in *world* frame and measuring width off a *world-axis-
-    aligned* AABB, neither of which has any relationship to the object's
-    real shape once it's rotated away from world-axis-aligned.
-
     Rotates the object's local-frame surface points (see
     ``SceneQuery.body_surface_points_local``) into the object's *current*
-    world orientation before dropping Z and projecting -- an earlier
-    version of this function projected onto the body's own local XY plane
-    directly, which is only the true horizontal footprint if the body's
-    local Z axis happens to already point world-up. Verified against
-    milk_1 (quaternion ``[0.5,0.5,0.5,0.5]``, a clean 90-degree rotation
-    that maps local *Y*, not Z, to world-vertical): projecting onto local
-    XY there measured a vertical slice through the carton, not its real
-    footprint, and picked a correspondingly wrong closing axis."""
+    world orientation before dropping Z and projecting -- projecting onto the
+    body's own local XY plane directly is only the true horizontal footprint
+    if the body's local Z axis already points world-up, which isn't true for
+    every asset's resting orientation."""
     points_local = scene.body_surface_points_local(object_name)
     if len(points_local) < 3:
         return None
@@ -177,14 +230,10 @@ def _object_width_at_yaw(
 
     Needed whenever a caller isn't free to choose the minimal-width axis --
     e.g. a fixed, non-object-dependent orientation. Reusing the OBB's own
-    short_half there silently reports the *wrong* number whenever that fixed
-    axis doesn't happen to line up with the object's real short axis.
-    Confirmed against a real cream_cheese_1 rollout: a fixed yaw that
-    actually closes along the object's *long* axis (~8.1cm) was reported as
-    needing only the OBB's short_half (4.27cm), so a genuinely
-    width-infeasible candidate passed the cheap width filter and only
-    failed later on the real geometric collision check -- hiding the true
-    rejection reason behind a misleading one.
+    short_half there silently reports the *wrong* (too-small) number
+    whenever that fixed axis doesn't line up with the object's real short
+    axis, letting a genuinely width-infeasible candidate pass the cheap
+    width filter and fail later with a misleading rejection reason.
     """
     points_local = scene.body_surface_points_local(object_name)
     if len(points_local) < 3:
@@ -192,19 +241,14 @@ def _object_width_at_yaw(
     R = quat_to_rotmat_wxyz(obj_quat_wxyz)
     points_world_oriented = points_local @ R.T
     xy = points_world_oriented[:, :2]
-    # [cos, sin], NOT the [-sin, cos] form used elsewhere in this module.
-    # Verified against ground truth rather than assumed: with the arm at its
-    # home pose (which is exactly yaw=pi/2 composed with _TOP_DOWN_QUAT_WXYZ),
-    # the two finger pads' real world positions differ by [~0, 0.065, ~0] --
-    # they separate along world *Y*, while [-sin, cos] at that same yaw gives
-    # world X. The other convention is self-consistent where it's used
+    # [cos, sin], NOT the [-sin, cos] form used elsewhere in this module --
+    # verified against the real finger pad separation at the arm's home pose.
+    # The other convention is self-consistent where it's used
     # (PrivilegedTopDownGraspGenerator derives its yaw from the same offset
-    # geometry it then measures against, so the 90 degrees cancels), but it is
-    # wrong for measuring the span at an *absolute* yaw the caller fixed
-    # itself. Getting this backwards reported an elongated box's long-axis
-    # width (8.12cm) for a pose that actually spans its short axis (4.27cm),
-    # which then fed a wildly-too-wide opening into the collision/closure
-    # checks and rejected a perfectly feasible grasp.
+    # geometry it then measures against, so the 90 degrees cancels), but it's
+    # wrong for measuring the span at an absolute yaw the caller fixed itself
+    # -- getting this backwards reports the long-axis width for a pose that
+    # actually spans the short axis, hiding a width-infeasible grasp.
     close_axis = np.array([np.cos(yaw_rad), np.sin(yaw_rad)])
     proj = xy @ close_axis
     return float(proj.max() - proj.min())
@@ -222,22 +266,16 @@ def _measure_local_wall_width_m(
 ) -> float:
     """Real wall thickness at one specific rim-grasp point, measured from the
     object's actual surface geometry near that point, instead of assuming a
-    single fixed width for the entire rim. A container's wall isn't
-    perfectly uniform (draft angle, a handle, a spout, an asymmetric mesh
-    decomposition) -- even a small mismatch between an assumed constant and
-    the real thickness *at this particular point* is exactly what
-    ``CollisionChecker.check_gripper_closure`` now correctly flags as the
-    fingers closing too far and catching the rigid segment on the wall
-    (verified directly: several rim angles around a real bowl started
-    failing gripper-closure validation specifically once that check existed,
-    for a bowl whose rim thickness plausibly does vary around its
-    circumference). Projects every real surface point within
-    ``search_radius_m`` of ``point_center_world`` onto the closing axis --
-    the same "project real geometry onto the closing axis" measurement
-    ``estimate_handle_closing_width_m`` (articulation.py) uses for the
-    drawer handle, just localized to one point on this object instead of a
-    whole small assembly. Falls back to ``fallback_width_m`` if too few real
-    points fall in that neighborhood to measure anything meaningful.
+    single fixed width for the entire rim. A container's wall isn't perfectly
+    uniform (draft angle, a handle, a spout, an asymmetric mesh
+    decomposition), and even a small mismatch between an assumed constant and
+    the real thickness there is enough for ``CollisionChecker.
+    check_gripper_closure`` to flag the fingers as catching the rigid segment
+    on the wall. Projects every real surface point within ``search_radius_m``
+    of ``point_center_world`` onto the closing axis -- the same technique
+    ``estimate_handle_closing_width_m`` (articulation.py) uses for the drawer
+    handle, localized to one point instead of a whole assembly. Falls back to
+    ``fallback_width_m`` if too few real points fall in that neighborhood.
     """
     points_local = scene.body_surface_points_local(object_name)
     if len(points_local) < 2:
@@ -334,52 +372,33 @@ class PrivilegedTopDownGraspGenerator(GraspGenerator):
         extent = scene.body_extent_world(object_name)
         # Mid-height in the object's own AABB, not just the body origin + half
         # its Z extent -- a body's collision geoms aren't always centered on
-        # its own frame origin (this bowl's AABB center sits 2.8cm above its
-        # body origin), and using center_offset fixes both strategies' grasp
-        # height instead of just approximating it off the origin.
+        # its own frame origin, and using center_offset fixes both
+        # strategies' grasp height instead of just approximating it.
         height_offset = float(extent.center_offset[2]) if extent is not None else 0.0
         grasp_z = obj_pos[2] + height_offset
         if extent is not None:
             margin = self.config.grasp_height_margin_m
-            # The palm/hand is a real, sizeable collision mesh, not a point
-            # at the TCP -- for a short/squat object, aiming for the exact
-            # geometric mid-height can put the palm's own lowest point
-            # *into* the object's top even though the TCP itself clears it
-            # by several cm (verified against the real alphabet-soup-can
-            # asset: TCP cleared by 4.3cm, but the palm's near face was only
-            # 2.2cm above the TCP, so it ended up ~2cm inside the can).
-            # Raise the target height just enough to keep the palm's real
-            # geometry above the object's top, rather than assuming
-            # "hand-to-tcp distance" alone describes how deep the gripper
-            # can safely reach.
+            # The palm is a real, sizeable collision mesh, not a point at the
+            # TCP -- for a short/squat object, the exact geometric mid-height
+            # can put the palm's lowest point into the object's top even
+            # though the TCP itself clears it by several cm. Raise the target
+            # height just enough to keep the palm's real geometry above the
+            # object's top.
             object_top_z = obj_pos[2] + extent.center_offset[2] + extent.half_extents[2]
             min_safe_for_palm = object_top_z - scene.palm_clearance_above_tcp_m() + margin
-            # Mirror image of the palm case: the rigid fingers extend *past*
-            # the TCP, so for a thin/flat object, the same exact-mid-height
-            # target can put the fingertips *below* the surface it rests on
-            # (verified against cream_cheese_1, 2cm tall: the finger body
-            # ended up ~1cm into the floor even though the TCP itself was
-            # still comfortably above it). Use the object's own AABB *bottom*
-            # as the floor reference, not raw obj_pos[2] -- that assumes a
-            # body's origin coincides with its base, which is false for
-            # cream_cheese_1 (origin sits at its geometric center instead,
-            # confirmed: center_offset[2] is ~0). Using obj_pos[2] directly
-            # silently assumed a floor ~1cm too high, and -- combined with
-            # finger_reach_below_tcp_m() alone already exceeding this
-            # object's full ~2cm height -- pushed grasp_z to 1.3cm *above*
-            # the object's own top surface. Confirmed via a real rollout:
-            # the arm tracked to that target with near-zero error and closed
-            # on nothing (object_displacement_m: 0.0).
+            # Mirror image of the palm case: the rigid fingers extend past the
+            # TCP, so for a thin/flat object the same mid-height target can
+            # put the fingertips below the surface it rests on. Uses the
+            # object's own AABB bottom as the floor reference, not raw
+            # obj_pos[2] -- that assumes a body's origin coincides with its
+            # base, which isn't true for every asset.
             object_bottom_z = obj_pos[2] + extent.center_offset[2] - extent.half_extents[2]
             min_safe_for_floor = object_bottom_z + scene.finger_reach_below_tcp_m() + margin
-            # Never push the target above the object's own body -- for an
-            # object shorter than finger_reach_below_tcp_m() + margin, even
-            # the corrected min_safe_for_floor above can still exceed the
-            # object's own top, which just relocates the same failure from
-            # "1.3cm above" to "pinned exactly at the boundary with zero
-            # collision-checker margin" (also confirmed by a real rollout:
-            # every candidate for a too-thin object landed on the identical
-            # height and was still rejected as in-collision). Back off by
+            # Never push the target above the object's own body -- for a very
+            # thin object, even the corrected min_safe_for_floor above can
+            # still exceed the object's own top, which just relocates the
+            # failure to the opposite extreme (pinned exactly on the
+            # collision checker's own boundary with zero margin). Back off by
             # the same margin instead of sitting on the exact boundary.
             grasp_z = min(max(grasp_z, min_safe_for_palm, min_safe_for_floor), object_top_z - margin)
         grasp_center = np.array([obj_pos[0], obj_pos[1], grasp_z])
@@ -391,34 +410,24 @@ class PrivilegedTopDownGraspGenerator(GraspGenerator):
         )
         # Rim-edge only makes physical sense for a hollow, thin-walled
         # container -- it deliberately straddles a *wall*, positioning the
-        # closing point at a fraction of the object's radius rather than at
-        # its true outer edge. For a solid object (a can, a box, most
-        # LIBERO groceries) there is no wall there to straddle: that point
-        # is just interior solid material, so the candidate is geometrically
-        # guaranteed to have the gripper collide no matter what height is
-        # tried. Verified directly against the alphabet-soup-can asset: its
-        # own decomposed collision geoms include one sitting almost exactly
-        # on the object's central axis (2.3mm off-center) -- solid, not
-        # hollow. Reuses the same object-class keyword list the legacy stage
-        # machine already uses for this exact distinction (modes.py's
+        # closing point at a fraction of the object's radius rather than its
+        # true outer edge. For a solid object there's no wall to straddle:
+        # that point is just interior solid material, geometrically
+        # guaranteed to collide. Reuses the same object-class keyword list
+        # the legacy stage machine uses for this distinction (modes.py's
         # RIM_GRASP_KEYWORDS) rather than inventing a second classification.
         if extent is not None and _is_rim_graspable_object_class(object_name):
             out.extend(
                 self._rim_edge_candidates(scene, object_name, obj_pos, obj_quat, grasp_center, approach_dir_world, extent)
             )
-        # Edge-pinch: a *geometric* trigger, not a keyword list, deliberately
-        # -- unlike rim-edge above, "is this object flat and wide" doesn't
-        # need object-class knowledge to answer, and a keyword list would
-        # only repeat the exact fragility already hit once this session (a
-        # real "plate" object silently missing from RIM_GRASP_KEYWORDS).
-        # Triggers whenever the object is both too *thin* for the top-down
-        # strategies' vertical clearance logic to find a safe height (real
-        # height less than the gripper's max opening) and too *wide* for any
-        # center-grasp yaw to span (confirmed empirically against the real
-        # plate_1 LIBERO asset: every rim-edge candidate there also failed,
-        # 1-1.5cm penetrations into solid material -- a flat disc has no
-        # hollow wall to straddle at any radius, so that strategy alone
-        # isn't sufficient here the way it is for a bowl).
+        # Edge-pinch: a *geometric* trigger, not a keyword list -- unlike
+        # rim-edge above, "is this object flat and wide" doesn't need
+        # object-class knowledge to answer, and a keyword list risks silently
+        # missing an object class. Triggers whenever the object is both too
+        # thin for the top-down strategies' vertical clearance logic to find
+        # a safe height, and too wide for any center-grasp yaw to span -- a
+        # flat disc has no hollow wall to straddle at any radius, so rim-edge
+        # alone isn't sufficient here the way it is for a bowl.
         if extent is not None:
             real_height_m = 2.0 * float(extent.half_extents[2])
             widest_span_m = 2.0 * float(max(extent.half_extents[0], extent.half_extents[1]))
@@ -526,14 +535,11 @@ class PrivilegedTopDownGraspGenerator(GraspGenerator):
             yaw = theta - np.pi / 2.0
             grasp_quat = quat_mul_wxyz(yaw_quat_wxyz(float(yaw)), _TOP_DOWN_QUAT_WXYZ)
 
-            # The wall's real thickness at *this specific point*, not a
-            # single fixed constant for the whole rim -- a container's wall
-            # isn't perfectly uniform (draft angle, a handle, a spout), and
-            # even a small mismatch between the assumed and real thickness
-            # is exactly what CollisionChecker.check_gripper_closure now
-            # catches (correctly) as the fingers closing too far and
-            # catching the rigid segment on the wall. See
-            # _measure_local_wall_width_m's docstring.
+            # The wall's real thickness at this specific point, not a single
+            # fixed constant for the whole rim -- a container's wall isn't
+            # perfectly uniform, and CollisionChecker.check_gripper_closure
+            # will flag even a small mismatch as the fingers catching the
+            # rigid segment on the wall. See _measure_local_wall_width_m.
             width = _measure_local_wall_width_m(
                 scene, object_name, obj_pos, obj_quat_wxyz, point_center, np.array([radial_dir[0], radial_dir[1], 0.0]),
                 fallback_width,
@@ -629,33 +635,15 @@ class PrivilegedTopDownGraspGenerator(GraspGenerator):
         return out
 
     def _estimate_width(self, extent, yaw_rad: float) -> float:
-        # Width the gripper must span across is the object's AABB extent
-        # projected onto the axis the fingers close along (gripper local X
-        # after the yaw rotation). This is exact for a box-shaped object.
-        #
-        # An earlier version capped this at the object's narrowest overall
-        # horizontal extent, reasoning that a rotated-square-AABB projection
-        # *overestimates* a round object's true (yaw-invariant) cross-section
-        # at oblique angles (e.g. predicting the AABB's diagonal instead of
-        # the actual diameter for a cylinder with near-equal XY half-extents).
-        # That's true for genuinely round objects, but the cap can't tell a
-        # round object from a square one with the same AABB -- and applying
-        # it unconditionally made every yaw report the *same* optimistic
-        # width regardless of the object's real shape. Verified against a
-        # real (square-ish, not round) soup-can asset: capping reported
-        # ~8.6cm at every sampled yaw, hiding that the true projected width
-        # actually ranged from ~9.0cm to ~12.7cm depending on yaw (a ~1.41x
-        # spread matching a square cross-section's diagonal-to-side ratio).
-        # PickSkill's own IK/collision check then had no way to prefer the
-        # near-feasible yaw over the badly-infeasible ones, since the width
-        # pre-check saw them as identical.
-        #
-        # Leaving this uncapped is still safe for genuinely round objects:
-        # multiple yaws are already sampled, so the axis-aligned ones (where
-        # this formula is exact even for a circle) remain correctly
-        # estimated and available -- an oblique yaw being pessimistically
-        # over-estimated just means PickSkill prefers one of those instead,
-        # not that round objects become ungraspable.
+        # Width the gripper must span is the object's AABB extent projected
+        # onto the axis the fingers close along (gripper local X after the
+        # yaw rotation). Exact for a box; deliberately left uncapped rather
+        # than clamped to the object's narrowest horizontal extent -- a cap
+        # can't distinguish a round object (where it would correctly avoid
+        # overestimating) from a square one with the same AABB (where it
+        # would hide genuinely different widths at different yaws behind one
+        # identical number). Multiple yaws are already sampled, so a round
+        # object's axis-aligned yaws remain correctly estimated regardless.
         close_axis = np.array([-np.sin(yaw_rad), np.cos(yaw_rad)])
         return float(
             2.0 * abs(close_axis[0]) * extent.half_extents[0]
@@ -685,18 +673,12 @@ def manual_pose_width_feasible(scene: SceneQuery, object_name: str, gripper_max_
 
     The generator's own fixed axis is non-negotiable (see its class
     docstring), so an object whose real width *at that specific axis* -- not
-    its OBB-fitted short axis, which can be a completely different,
-    narrower number for an elongated object -- already exceeds the
-    gripper's opening has no candidate this generator could ever accept,
-    regardless of how many it emits or how they're scored. Confirmed on a
-    real book (STUDY_SCENE1's black_book_1): every one of 5 manual
-    candidates was rejected as ``gripper_width_incompatible`` at ~9.3cm
-    against an 8cm gripper -- a flat, elongated object where the fixed axis
-    happens to span its long dimension, the same failure mode already
-    documented for cream_cheese_1/butter_1 in ``generate()``'s own comment,
-    just never checked for *before* committing to manual-only (see
-    ``libero_pick_adapter.py``'s own ``manual_only`` classification, which
-    this exists to correct)."""
+    its OBB-fitted short axis, which can be a different, narrower number for
+    an elongated object -- already exceeds the gripper's opening has no
+    candidate this generator could ever accept. Checked up front here rather
+    than discovered only after every manual candidate is rejected (see
+    ``libero_pick_adapter.py``'s ``manual_only`` classification, which this
+    exists to correct)."""
     obj_pos, obj_quat = scene.body_pose(object_name)
     width = _object_width_at_yaw(scene, object_name, obj_quat, MANUAL_DEEP_CENTER_YAW_RAD)
     if width is None:
@@ -706,45 +688,36 @@ def manual_pose_width_feasible(scene: SceneQuery, object_name: str, gripper_max_
 
 class ManualDeepCenterGraspGenerator(GraspGenerator):
     """Single hardcoded top-down grasp per object: centered on the object's
-    own (x, y), the fixed orientation that matches the arm's own home/resting
-    pose exactly (see ``manual_yaw_rad``'s own comment in ``generate()``) --
-    no per-object rotation, no search, no short-axis alignment, and no
-    reorientation away from home at all, for any object. This is a hard
-    constraint, not a default: an object whose real short axis doesn't line
-    up with this fixed orientation (e.g. butter_1/cream_cheese_1) is a known
-    open problem to solve by other means (grasp position, width handling,
-    approach), never by rotating. Aimed at the same palm/floor-clearance-safe
-    *deep* target both other generators already use only as a safety
-    *ceiling* (see ``ContactGraspNetGenerator._generate_for_object``'s
-    ``min_safe_z`` clamp).
+    own (x, y), at the fixed orientation that matches the arm's own
+    home/resting pose exactly -- no per-object rotation, search, short-axis
+    alignment, or reorientation away from home, for any object. This is a
+    hard constraint, not a default: an object whose real short axis doesn't
+    line up with this fixed orientation is a known open problem to solve by
+    other means (grasp position, width handling, approach), never by
+    rotating. Aimed at the same palm/floor-clearance-safe deep target the
+    other generators use only as a safety ceiling (see
+    ``ContactGraspNetGenerator._generate_for_object``'s ``min_safe_z`` clamp).
 
     Exists because that ceiling is a floor, not an attractor: a learned
     generator's own candidates can legally sit anywhere in the safe band with
-    no preference for the deep end, and a real rollout confirmed this
-    matters -- ContactGraspNet's 32 candidates for the alphabet-soup-can
-    spanned 79%-105% up the can with ~zero correlation between height and
-    the network's own confidence (r=-0.05), so a shallow, rim-adjacent grasp
-    could (and did) win purely by chance over a deep, reliable one sitting
-    right next to it in the pool. Rather than only reweighting the OR-set's
-    cost function to *prefer* depth (see ``PickSkill._score_candidate``'s
-    ``grasp_depth_penalty``, which still helps), this generator adds one
-    candidate that is already exactly where a reliable grasp on a solid,
-    center-graspable object should be -- confirmed 5/5 deterministic
-    successes replacing GraspNet/heuristic entirely for the can, vs. the
-    combined pipeline needing up to 5 retries against the same object.
+    no preference for the deep end, which real testing showed costs reliability
+    -- a shallow, rim-adjacent grasp can win purely by chance over a deep,
+    reliable one sitting right next to it in the pool. Rather than only
+    reweighting the OR-set's cost function to prefer depth (see
+    ``PickSkill._score_candidate``'s ``grasp_depth_penalty``, which still
+    helps), this generator adds one candidate that is already exactly where a
+    reliable grasp on a solid, center-graspable object should be.
 
-    Gated to non-rim-graspable objects only (the same ``_is_rim_graspable_object_class``
-    check ``PrivilegedTopDownGraspGenerator`` uses before adding its own
-    rim-edge candidates): a hollow object (bowl, mug, cup) has no solid
-    material at its center for a straight-through pinch to close on, so a
-    candidate like this one is guaranteed wrong there. This exact failure
-    mode already burned once when the heuristic's own center candidate --
-    cheap to reach, unscored by any generator confidence -- won the OR-set
-    over every real GraspNet candidate for a ramekin. This generator's
+    Gated to non-rim-graspable objects only (the same
+    ``_is_rim_graspable_object_class`` check ``PrivilegedTopDownGraspGenerator``
+    uses before adding its own rim-edge candidates): a hollow object has no
+    solid material at its center for a straight-through pinch to close on, so
+    a candidate like this one is guaranteed wrong there -- the heuristic's own
+    cheap, unscored center candidate has previously won the OR-set over a
+    real GraspNet candidate for exactly this kind of object. This generator's
     ``generator_score`` still reflects real gripper-opening margin (same
-    formula as ``PrivilegedTopDownGraspGenerator._score``), not an
-    artificial maximum, so it competes on the same terms as every other
-    candidate rather than being hand-favored.
+    formula as ``PrivilegedTopDownGraspGenerator._score``), not an artificial
+    maximum, so it competes on the same terms as every other candidate.
     """
 
     def __init__(
@@ -771,12 +744,7 @@ class ManualDeepCenterGraspGenerator(GraspGenerator):
             # XY center, not just obj_pos[0]/[1] directly -- a body's real
             # collision geometry isn't always centered on its own frame
             # origin (same reasoning already applied to Z below, just never
-            # extended to XY). Confirmed against the real alphabet_soup_1
-            # can: its collision box's own Y center sits 3.7mm off the body
-            # origin, meaning every manual-pose grasp on it targeted a point
-            # 3.7mm off the can's true center -- small on its own, but a real,
-            # avoidable bias on top of ordinary IK/servo tracking error,
-            # compounding into a visibly off-center grasp.
+            # extended to XY).
             object_center_xy = np.array([obj_pos[0], obj_pos[1]]) + extent.center_offset[:2]
             object_center_z = float(obj_pos[2] + extent.center_offset[2])
             object_top_z = object_center_z + float(extent.half_extents[2])
@@ -784,39 +752,27 @@ class ManualDeepCenterGraspGenerator(GraspGenerator):
             min_safe_for_palm = object_top_z - scene.palm_clearance_above_tcp_m() + margin
             min_safe_for_floor = object_bottom_z + scene.finger_reach_below_tcp_m() + margin
             # Floor clearance is a hard bound the "stay below the object's own
-            # top" clamp must not override. For anything thinner than the
-            # fingers' own reach below the TCP, that clamp used to win and
-            # push the fingertips straight through the table -- confirmed
-            # against the real cream_cheese_1/butter_1 assets (both ~1.8cm
-            # tall): the clamp discarded a floor bound sitting 1.2cm higher,
-            # and the resulting pose put both finger geoms ~1.9mm into the
-            # floor, rejecting every candidate as grasp_pose_in_collision.
-            # Grasping a thin object nearer its top edge still closes on it
-            # (the pads reach below the TCP, so they straddle its upper half);
-            # driving them into the table never works.
+            # top" clamp must not override -- for anything thinner than the
+            # fingers' own reach below the TCP, that clamp can otherwise win
+            # and push the fingertips through the table. Grasping a thin
+            # object nearer its top edge still closes on it (the pads reach
+            # below the TCP, straddling its upper half); driving them into
+            # the table never works.
             ideal_deep_z = max(
                 min(max(min_safe_for_palm, min_safe_for_floor), object_top_z - margin),
                 min_safe_for_floor,
             )
 
             grasp_center = np.array([object_center_xy[0], object_center_xy[1], ideal_deep_z])
-            # A single fixed orientation for every object, no per-object
-            # search or computed alignment, and -- non-negotiable, per
-            # explicit instruction -- no rotation away from the arm's own
-            # home/resting orientation, ever, for any object. Confirmed via
-            # a real rollout (home_ee_quat measured directly) that home's
-            # own orientation is exactly this +90-degree-from-base pose, so
-            # this candidate requires zero wrist reorientation to reach.
-            #
-            # For an elongated box (butter_1/cream_cheese_1) this closes
-            # along the object's *long* axis, which the real mesh doesn't
-            # fit inside an 8cm gripper at this width (confirmed: ~1.3mm
-            # real contact penetration on both pads) -- a genuine open
-            # problem to solve *without* rotating, not a reason to rotate.
-            # Left as a known-infeasible-for-now case rather than silently
-            # switching axes: rejected candidates fail cleanly through the
-            # ordinary width/collision checks below, same as any other
-            # infeasible candidate.
+            # A single fixed orientation for every object -- non-negotiable,
+            # per explicit instruction -- that matches the arm's home/resting
+            # orientation exactly, so this candidate requires zero wrist
+            # reorientation to reach. For an elongated object this can close
+            # along the object's long axis and fail the gripper's real
+            # opening; that's a genuine open problem to solve without
+            # rotating, so such candidates are left to fail cleanly through
+            # the ordinary width/collision checks below rather than silently
+            # switching axes.
             manual_yaw_rad = MANUAL_DEEP_CENTER_YAW_RAD + _manual_yaw_offset_rad(name)
             grasp_quat = quat_mul_wxyz(yaw_quat_wxyz(manual_yaw_rad), _TOP_DOWN_QUAT_WXYZ)
 
@@ -824,13 +780,10 @@ class ManualDeepCenterGraspGenerator(GraspGenerator):
             # axis* -- not the OBB's short_half, which is the object's
             # minimum possible width across ALL orientations. Those two only
             # agree when the fixed axis happens to be the object's real short
-            # axis (true for a round can, false for an elongated box).
-            # Confirmed against a real cream_cheese_1 rollout: reporting the
-            # OBB short_half (4.27cm) here for a fixed axis that actually
-            # spans the object's long dimension (~8.1cm) let a genuinely
-            # width-infeasible candidate pass the cheap width filter and
-            # fail only later on the real collision check, with a rejection
-            # reason that didn't say why.
+            # axis (true for a round can, false for an elongated box); using
+            # the OBB value here would let a genuinely width-infeasible
+            # candidate pass the cheap filter and fail later with a
+            # misleading rejection reason.
             width = _object_width_at_yaw(scene, name, obj_quat, manual_yaw_rad)
 
             # Slide the pinch point along the axis the fingers do NOT close on
@@ -839,13 +792,9 @@ class ManualDeepCenterGraspGenerator(GraspGenerator):
             # freedom available when the centered grasp is blocked by a
             # neighbor that rotating would otherwise be used to dodge: the
             # orientation, depth and gripper opening are all unchanged, only
-            # *where along the bar* the pads pinch moves. Confirmed against
-            # the real libero_10 cream-cheese scene, where a milk carton sits
-            # ~8cm away and put itself between the gripper's own hand body and
-            # the target -- `milk_1_g1 <-> gripper0_hand_collision` at the
-            # centered pose. Raising the grasp does not help there (the carton
-            # is 13cm tall, its top well above any grasp height), but sliding
-            # 2cm along the long axis clears it at every height.
+            # where along the bar the pads pinch moves. Raising the grasp
+            # doesn't help when the obstacle is tall; sliding along the long
+            # axis can clear it at every height instead.
             #
             # Centered stays first and is what PickSkill's cost function
             # normally selects; the offsets only matter when the centered pose
@@ -905,7 +854,6 @@ def hand_from_fingertip_pose(
     ``[x, y, z, qw, qx, qy, qz]`` pose.
     """
     offset_z = scene.hand_to_tcp_transform(hand_site, tcp_site)
-    from ..scene_query import quat_to_rotmat_wxyz
 
     R = quat_to_rotmat_wxyz(fingertip_quat_wxyz)
     hand_pos = np.asarray(fingertip_pos, dtype=np.float64) - R @ np.array([0.0, 0.0, offset_z])

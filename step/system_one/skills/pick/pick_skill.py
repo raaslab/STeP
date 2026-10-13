@@ -9,19 +9,14 @@ approach (under strict ``FREE_SPACE``, no contact with the target permitted)
 to a standoff point close to the object, then validate a short final descent
 from there to the exact grasp pose under ``TERMINAL_APPROACH`` (gripper<->
 target contact now expected) via ``CollisionChecker.check_edge`` -- never
-executed without that check. (An earlier version planned the *entire* path
-under ``TERMINAL_APPROACH``, reasoning that a single planning call is enough
-to keep this "one atomic Pick"; that turned out to let RRTConnect bump/shove
-the object anywhere along a long approach, since contact was permitted
-everywhere rather than just at the very end. Keeping the long-range leg
-strict avoids that regression while still fixing the actual bug: the
-standoff->grasp segment is small and explicitly validated now, whereas an
-even-earlier version executed it as raw, unchecked joint-space interpolation.
-See ``GraspCandidate``'s docstring in ``types.py`` for the full history.)
-Execution/tracking happens by the caller feeding the returned ``MotionPlan``
-to ``JointSpaceMPC``, since ``PickSkill`` itself is planning-only and
-backend-agnostic; the caller closes the gripper, verifies the grasp, and
-registers the object as attached via ``AttachedObjectManager``.
+executed without that check. The long-range leg is kept contact-free
+specifically so RRTConnect can't bump/shove the object while maneuvering;
+only the short final descent is allowed to touch it, and only after that
+segment is explicitly validated. Execution/tracking happens by the caller
+feeding the returned ``MotionPlan`` to ``JointSpaceMPC``, since ``PickSkill``
+itself is planning-only and backend-agnostic; the caller closes the gripper,
+verifies the grasp, and registers the object as attached via
+``AttachedObjectManager``.
 
 OR semantics ("pick any cup"): every candidate object in ``object_set`` is
 fully evaluated (grasp generation -> IK -> planning -> cost) *before* any
@@ -33,16 +28,16 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..collision import CollisionChecker, CollisionPhase
-from ..config import MotionConfig
+from ...motion.collision import CollisionChecker, CollisionPhase
+from ...motion.config import MotionConfig
 from .grasp_generator import GraspGenerator
-from ..kinematics import IKSolver
-from ..ompl_planner import MotionPlanner
-from ..panda import FINGER_CLOSED_QPOS, FINGER_JOINT_NAMES
-from .place_skill import _solve_ik_robust, escape_start_collision
-from ..scene_query import SceneQuery
-from .standoff_search import standoff_candidates
-from ..types import (
+from ..ik_utils import escape_start_collision, solve_ik_robust as _solve_ik_robust
+from ...motion.kinematics import IKSolver
+from ...motion.ompl_planner import MotionPlanner
+from ...motion.panda import FINGER_CLOSED_QPOS, FINGER_JOINT_NAMES
+from ...motion.scene_query import SceneQuery
+from ..standoff_search import standoff_candidates
+from ...motion.types import (
     CandidateScore,
     GraspCandidate,
     SkillFailureReason,
@@ -77,25 +72,17 @@ class PickSkill:
         constraints = constraints or {}
         downstream_goal_xy = constraints.get("downstream_goal_xy")  # optional (x, y) reachability hint
 
-        # A pick is often the very next skill called right after a place
-        # released its object -- the arm's resting spot at that instant is
-        # wherever the release left it, not necessarily lifted clear (see
-        # escape_start_collision's own docstring). Confirmed directly via a
-        # real rollout: this start_q registered START_IN_COLLISION for every
-        # single pick candidate, since OMPL (correctly) refuses to plan from
-        # an invalid start regardless of how good the candidate goal is.
-        # PickSkill has no single "attached object" or "goal" the way
-        # Place/Transport do (nothing is held yet, and there may be several
-        # candidate objects), so this only tries the "straight up" retreat,
-        # not the "toward a goal's center" one those two also get.
+        # A pick often runs right after a place, which can leave the arm in a
+        # collision-adjacent resting pose that OMPL refuses to plan from. No
+        # single attached object/goal exists yet here, so only the "straight
+        # up" retreat is tried, not Place/Transport's "toward goal" option.
         start_q = escape_start_collision(self.ik_solver, self.collision_checker, scene, None, None, start_q)
 
         # Callers that already generated candidates for their own purposes
         # (e.g. LiberoPickAdapter saving a grasp-pose visualization before
-        # executing) can pass them straight through -- avoids a second,
-        # possibly expensive/non-deterministic regenerate() call (a learned
-        # generator like ContactGraspNetGenerator re-runs real CUDA
-        # inference on every call).
+        # executing) can pass them straight through, avoiding a second,
+        # possibly expensive regenerate() call (a learned generator re-runs
+        # real inference on every call).
         if candidates is None:
             candidates = self.grasp_generator.generate(scene, object_set)
         if not candidates:
@@ -118,11 +105,8 @@ class PickSkill:
                     "detail": "no candidate passed IK/collision/planning/downstream-feasibility filtering",
                     "n_candidates_tried": len(scored),
                     "rejection_reasons": [s.rejection_reason for s in scored],
-                    # Enough per-candidate context to diagnose *why* every
-                    # candidate failed straight from execution_summary.json,
-                    # without needing to re-run with ad hoc instrumentation:
-                    # which object/strategy/yaw was tried, how wide the
-                    # generator thought the grasp was, and where it aimed.
+                    # Enough per-candidate context to diagnose why every candidate
+                    # failed directly from execution_summary.json, without a re-run.
                     "rejected_candidates": [
                         {
                             "object_name": s.object_name,
@@ -163,21 +147,14 @@ class PickSkill:
 
         # --- gripper-opening compatibility -------------------------------------------------
         # The AABB-derived width estimate (grasp_generator._estimate_width) is a
-        # conservative *overestimate* for round/irregular objects -- it's a bounding
-        # box, not the object's true cross-section at the grasp height. A small
-        # tolerance avoids hard-rejecting genuinely graspable objects whose real
-        # cross-section is a bit smaller than their bounding box; grossly
-        # incompatible widths are still rejected.
-        #
-        # The tolerance is deliberately *not* applied past the gripper's own
-        # physical opening. Slack above that admits candidates the hand can
-        # never straddle no matter how good the estimate was: at 1.15 this
-        # accepted widths up to 9.2cm on an 8cm gripper, which is how
-        # cream_cheese_1 (8.3 x 4.4cm) got grasped across its long axis --
-        # the fingers bottom out at their limit, clip the box and shove it,
-        # which reads as a successful pick and then fails downstream. An
-        # over-estimated round object still has its narrower yaw candidates
-        # to fall back on; a candidate wider than the hand has nothing.
+        # conservative overestimate for round/irregular objects, so a small
+        # tolerance avoids hard-rejecting candidates whose real cross-section is
+        # a bit smaller than their bounding box. The tolerance is capped at the
+        # gripper's own physical opening, not applied past it: letting it admit
+        # widths the hand can never straddle just means the fingers bottom out,
+        # clip the object, and shove it -- reading as a successful pick that
+        # fails downstream. A candidate wider than the hand has nothing to fall
+        # back on, unlike an over-estimated round object's narrower yaws.
         width_tolerance = 1.15
         if (
             cand.gripper_width is not None
@@ -197,39 +174,29 @@ class PickSkill:
             )
 
         # --- IK: approach standoff first, then the grasp pose seeded from it -----------------
-        # No separate pregrasp *stage* is exposed to callers (this is still one
-        # PickSkill.execute() call) -- but internally, planning still goes
-        # through a standoff point close to (not at) the object, exactly like
-        # PlaceSkill's hover point. An earlier version of this method planned
-        # the *entire* path (start -> grasp) under TERMINAL_APPROACH, which
-        # permits gripper<->target contact everywhere, not just at the end --
-        # that let RRTConnect freely bump/shove the object anywhere along a
-        # long approach, since contact was never penalized. Confirmed by a
-        # real run: a bowl ended up ~5cm from its recorded scene-discovery
-        # position after a "successful" plan, because the arm pushed it
-        # before ever closing the gripper. Keeping the long-range leg under
-        # strict FREE_SPACE (no target contact permitted at all) avoids that;
-        # only the short final descent segment below transitions to
-        # TERMINAL_APPROACH, and unlike the old pregrasp->grasp segment, that
-        # segment is now explicitly collision-validated via check_edge before
-        # ever being trusted for execution -- the actual bug this whole
-        # function is fixing.
-        # Try the plain straight-line standoff first (directly opposite the
+        # No separate pregrasp *stage* is exposed to callers (still one
+        # PickSkill.execute() call), but internally planning goes through a
+        # standoff point close to (not at) the object, exactly like PlaceSkill's
+        # hover point -- this keeps the long-range approach under strict
+        # FREE_SPACE (no target contact permitted), with only the short final
+        # descent transitioning to TERMINAL_APPROACH and explicitly
+        # collision-validated via check_edge before being trusted for
+        # execution. Without this split, RRTConnect is free to bump/shove the
+        # object anywhere along a long approach since contact is never
+        # penalized.
+        #
+        # Tries the plain straight-line standoff first (directly opposite the
         # approach direction -- straight up, for a top-down grasp), then
         # increasingly wide rings of sideways-offset alternatives if that one
-        # is unreachable or blocked. A single fixed vertical standoff assumes
-        # the airspace directly above the object is always clear, which
-        # isn't true once an earlier subtask has moved something else into
-        # it -- measured directly: after opening a drawer that ends up
-        # hovering above a bowl, every rim-edge candidate at every angle
-        # failed identically, because they all shared that same now-blocked
-        # straight-up standoff direction. See standoff_search.standoff_candidates.
-        # Each finger travels symmetrically from center (qpos=[0,0] is *zero*
+        # is unreachable or blocked -- a fixed vertical standoff assumes the
+        # airspace above the object is always clear, which an earlier subtask
+        # (e.g. an opened drawer) can violate. See standoff_search.standoff_candidates.
+        #
+        # Each finger travels symmetrically from center (qpos=[0,0] is zero
         # gap, not "closed on an object" -- see check_gripper_closure's
         # docstring), so the right closed-finger target is half the object's
-        # own real width at this grasp, not the joint's mechanical limit;
-        # falls back to that limit only if the generator couldn't estimate a
-        # width for this candidate.
+        # own real width at this grasp, falling back to the joint's mechanical
+        # limit only if the generator couldn't estimate a width.
         if cand.gripper_width is not None:
             half = float(np.clip(cand.gripper_width / 2.0, 0.0, 0.04))
             finger_closed_qpos = np.array([half, -half])
@@ -239,19 +206,13 @@ class PickSkill:
             np.max(self.planner.joint_limits_hi - self.planner.joint_limits_lo)
         )
 
-        # Every standoff candidate seeds a *different* grasp_ik solve (DLS IK
-        # is non-unique -- a different standoff direction can converge to a
-        # different elbow/wrist configuration even for the exact same
-        # Cartesian grasp target), so grasp/descent/closure validation is
-        # tried per-standoff-candidate too, not just once against whichever
-        # standoff happened to be found first. Measured directly: widening
-        # the standoff search alone (approaching a rim point from the side
-        # instead of straight down, to route around a drawer hovering
-        # overhead) got *past* the standoff check more often, but then
-        # revealed that *that* elbow configuration collided at the grasp
-        # pose itself -- a different standoff direction sweeps the forearm
-        # through a different part of a cluttered scene even when aiming at
-        # the identical final target.
+        # Every standoff candidate seeds a *different* grasp_ik solve (DLS IK is
+        # non-unique -- a different standoff direction can converge to a
+        # different elbow/wrist configuration for the same Cartesian grasp
+        # target), so grasp/descent/closure validation is tried per-standoff-
+        # candidate, not just once against whichever standoff was found first:
+        # a reachable standoff can still sweep the forearm into a collision at
+        # the grasp pose itself.
         standoff_ik = grasp_ik = above_ik = None
         last_rejection = "approach_standoff_ik_failed"
         for standoff_position in standoff_candidates(
@@ -292,23 +253,16 @@ class PickSkill:
                 continue
 
             # --- above-object waypoint: force the final descent to be a straight drop ---
-            # Without this, the "final descent" below is a straight joint-
-            # space interpolation from whichever standoff the search above
-            # picked directly to the grasp pose -- and a standoff needing a
-            # lateral offset to dodge some *other* obstacle produces a
-            # descent that moves down and sideways at once. That combined
-            # move isn't caught by the collision check right below it: this
-            # segment runs under TERMINAL_APPROACH, which deliberately
-            # permits contact with the target object (a pick has to touch it
-            # eventually), so an arm that clips the object's side while
-            # angling in doesn't read as a collision at all. Confirmed by a
-            # real rollout report: the arm visibly approaching diagonally and
-            # hitting the object before ever reaching the intended pose.
-            # Fixing it by construction: always pass through a point directly
-            # above the grasp (same XY, one standoff distance back along the
-            # approach direction) before ever permitting target contact, so
-            # the segment that's allowed to touch the object is a pure
-            # vertical drop, regardless of which standoff got the arm there.
+            # Without this, a standoff needing a lateral offset to dodge some
+            # obstacle produces a descent that moves down and sideways at
+            # once -- and since this segment runs under TERMINAL_APPROACH
+            # (which deliberately permits target contact), the arm clipping
+            # the object's side while angling in wouldn't read as a
+            # collision at all. Fixed by construction: always pass through a
+            # point directly above the grasp (same XY, one standoff distance
+            # back along the approach direction) before permitting target
+            # contact, so the segment allowed to touch the object is always a
+            # pure vertical drop.
             above_position = (
                 cand.grasp_position
                 - self.config.grasp.approach_standoff_m * cand.approach_direction_world
@@ -329,10 +283,9 @@ class PickSkill:
 
             # --- final descent segment: explicitly validated, never blindly executed ---
             # Split in two: standoff -> above still forbids target contact
-            # (free maneuvering, not descending yet); above -> grasp is the
-            # one segment allowed to touch the object, and it is now always a
-            # straight vertical line by construction (both endpoints share
-            # the grasp's XY).
+            # (free maneuvering); above -> grasp is the one segment allowed to
+            # touch the object, always a straight vertical line by
+            # construction (both endpoints share the grasp's XY).
             approach_descent_check = self.collision_checker.check_edge(
                 candidate_standoff_ik.q,
                 candidate_above_ik.q,
@@ -354,10 +307,10 @@ class PickSkill:
                 last_rejection = "final_descent_in_collision"
                 continue
 
-            # --- gripper closure: never simulated by IK/OMPL/the MPC, which only ever move ---
-            # the 7 arm joints -- a pose whose *open*-finger geometry clears the object can
-            # still have its rigid finger segment (reaches further than the pad) catch
-            # something as the fingers close from there. See check_gripper_closure's docstring.
+            # --- gripper closure: never simulated by IK/OMPL/the MPC, which only move ---
+            # the 7 arm joints -- a pose whose open-finger geometry clears the object can
+            # still have its rigid finger segment catch something as the fingers close.
+            # See check_gripper_closure's docstring.
             closure_check = self.collision_checker.check_gripper_closure(
                 candidate_grasp_ik.q, FINGER_JOINT_NAMES, finger_closed_qpos, cand.object_name
             )
@@ -403,22 +356,13 @@ class PickSkill:
                 )
 
         # --- plan the long-range approach to the standoff point, scored by path + reachability + clearance --
-        # A single call, not a "planning_attempts times" retry loop: this is
-        # one fixed (start_q, standoff_ik.q) pair, and MotionPlanner.plan()'s
-        # own docstring documents why retrying it is pure waste -- OMPL seeds
-        # its RNG once per process and refuses reseeding, so a failed
-        # RRTConnect search returns the identical result every time (measured
-        # there: 8 back-to-back retries, byte-identical). An earlier version
-        # of this method retried anyway, which meant any candidate whose
-        # planning genuinely failed (NO_PATH_FOUND/TIMEOUT) burned up to
-        # planning_attempts * timeout_sec seconds for zero benefit --
-        # confirmed against a real cream_cheese_1 rollout: two separate
-        # fallback stages each spent ~100s here alone (6 retries x ~17s
-        # average before timing out), the overwhelming majority of a 223s
-        # total pick. Retrying only ever helps when the goal itself changes
-        # between attempts (see TransportSkill's nearest-configuration
-        # hover-IK selection for that pattern) -- not applicable here, since
-        # the standoff search above already committed to one fixed goal.
+        # A single call, not a retry loop: OMPL seeds its RNG once per process
+        # and refuses reseeding (see MotionPlanner.plan()'s own docstring), so
+        # a failed RRTConnect search just returns the same result every time.
+        # Retrying only helps when the goal itself changes between attempts
+        # (see TransportSkill's nearest-configuration hover-IK selection) --
+        # not applicable here, since the standoff search above already
+        # committed to one fixed goal.
         plan = self.planner.plan(
             start_q, [standoff_ik.q], phase=CollisionPhase.FREE_SPACE, target_object_body=cand.object_name
         )
@@ -432,10 +376,8 @@ class PickSkill:
         # the time-parameterized standoff leg and tracks it under
         # TERMINAL_APPROACH). Two legs, not one: standoff -> above (still no
         # target contact permitted), then above -> grasp (the one segment
-        # allowed to touch the object, and always a straight vertical drop
-        # by construction -- see the above-waypoint validation above for why
-        # a single standoff->grasp interpolation let a diagonal, lateral-plus-
-        # vertical approach through uncaught).
+        # allowed to touch the object, always a straight vertical drop by
+        # construction).
         to_above_count = 8
         approach_positions = np.concatenate(
             [
@@ -450,11 +392,10 @@ class PickSkill:
         # Where approach_positions splits into its two legs (index of above_q,
         # shared by both): the executor needs this to track them as two
         # separate, sequential MPC phases with a real convergence check in
-        # between -- see LiberoPickAdapter.run's own comment for why a single
-        # continuous reference isn't enough (the MPC's lookahead horizon
-        # blends across the standoff->above/above->grasp boundary, so the arm
-        # can still be correcting XY while Z is already dropping toward the
-        # object -- confirmed via a real rollout's own Cartesian trace).
+        # between -- a single continuous reference lets the MPC's lookahead
+        # horizon blend across the standoff->above/above->grasp boundary, so
+        # the arm can still be correcting XY while Z is already dropping
+        # toward the object.
         plan.metadata["to_above_count"] = to_above_count
 
         path_cost = 0.0
@@ -465,27 +406,16 @@ class PickSkill:
         breakdown["generator_score_penalty"] = float(1.0 - cand.generator_score)
 
         # --- depth preference: bias top-down grasps toward the deepest safe height ----------
-        # Both generators already clamp a candidate's height to never go
-        # *past* the palm/floor-clearance-safe band (see grasp_generator.py's
-        # and contact_graspnet_generator.py's own min_safe_z clamp, which
-        # shares this exact formula) -- but that clamp is a floor, not an
-        # attractor: a shallow, near-the-rim candidate that never hits the
-        # clamp passes through untouched. Confirmed via a real rollout
-        # (alphabet_soup_1_main, a can): ContactGraspNet's 32 candidates spanned
-        # the full safe band (79%-105% up the can) with essentially zero
-        # correlation between height and the network's own confidence score
-        # (r=-0.05) -- the network has no notion of "grip margin", so its
-        # top-scoring candidate landed at 101% up (right at the rim, a shallow
-        # pinch prone to slipping) purely by chance, even though a
-        # near-identical-score deep candidate at 79% up (matching a real,
-        # reliable can grasp) was sitting right next to it in the pool. This
-        # term breaks that tie toward the deep end without touching either
-        # generator, so it applies uniformly to CGN and heuristic candidates
-        # alike. Gated to near-vertical approaches only: the "grasp near
-        # object_top_z minus palm clearance" reasoning only describes a
-        # top-down grasp -- a side/rim-pinch candidate's z is set by object
-        # geometry, not palm depth, and penalizing it here would just add
-        # noise to a strategy this formula doesn't describe.
+        # Both generators already clamp a candidate's height to the
+        # palm/floor-clearance-safe band (see grasp_generator.py's and
+        # contact_graspnet_generator.py's own min_safe_z clamp), but that
+        # clamp is a floor, not an attractor -- a shallow, near-the-rim
+        # candidate that never hits it passes through untouched, and a
+        # learned generator's own confidence score has essentially no
+        # correlation with depth. This term breaks that tie toward the deep
+        # end, applied uniformly to every generator's candidates. Gated to
+        # near-vertical approaches only: a side/rim-pinch candidate's z is set
+        # by object geometry, not palm depth, so this formula doesn't apply.
         extent = scene.body_extent_world(cand.object_name)
         if extent is not None and float(np.dot(cand.approach_direction_world, [0.0, 0.0, -1.0])) > 0.9:
             obj_pos, _ = scene.body_pose(cand.object_name)
@@ -500,28 +430,15 @@ class PickSkill:
         else:
             breakdown["grasp_depth_penalty"] = 0.0
 
-        # Weight 8.0, not 1.0: generator_score_penalty is bounded to [0, 1],
-        # but path_cost/joint_quality routinely land in the 2-12+ range for a
-        # real arm trajectory -- at weight 1.0 the network's own confidence
-        # was almost noise next to how far the arm has to travel, letting a
-        # candidate the network itself flagged as low-confidence (a real
-        # case: network_score=0.19) win purely for being cheap to reach.
-        # Confirmed via a real rollout ("pick up the milk"): that exact
-        # candidate's grasp_position was ~3.5cm laterally and ~6cm
-        # vertically off the carton's real body -- the gripper closed fully
-        # shut on nothing (finger pads touching each other directly, zero
-        # contact with the object) despite tracking to that target with
-        # near-zero error. It had 15 other feasible candidates to choose
-        # from; this scoring is why it picked the one that missed.
-        # Weight 300.0: grasp_depth_penalty is a raw distance in meters, and
-        # the real-world gap between a shallow rim candidate and the deep
-        # target is small in absolute terms (~1-2cm, confirmed against the
-        # alphabet-soup-can pool above) -- at weight 1.0 that's a rounding
-        # error next to path_cost/reachability. 300.0 puts a 2cm gap
-        # (0.02 * 300 = 6.0) on the same order as generator_score_penalty's
-        # own max contribution (8.0), enough to flip the ranking between two
-        # otherwise-similar candidates without letting depth alone override a
-        # large path-cost or reachability difference.
+        # Weight 8.0, not 1.0: generator_score_penalty is bounded to [0, 1], but
+        # path_cost/joint_quality routinely land in the 2-12+ range for a real
+        # trajectory -- at weight 1.0 a low-confidence candidate could win
+        # purely for being cheap to reach despite missing the object entirely.
+        # Weight 300.0: grasp_depth_penalty is a raw distance in meters, and the
+        # real gap between a shallow and deep candidate is small (~1-2cm) --
+        # this weight puts that gap on the same order as generator_score_
+        # penalty's own max contribution, enough to flip a close ranking
+        # without letting depth override a large path-cost difference.
         total_cost = (
             1.0 * path_cost
             + 2.0 * breakdown["joint_quality"]

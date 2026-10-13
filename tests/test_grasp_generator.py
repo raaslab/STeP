@@ -2,10 +2,10 @@ import numpy as np
 import pytest
 
 from conftest import HAND_SITE, requires_libero
-from step.system_one.motion.config import GraspSampleConfig
-from step.system_one.motion.skills.grasp_generator import (
+from step.system_one.skills.pick.grasp_generator import (
     CompositeGraspGenerator,
     GraspGenerator,
+    GraspSampleConfig,
     PrivilegedTopDownGraspGenerator,
     hand_from_fingertip_pose,
     yaw_quat_wxyz,
@@ -146,7 +146,7 @@ def test_rim_edge_gated_by_object_class(libero_scene):
     cands = gen.generate(libero_scene, ["alphabet_soup_1_main"])
     assert not any(c.metadata["strategy"] == "rim_edge" for c in cands)
 
-    from step.system_one.motion.skills.grasp_generator import _is_rim_graspable_object_class
+    from step.system_one.skills.pick.grasp_generator import _is_rim_graspable_object_class
 
     assert _is_rim_graspable_object_class("akita_black_bowl_1_main")
     assert _is_rim_graspable_object_class("glazed_rim_porcelain_ramekin_1_main")
@@ -182,7 +182,7 @@ def test_zero_yaw_top_down_quat_is_wxyz_0100():
     grasp_generator._object_xy_obb_world) and generally isn't 0.
     ``test_generates_top_down_approach`` already covers that every generated
     candidate points straight down regardless of its yaw."""
-    from step.system_one.motion.skills.grasp_generator import _TOP_DOWN_QUAT_WXYZ
+    from step.system_one.skills.pick.grasp_generator import _TOP_DOWN_QUAT_WXYZ
     from step.system_one.motion.scene_query import quat_mul_wxyz, quat_to_rotmat_wxyz
 
     q = quat_mul_wxyz(yaw_quat_wxyz(0.0), _TOP_DOWN_QUAT_WXYZ)
@@ -296,7 +296,7 @@ def test_width_estimate_matches_real_obb_and_is_minimal_at_optimum(libero_scene)
     yaws, (b) never be less than the OBB's true short side (the physical
     minimum), and (c) hit exactly that minimum at the fitted-optimal yaw
     (offset 0, always one of the samples)."""
-    from step.system_one.motion.skills.grasp_generator import _object_xy_obb_world
+    from step.system_one.skills.pick.grasp_generator import _object_xy_obb_world
 
     gen = PrivilegedTopDownGraspGenerator(GraspSampleConfig(num_yaw_samples=8, yaw_search_half_range_rad=0.6))
     cands = gen.generate(libero_scene, ["alphabet_soup_1_main"])

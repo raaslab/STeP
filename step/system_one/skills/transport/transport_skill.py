@@ -4,37 +4,68 @@ path that treats the carried object as part of the robot's own collision
 geometry (via its sphere approximation, see ``attached_object.py``/
 ``collision.py``) -- not just the bare gripper.
 
-This is the *same* hover-leg motion ``PlaceSkill`` already plans internally
-on the way to its own descent (see that module's own comment: "Plan the
-transport-to-hover leg with the container as a real obstacle"), just
-exposed here as its own subtask instead of only ever running as a step
-inside ``place``. It exists because this codebase's *legacy* stage-machine
-transport backend has no notion of the carried object's own footprint at
-all -- a single fixed carry height, no attached-object collision checking
-whatsoever -- confirmed directly via a real rollout ("move the bowl out of
-the drawer's way, onto the cabinet's top") that it drove a grasped bowl
-straight into the cabinet's own wall reaching for a goal on top of it,
-dropping the grasp partway there. ``TransportSkill`` reuses ``PlaceSkill``'s
-own floor/rim measurement (``_container_floor_and_rim_z``/
-``_support_floor_and_rim_z``) so the two skills agree on where "over the
-goal" actually is, and stops there -- the final descent-and-release is left
-to a subsequent ``place`` subtask, matching the OverGoal vs
-Placed/Released predicate split already used in STL formulas.
+This is the same hover-leg motion ``PlaceSkill`` already plans internally on
+the way to its own descent, exposed here as its own subtask instead of only
+running as a step inside ``place``. It exists because this codebase's
+*legacy* stage-machine transport backend has no notion of the carried
+object's own footprint -- a single fixed carry height, no attached-object
+collision checking -- and can drive a grasped object straight into an
+obstacle reaching for a goal above it. ``TransportSkill`` reuses
+``PlaceSkill``'s own floor/rim measurement so the two skills agree on where
+"over the goal" is, and stops there -- the final descent-and-release is left
+to a subsequent ``place`` subtask, matching the OverGoal vs Placed/Released
+predicate split already used in STL formulas.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
-from ..collision import CollisionChecker, CollisionPhase, required_hand_pose_for_object_pose
-from ..config import MotionConfig
-from ..kinematics import IKSolver
-from ..ompl_planner import MotionPlanner
-from ..panda import ROBOT_BODIES
-from ..scene_query import SceneQuery, quat_mul_wxyz
-from .grasp_generator import yaw_quat_wxyz
-from ..types import AttachedObjectState, PlannerFailureReason, SkillFailureReason, SkillResult
-from .place_skill import _container_floor_and_rim_z, _support_floor_and_rim_z, escape_start_collision
+from ...motion.collision import CollisionChecker, CollisionPhase, required_hand_pose_for_object_pose
+from ...motion.config import MotionConfig
+from ..ik_utils import escape_start_collision, yaw_quat_wxyz
+from ...motion.kinematics import IKSolver
+from ...motion.ompl_planner import MotionPlanner
+from ...motion.panda import ROBOT_BODIES
+from ...motion.scene_query import SceneQuery, quat_mul_wxyz
+from ...motion.types import AttachedObjectState, PlannerFailureReason, SkillFailureReason, SkillResult
+from ..place.place_skill import _container_floor_and_rim_z, _support_floor_and_rim_z
+
+
+@dataclass
+class TransportConfig:
+    """Tuning for ``TransportSkill``/``LiberoTransportAdapter`` -- moves the
+    currently-attached object to a hover point above the goal container/
+    support, the same target ``PlaceSkill``'s own internal hover leg plans
+    to, exposed as its own subtask instead of only running as a step inside
+    ``place``. Exists because the *legacy* stage-machine transport backend
+    has no notion of the carried object's own footprint (a single fixed
+    carry height, no attached-object collision checking) and can drive a
+    grasped object straight into an obstacle on the way to the goal.
+    """
+
+    # IK is not unique -- see OpenDrawerSkill/PlaceSkill's own comments on
+    # the same point. Mix of near-start_q perturbation and full-joint-range
+    # random seeds (see TransportSkill.execute's own comment on why both are
+    # needed), tried before giving up on one hover-pose candidate.
+    pose_selection_attempts: int = 8
+    # RRTConnect is stochastic; retried more than most other OMPL-backed
+    # skills in this package (default 3) since a tight, recessed transport
+    # goal (e.g. an already-open drawer) needs more attempts to reliably
+    # succeed.
+    planning_attempts: int = 8
+    # Candidates further than this from the robot's own base (world-frame xy
+    # distance, ignoring z) are tried only after every closer one fails,
+    # regardless of how "furthest from the object" ranks them -- see
+    # TransportSkill.execute()'s own comment on why "furthest first" isn't
+    # enough alone. Past this range the arm struggles to actually track to
+    # the candidate even when IK/collision accept it. Sits comfortably under
+    # the Panda's nominal ~0.85m kinematic reach, leaving room for a
+    # demanding hover orientation; a heuristic cap, not a precisely derived
+    # limit.
+    max_practical_reach_m: float = 0.70
 
 
 class TransportSkill:
@@ -60,14 +91,11 @@ class TransportSkill:
         place_surface: str = "inside",
         goal_point_xyz: np.ndarray | None = None,
     ) -> SkillResult:
-        # A real completed pick leaves the object resting wherever it was
-        # grasped -- on the table, or right at a container's rim -- not
-        # lifted clear. The very first attached-object-aware collision
-        # check below can therefore legitimately find `start_q` already
-        # touching something; escape it the same way PlaceSkill's own
-        # handoff does (see escape_start_collision's own docstring) rather
-        # than failing outright on a collision that's about to be resolved
-        # by the very next step anyway.
+        # A completed pick leaves the object resting wherever it was
+        # grasped, not lifted clear, so the first attached-object-aware
+        # collision check can legitimately find `start_q` already touching
+        # something; escape it first rather than failing outright (same as
+        # PlaceSkill's own handoff -- see escape_start_collision's docstring).
         start_q = escape_start_collision(self.ik_solver, self.collision_checker, scene, attached, goal_container_body, start_q)
 
         cfg = self.config.transport
@@ -77,48 +105,36 @@ class TransportSkill:
         # An explicit point goal says exactly where over the surface to carry
         # the object, replacing the "aim at the goal body's center, then try
         # a ring of offsets around it" search below. That search is right for
-        # a small named container but close to useless on a large support:
-        # measured on the real table, its own center sits ~6cm from where the
-        # bowl already was, so a "successful" transport left the object
-        # essentially where it started. The surface body is still needed (and
-        # still passed) for the real floor height and for permitting contact
-        # with the thing being placed onto.
+        # a small named container but close to useless on a large support,
+        # where the body center can be nearly indistinguishable from the
+        # object's own current position. The surface body is still needed
+        # for the real floor height and for permitting contact with it.
         if goal_point_xyz is not None:
             goal_point_xyz = np.asarray(goal_point_xyz, dtype=float)
             container_pos = np.array([goal_point_xyz[0], goal_point_xyz[1], container_pos[2]])
             if goal_point_xyz.shape[0] > 2 and np.isfinite(goal_point_xyz[2]):
                 rim_top_z = float(goal_point_xyz[2])
 
-        # The object's orientation *relative to the gripper* never changes
-        # in flight (the grip is rigid) -- but the world-frame yaw we ask
-        # the arm to hold that grip at is still ours to choose, and doesn't
-        # have to be exactly whatever yaw the preceding pick happened to
-        # leave it at. Confirmed directly via a real rollout: a plate's
-        # rim-edge grasp yaw (picked for reasons entirely about *picking*,
-        # not about what's convenient to carry) sometimes left the required
-        # hover-hand orientation in a basin the arm's IK solver essentially
-        # never reaches from any seed (0/8 across every hover XY offset
-        # tried) -- not because the pose was truly infeasible, a *different*
-        # commanded yaw for the same rigid grip solved immediately. So
-        # sweep a handful of yaw deltas about world Z (0/90/180/270 degrees)
-        # applied on top of the object's current orientation, trying delta=0
-        # (today's behavior -- a no-op when it already works, e.g. the bowl
-        # case) before the others.
+        # The object's orientation *relative to the gripper* never changes in
+        # flight (the grip is rigid), but the world-frame yaw we ask the arm
+        # to hold that grip at is still ours to choose -- it doesn't have to
+        # be whatever yaw the preceding pick happened to leave it at. A
+        # grasp yaw picked for picking reasons can leave the required
+        # hover-hand orientation in a basin IK can't reach from any seed,
+        # even though a different commanded yaw for the same rigid grip
+        # solves immediately. So sweep yaw deltas about world Z (0/90/180/270
+        # degrees), trying delta=0 (today's behavior) first.
         object_quat_now_base = scene.body_pose(attached.object_name)[1]
         yaw_deltas = [0.0, np.pi / 2.0, np.pi, 3.0 * np.pi / 2.0]
 
         # A named container (a bowl/basket/drawer) is small enough that
-        # aiming for its own geometric center is exactly right. A large,
-        # open support surface (the table, say) is not: its center is just
-        # as likely to already be occupied by something else already
-        # sitting there. Confirmed via a real rollout: transporting toward
-        # the table's own body center failed outright with the target
-        # overlapping an unrelated plate already on the table. So this
-        # tries the same center + shrunk-ring spread of XY offsets
-        # PlaceSkill's own `_generate_candidates` uses (same config fields)
-        # -- for a small container the ring candidates are harmless
-        # near-duplicates of the center; for a big open surface they're
-        # what actually finds a clear spot.
+        # aiming for its own geometric center is exactly right. A large open
+        # support surface (the table, say) is not: its center is just as
+        # likely to already be occupied by something else. So this tries the
+        # same center + shrunk-ring spread of XY offsets PlaceSkill's own
+        # `_generate_candidates` uses (same config fields) -- harmless
+        # near-duplicates of the center for a small container, but what
+        # actually finds a clear spot on a big open surface.
         pcfg = self.config.place
         container_extent = scene.body_collision_extent_world(goal_container_body)
         xy_offsets = [np.zeros(2)]
@@ -126,12 +142,9 @@ class TransportSkill:
             # The exact point first, then a tight ring of near-misses, for
             # the same reason PlaceSkill's own point branch has one: a single
             # candidate makes the subtask all-or-nothing on one IK solve, and
-            # a hover pose a few cm over is still the requested spot. Leaving
-            # this out here (while place had it) was a real regression -- one
-            # rollout failed outright with hover_ik_failed on the lone
-            # candidate. Deliberately much tighter than the wide ring used
-            # for a bare support entity, which is what makes "aim at the
-            # table" miss by half a table.
+            # a hover pose a few cm over is still the requested spot.
+            # Deliberately much tighter than the wide ring used for a bare
+            # support entity.
             for ring_m in (0.04, 0.08):
                 for i in range(6):
                     theta = 2.0 * np.pi * i / 6
@@ -141,9 +154,8 @@ class TransportSkill:
                 # Same widened, multi-radius search PlaceSkill's own
                 # _generate_candidates uses for place_surface="top" -- see
                 # top_surface_* fields' own docstring in config.py. A single
-                # ring wasn't enough once more than one object needed its
-                # own clear spot on the table in the same run (one candidate
-                # landed almost exactly on the cabinet's own footprint).
+                # ring isn't enough once more than one object needs its own
+                # clear spot on a shared surface in the same run.
                 n_ring = max(0, int(pcfg.top_surface_num_ring_samples))
                 for shrink_fraction in pcfg.top_surface_shrink_fractions:
                     interior_half_xy = shrink_fraction * container_extent.half_extents[:2]
@@ -151,33 +163,21 @@ class TransportSkill:
                         theta = 2.0 * np.pi * i / n_ring
                         xy_offsets.append(interior_half_xy * np.array([np.cos(theta), np.sin(theta)]))
                 # Try the spots furthest from where the object already is
-                # first. The whole reason to transport onto a big support is
-                # to put the object somewhere *else*; taking the first
-                # feasible candidate in ring order means aiming at the
-                # surface's own center, which on this table sits ~6cm from
-                # where the bowl started -- a "successful" transport that
-                # left it exactly as much in the way as before. Ordering
-                # only changes which feasible candidate wins; every one of
-                # them is still fully collision-checked, which is what keeps
-                # this honest about obstacles nothing else knows about (a
-                # real rollout had 206 candidates correctly rejected for
-                # putting the carried bowl inside a stove that isn't even a
-                # named entity).
+                # first: the whole reason to transport onto a big support is
+                # to put the object somewhere *else*, and the first feasible
+                # candidate in ring order is usually close to the surface's
+                # own center -- i.e. close to where the object already is.
+                # Every candidate is still fully collision-checked regardless
+                # of order, so this only affects which feasible one wins.
                 #
-                # "Furthest from the object" alone still isn't enough: it
-                # says nothing about whether the arm can actually *track*
-                # to that candidate, only that IK+collision accept it as a
-                # final pose. Confirmed via a real rollout: the furthest
-                # candidate on a real table was 0.68m from the robot's own
-                # base and left the settle loop frozen at ~0% progress
-                # (0.289m residual against a 0.288m planned path), while
-                # closer candidates (0.59-0.63m from base) converged to
-                # within a few cm. So candidates beyond
+                # "Furthest from the object" alone isn't enough though: it
+                # says nothing about whether the arm can actually *track* to
+                # that candidate, only that IK+collision accept it as a final
+                # pose -- a candidate too far from the robot's own base can
+                # leave the settle loop essentially frozen even though
+                # planning accepted it. So candidates beyond
                 # cfg.max_practical_reach_m from the base are pushed to the
-                # back of the ordering -- still tried (never dropped
-                # outright, in case nothing closer is feasible on some
-                # other scene), just no longer preferred purely for being
-                # far from the object.
+                # back of the ordering (still tried, never dropped outright).
                 object_xy_now = scene.body_pose(attached.object_name)[0][:2]
                 robot_base_xy = scene.body_pose(ROBOT_BODIES[0])[0][:2]
                 anchor_xy = container_pos[:2]
@@ -198,17 +198,12 @@ class TransportSkill:
         # point (its body origin), not from whichever part of its real
         # collision geometry hangs lowest below that point -- wrong whenever
         # the two aren't close, which is common for a handle-grasped object
-        # whose body origin sits well above its own base. Confirmed against
-        # the real moka_pot_1 asset: its lowest fitted collision sphere
-        # reaches 10.85cm below the body origin, so a flat 6cm clearance
-        # above the goal surface still left the pot's real base ~1.8cm
-        # *below* the table -- rejected every hover candidate as
-        # in_collision:table, even ones correctly centered in xy on the
-        # actual goal. Extending clearance by however far the object's own
-        # geometry overhangs its reference point fixes this without
-        # touching the reference point itself (used unchanged for the final
-        # place pose and everything else). See PlaceSkill's identical fix
-        # for the same reasoning in more detail.
+        # whose body origin sits well above its own base, and can otherwise
+        # leave the object's real base penetrating the goal surface even
+        # when xy is correctly centered. Extending clearance by however far
+        # the object's geometry overhangs its reference point fixes this
+        # without touching the reference point itself. See PlaceSkill's
+        # identical fix for the same reasoning in more detail.
         overhang_m = max(
             0.0,
             -min(
@@ -223,11 +218,9 @@ class TransportSkill:
         last_rejection = "no_ik_attempted"
         n_offsets_tried = 0
         # Counts per rejection kind across every (yaw, offset, seed) attempt.
-        # `last_rejection` alone is actively misleading -- it reports only
-        # whichever attempt happened to fail last, so a run whose candidates
-        # were overwhelmingly rejected for collision still reads as
-        # "hover_ik_failed" if the final seed happened to miss. That cost
-        # real debugging time; the counts are cheap and settle it directly.
+        # `last_rejection` alone is misleading -- it only reports whichever
+        # attempt failed last, which can look like "IK failed" even when
+        # collision was the dominant cause.
         rejection_counts: dict[str, int] = {}
 
         def _note(kind: str) -> None:
@@ -248,29 +241,23 @@ class TransportSkill:
                     candidate_hover_xyz, object_quat_now, attached.grasp_transform_hand_from_object
                 )
                 # IK has many solution branches for the same Cartesian pose
-                # (elbow up/down, base rotated round), and they are *not*
-                # interchangeable here: the arm has to physically travel from
-                # its current configuration to whichever one is picked, and a
+                # (elbow up/down, base rotated round), and they are not
+                # interchangeable: the arm has to physically travel from its
+                # current configuration to whichever one is picked, and a
                 # branch far away in joint space sweeps the hand through a
-                # correspondingly huge arc in world space to get there --
-                # even along a perfectly direct joint-space path. That is
-                # exactly the "arm shot up in the air" the user reported
-                # watching a real rollout: measured 1.5m of hand travel for a
-                # 0.18m hover move. So don't accept the first valid solution:
+                # correspondingly huge arc to get there even along a direct
+                # joint-space path. So don't accept the first valid solution:
                 # collect every valid one this budget finds and keep the one
-                # *closest to start_q*, which is the one the arm can reach
-                # with the least (and least dramatic) movement.
+                # closest to start_q, which needs the least movement to reach.
                 best_candidate = None
                 best_joint_distance = float("inf")
                 for attempt in range(cfg.pose_selection_attempts):
-                    # Seeding a DLS solve near start_q tends to converge to a
-                    # nearby branch, which is what we want -- but it can also
-                    # fail outright when no solution exists in that basin
-                    # (measured: a plate-hover pose solvable 20/60 times from
-                    # full-range seeds, 0/6 from start_q perturbations). So
-                    # spend the first half of the budget near start_q and the
-                    # rest on full-range seeds, then let the distance ranking
-                    # below decide -- a far branch is still better than none.
+                    # Seeding near start_q tends to converge to a nearby
+                    # branch, which is what we want, but can fail outright
+                    # when no solution exists in that basin. So spend the
+                    # first half of the budget near start_q and the rest on
+                    # full-range seeds, then let the distance ranking below
+                    # decide -- a far branch is still better than none.
                     if attempt == 0:
                         seed = start_q
                     elif attempt <= cfg.pose_selection_attempts // 2:
@@ -282,15 +269,12 @@ class TransportSkill:
                         last_rejection = "hover_ik_failed"
                         _note("hover_ik_failed")
                         continue
-                    # PLACE_APPROACH, not FREE_SPACE: this is the pose that
-                    # holds the object right above the surface it is being
-                    # carried to, so the carried object is necessarily within
-                    # the attached-sphere margin of that surface -- and only
-                    # PLACE_APPROACH exempts the goal body. Measured carrying
-                    # a plate to the table: 356 candidates rejected for the
-                    # plate's own sphere touching table_collision, the very
-                    # thing it was being brought to. PlaceSkill's hover check
-                    # had the identical bug and the identical fix.
+                    # PLACE_APPROACH, not FREE_SPACE: this pose holds the
+                    # object right above the surface it's being carried to,
+                    # so the carried object is necessarily within the
+                    # attached-sphere margin of that surface, and only
+                    # PLACE_APPROACH exempts the goal body. PlaceSkill's
+                    # hover check has the identical fix for the same reason.
                     check = self.collision_checker.check(
                         candidate.q,
                         phase=CollisionPhase.PLACE_APPROACH,
@@ -337,29 +321,18 @@ class TransportSkill:
         # legacy backend it replaces.
         #
         # RRTConnect is a *feasibility* planner, not a shortest-path one --
-        # its own path-simplification pass shortcuts through free space but
+        # its path-simplification pass shortcuts through free space but
         # doesn't reliably turn a circuitous solution into a direct one, so
-        # "the first collision-free plan found" can still be a wildly
-        # inefficient one. Confirmed directly via a real rollout (visible in
-        # its saved video, and independently reported by the user watching
-        # it: "the arm shot up in the air"): a successful bowl transport
-        # took a 2.6m joint-space-equivalent path for a 0.8m straight-line
-        # hover move (path_efficiency 0.31), swinging the arm up and out of
-        # the camera's view entirely for dozens of frames although a much
-        # shorter path existed. Rather than accepting the first feasible
-        # plan outright, keep re-planning across the attempt budget and
-        # track the shortest one found, only stopping early once a plan is
-        # already reasonably direct (no need to spend the whole budget once
-        # a good path is in hand).
+        # the first collision-free plan found can still swing the arm through
+        # a wildly inefficient detour. So keep re-planning across the attempt
+        # budget and track the shortest one found, stopping early once a
+        # plan is already reasonably direct.
+        #
         # Score candidate plans by *Cartesian* hand-path length (via forward
-        # kinematics on each joint waypoint), not joint-space distance --
-        # confirmed directly that the two don't reliably agree: an earlier
-        # version of this retry scored by joint-space path length alone and
-        # still accepted an equally-inefficient plan (path_efficiency barely
-        # changed, 0.31 -> 0.37), since a "short" move in joint space can
-        # still swing the hand through a long, high Cartesian detour
-        # depending which joints move. Cartesian length is what actually
-        # corresponds to "the arm visibly swinging out of frame."
+        # kinematics on each joint waypoint), not joint-space distance: a
+        # "short" move in joint space can still swing the hand through a
+        # long, high Cartesian detour depending which joints move, so
+        # joint-space distance doesn't reliably track actual arm-swing.
         joint_names = self.collision_checker.joint_names
         ee_site = self.collision_checker.ee_site
 
@@ -424,19 +397,14 @@ class TransportSkill:
             )
 
         plan.metadata["hover_q"] = hover_ik.q.tolist()
-        # The plan's own first waypoint is the *escaped* start_q above, not
-        # necessarily wherever the real arm currently sits (escaping a real
-        # start-in-collision can move it by a non-trivial distance -- unlike
-        # PlaceSkill's own escape, which only ever needs a few cm to clear a
-        # container wall, this one can need up to `max_lift_m` to clear a
-        # carried object still resting on the table). The adapter needs
-        # this explicitly so it can move the real arm there *first*, before
-        # tracking the reference this plan produces -- confirmed via a real
-        # rollout that skipping this left the reference assuming a start
-        # position the arm was never actually at, and the MPC's attempt to
-        # reconcile that gap produced a huge (~0.5-0.9 rad) joint-space
-        # tracking error for the entire leg, driving the carried object
-        # through the table/cabinet the whole way rather than around it.
+        # The plan's first waypoint is the *escaped* start_q above, which can
+        # be a non-trivial distance from where the real arm currently sits
+        # (escaping a carried object resting on the table can need up to
+        # `max_lift_m`, more than PlaceSkill's own escape typically needs).
+        # The adapter needs this explicitly to move the real arm there first,
+        # before tracking the reference this plan produces -- otherwise the
+        # MPC's attempt to reconcile the gap produces large tracking error
+        # and drives the carried object through obstacles instead of around.
         plan.metadata["plan_start_q"] = start_q.tolist()
         return SkillResult(
             success=True,
@@ -448,12 +416,10 @@ class TransportSkill:
                 "hover_hand_pos": hover_hand_pos.tolist(),
                 "hover_hand_quat_wxyz": hover_hand_quat.tolist(),
                 "goal_container_body": goal_container_body,
-                # The planned hand path vs the straight line to the same
-                # target -- the ratio is what "the arm swung wide instead of
-                # just moving there" looks like numerically, so it's worth
-                # having on every run rather than only under ad hoc
-                # instrumentation. Distinct from motion_trace's own
-                # (executed, post-tracking) numbers: a mismatch between the
+                # The planned hand path vs. the straight line to the same
+                # target: the ratio quantifies "the arm swung wide instead of
+                # just moving there." Distinct from motion_trace's own
+                # (executed, post-tracking) numbers -- a mismatch between the
                 # two separates a bad *plan* from bad *tracking*.
                 "planned_hand_path_m": best_path_length,
                 "planned_straight_line_m": straight_line_m,

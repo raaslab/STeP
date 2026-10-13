@@ -3,9 +3,8 @@
 #
 # STeP's own pyproject.toml only declares `openai` -- the actual LIBERO /
 # robosuite / MuJoCo / contact-graspnet / OMPL stack lives in a sibling
-# `cap-x` checkout that every scripts/run_libero_*.py and scripts/tune_*.py
-# imports from at runtime via sys.path (see step/system_one/libero_scene.py).
-# This script:
+# `cap-x` checkout that every scripts/run_libero_*.py imports from at
+# runtime via sys.path (see step/system_one/libero_scene.py). This script:
 #
 #   1. Locates (or clones) cap-x as a sibling of STeP.
 #   2. Creates cap-x's base `.venv` (uv, Python 3.10) if missing.
@@ -30,9 +29,6 @@
 #
 # Usage:
 #   cd STeP && bash scripts/setup_env.sh [--cap-x-root /path/to/cap-x]
-#
-# For a cluster (SLURM + conda, no uv, no OMPL bridge needed since the conda
-# env pulls OMPL straight from conda-forge) see cluster/setup_env.sh instead.
 set -euo pipefail
 
 STEP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -98,7 +94,7 @@ if "$VENV_PY" -c "import ompl" >/dev/null 2>&1; then
   echo "[setup] ompl already importable in .venv-libero, skipping OMPL bridge"
 elif ! command -v conda >/dev/null 2>&1; then
   echo "[setup] warning: ompl not importable and conda not found, cannot bridge it automatically." >&2
-  echo "[setup]   Install conda and re-run, or use cluster/setup_env.sh (conda-only, no bridging needed)." >&2
+  echo "[setup]   Install conda and re-run." >&2
 else
   echo "[setup] bridging OMPL from a conda-forge build (no prebuilt PyPI wheel exists)"
   CONDA_BASE="$(conda info --base)"
@@ -143,7 +139,7 @@ EOF
   if "$VENV_PY" -c "import ompl" >/dev/null 2>&1; then
     echo "[setup] OMPL bridge OK"
   else
-    echo "[setup] warning: ompl still fails to import after bridging -- see cluster/environment.yml for the conda-only alternative." >&2
+    echo "[setup] warning: ompl still fails to import after bridging." >&2
   fi
 fi
 

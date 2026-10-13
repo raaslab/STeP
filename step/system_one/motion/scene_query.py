@@ -63,35 +63,24 @@ def resolve_body_name(scene: "SceneQuery", canonical_name: str) -> str:
     as used throughout ``scene_context``/params) to the actual MuJoCo body name
     the LIBERO/robosuite model uses (e.g. ``"alphabet_soup_1_main"``). These
     differ by a ``"_main"`` suffix for LIBERO's free-body objects -- the
-    resolver layer was never MuJoCo-body-name-aware (it only tracks XY/z
-    geometry hints), so anything in ``step/system_one/motion/`` that needs a
-    real body/geom lookup must go through this first.
+    resolver layer was never MuJoCo-body-name-aware, so anything in
+    ``step/system_one/motion/`` that needs a real body/geom lookup must go
+    through this first.
 
     A drawer/cabinet-level entity (e.g. ``"top_drawer"``) is neither of
     those -- it's a level_label alias ``infer_drawer_fixtures`` registers,
-    never a real body name at all (the real body is something like
+    never a real body name (the real body is something like
     ``"wooden_cabinet_1_cabinet_top"``, which doesn't derive from the alias
-    by any string rule). Confirmed via a real rollout: transporting/placing
-    into a drawer goal crashed outright here, a gap that had simply never
-    been exercised through this function before (legacy transport, and
-    apparently place too until a real drawer-goal ompl_mpc run finally hit
-    it, never needed a literal MuJoCo body match for a drawer target).
-    Falls back to ``articulation.resolve_drawer`` (lazily imported to avoid
-    a circular import -- ``articulation.py`` itself imports from this
-    module) before giving up.
+    by any string rule). Falls back to ``articulation.resolve_drawer``
+    (lazily imported to avoid a circular import) before giving up.
     """
     # "_burner" before "_main": a stove's "_main"/"_base" frame body is not
-    # its functional surface -- confirmed against the real flat_stove_1
-    # asset, whose "_main" body sits 15cm away (in a completely different
-    # local frame) from its "_burner" body, which is what a placed object
-    # actually needs to land on/near. Resolving to "_main" here silently
-    # aimed every hover/placement candidate at the wrong body's position --
-    # confirmed by a real rollout: transport's own hover_target_xy matched
-    # "_main"'s xy exactly, 0.15m off from the burner scene_context's own
-    # entity entry (infer_stove_fixtures) correctly pointed System 2 at.
-    # "_main" still wins for every ordinary free-body object (nothing else
-    # in this codebase's assets defines a "_burner" body), so this can't
-    # regress anything that isn't a stove.
+    # its functional surface -- on the real flat_stove_1 asset, "_main" sits
+    # well away (in a different local frame) from "_burner", which is what a
+    # placed object actually needs to land on/near. Resolving to "_main"
+    # would silently aim every hover/placement candidate at the wrong
+    # position. "_main" still wins for every ordinary free-body object, so
+    # this can't regress anything that isn't a stove.
     for candidate in (f"{canonical_name}_burner", f"{canonical_name}_main", canonical_name):
         try:
             scene.body_id(candidate)
@@ -106,20 +95,13 @@ def resolve_body_name(scene: "SceneQuery", canonical_name: str) -> str:
         pass
     if canonical_name == "table":
         # "table" is the one canonical name every scene is assumed to have
-        # (e.g. the executor's own point-target path defaults an unset
-        # params.goal_surface to it -- see executor.py's _resolve_point_
-        # goal), but it's a real, exact MuJoCo body name only in a kitchen
-        # scene's own arena; a living-room scene names it
-        # "living_room_table", a study scene "study_table", and presumably
-        # others follow the same room-prefixed pattern -- confirmed via a
-        # real rollout (STUDY_SCENE1, a caddy/book task): the literal body
-        # "table" doesn't exist there, and _resolve_point_goal's hardcoded
-        # default crashed uncaught deep in this function instead of ever
-        # reaching a real surface. Fall back to any top-level body whose
-        # name contains "table" -- sorted by (length, name) so the base
-        # table body (e.g. "living_room_table") wins over a longer,
-        # more-specific sub-body/geom-holder (e.g. "living_room_table_col")
-        # when a scene happens to expose both.
+        # (e.g. executor.py's _resolve_point_goal defaults an unset
+        # params.goal_surface to it), but it's an exact MuJoCo body name only
+        # in a kitchen scene's arena -- a living-room scene names it
+        # "living_room_table", a study scene "study_table", and so on. Fall
+        # back to any top-level body whose name contains "table", sorted by
+        # (length, name) so the base table body wins over a longer,
+        # more-specific sub-body/geom-holder when a scene exposes both.
         matches = sorted(
             (
                 name
@@ -142,20 +124,18 @@ def object_within_container_footprint(
     scene: "SceneQuery", object_body: str, container_body: str, z_margin_m: float = 0.10
 ) -> bool | None:
     """Is ``object_body`` currently resting inside ``container_body``'s own
-    footprint -- the same XY-AABB proxy ``libero_place_adapter.py`` already
-    uses for its own ``within_goal_footprint_xy`` place-verification (reused,
-    not reimplemented), plus a Z-height sanity check so an object merely
-    transiting *over* the container at the instant of a live snapshot isn't
-    mistaken for one already resting inside it.
+    footprint -- the same XY-AABB proxy ``libero_place_adapter.py`` uses for
+    its own place-verification, plus a Z-height sanity check so an object
+    merely transiting over the container isn't mistaken for one already
+    resting inside it.
 
     Used by the pipeline-recall retry loop (``libero_runner.py``) to decide
-    whether a place goal is already satisfied before recalling System 2 --
-    without this, a recall after an unrelated failure (e.g. a second object's
-    dropped transport) has no way to know the first object is already done,
-    and re-plans a redundant pick/place for it. Returns ``None`` (not a
-    guess) if either body or the container's own collision geometry can't be
-    resolved -- the caller should then treat the goal state as unknown, not
-    assume it's unsatisfied.
+    whether a place goal is already satisfied before recalling System 2, so
+    a recall after an unrelated failure doesn't re-plan a redundant
+    pick/place for an object that's already placed. Returns ``None`` (not a
+    guess) if either body or the container's collision geometry can't be
+    resolved, so the caller treats the goal state as unknown rather than
+    unsatisfied.
     """
     try:
         object_pos, _ = scene.body_pose(object_body)
@@ -203,13 +183,13 @@ class SceneQuery:
     def __init__(self, model: "mujoco.MjModel", data: "mujoco.MjData", *, _render_sim: Any = None) -> None:
         self.model = model
         self.data = data
-        # Optional: the *live* robosuite sim, kept only for its already-
+        # Optional: the live robosuite sim, kept only for its already-
         # established render context (see render_depth_and_body_ids) -- never
         # read/written for anything else, so this doesn't weaken the
         # scratch-data-only mutation guarantee the rest of this class relies
         # on. None for a SceneQuery built directly from (model, data), e.g.
-        # in tests -- render_depth_and_body_ids falls back to mujoco.Renderer
-        # in that case.
+        # in tests, where render_depth_and_body_ids falls back to
+        # mujoco.Renderer.
         self._render_sim = _render_sim
 
     # ---------------------------------------------------------------- construction
@@ -247,13 +227,9 @@ class SceneQuery:
         robosuite's multi-arm-ready naming, where every gripper part gets a
         ``_right``/``_left`` side infix after ``gripper0_``. Older forks --
         e.g. the ``robosuite==1.4.0`` this repo's LIBERO-PRO checkout
-        vendors -- only apply that infix to the top-level mount body
-        (``gripper0_right_gripper``) and drop it everywhere else
-        (``gripper0_eef``, ``gripper0_ft_frame``, ...), confirmed by reading
-        the actual loaded model rather than assumed from a version number.
-        Trying the other convention here, once, keeps every call site
-        working against either install without needing to know which one is
-        active.
+        vendors -- only apply that infix to the top-level mount body and
+        drop it everywhere else. Trying the other convention here, once,
+        keeps every call site working against either install.
         """
         if "gripper0_right_" in name:
             return name.replace("gripper0_right_", "gripper0_", 1)
@@ -298,19 +274,11 @@ class SceneQuery:
             if alt is not None:
                 gid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, alt)
         if gid < 0 and name.startswith("geom_"):
-            # Exact inverse of geom_name()'s own fallback for a geom with no
-            # real MJCF name (common for simple collision primitives, e.g.
-            # unnamed box/plane geoms robosuite/LIBERO assets add for
-            # collision-only purposes) -- geom_name() synthesizes f"geom_{gid}"
-            # for those, and any caller that round-trips a name straight out
-            # of compute_contacts()/geom_name() back through geom_id() (every
-            # CollisionChecker.check()/check_edge() call does exactly this)
-            # needs that fallback to resolve, not raise. A real bug this
-            # fixes: PickSkill's escape_start_collision crashed outright the
-            # first time an escape check's contact list included one of
-            # these unnamed geoms, with no prior indication anything was
-            # wrong (the geom's real id was always fine -- only its string
-            # round-trip through this method was broken).
+            # Exact inverse of geom_name()'s fallback for a geom with no real
+            # MJCF name: geom_name() synthesizes f"geom_{gid}" for those, and
+            # any caller that round-trips a name from compute_contacts()/
+            # geom_name() back through geom_id() (every CollisionChecker
+            # check) needs that fallback to resolve, not raise.
             try:
                 candidate = int(name[len("geom_"):])
             except ValueError:
@@ -337,15 +305,11 @@ class SceneQuery:
         """Names of free-jointed bodies (LIBERO's manipulable objects -- see
         ``set_free_body_qpos``'s same free-joint check) within ``radius_m`` of
         ``point_world``, excluding ``exclude``. Filtering to free-jointed
-        bodies is what excludes the fixed robot/table/world bodies without
-        needing any ``scene_context``/``SceneResolver`` plumbing -- this
-        module has neither wired in today (confirmed: ``LiberoPickAdapter``
-        only ever constructs a ``SceneQuery`` from the raw sim, never a
-        resolver) -- so a real MuJoCo joint-type check is the only geometry
-        this layer already has available to tell "a movable object" apart
-        from "part of the fixed scene." Used to assemble the wider
-        ``pc_full`` scene context a learned grasp detector needs, beyond just
-        the target object's own points."""
+        bodies excludes the fixed robot/table/world bodies without needing
+        any ``scene_context``/``SceneResolver`` plumbing, which this module
+        doesn't have wired in. Used to assemble the wider ``pc_full`` scene
+        context a learned grasp detector needs, beyond just the target
+        object's own points."""
         point_world = np.asarray(point_world, dtype=np.float64).reshape(3)
         names = []
         for bid in range(self.model.nbody):
@@ -370,12 +334,11 @@ class SceneQuery:
         self, hand_site: str = "gripper0_right_ft_frame", tcp_site: str = "gripper0_right_grip_site"
     ) -> np.ndarray:
         """Signed distance (m) along the hand frame's local +Z from the hand/
-        flange site to the TCP/grip site, computed live from the current model
-        instead of a hardcoded constant (unlike Cap-X's
-        ``FRANKA_HAND_TO_FINGERTIP_Z_M``, which hardcodes 0.0584*2 m for the
-        Franka hand geometry -- robosuite's Panda MJCF already exposes both
-        frames as named sites, so we read the real transform instead of
-        guessing/copying a constant that may not match this exact model).
+        flange site to the TCP/grip site, computed live from the current
+        model instead of a hardcoded constant (unlike Cap-X's
+        ``FRANKA_HAND_TO_FINGERTIP_Z_M``) -- robosuite's Panda MJCF already
+        exposes both frames as named sites, so we read the real transform
+        rather than copy a constant that may not match this exact model.
         """
         hand_pos, hand_quat = self.site_pose(hand_site)
         tcp_pos, _ = self.site_pose(tcp_site)
@@ -392,17 +355,15 @@ class SceneQuery:
         """How far *before* the TCP, along the hand frame's approach axis,
         the palm/hand collision geometry's near face sits -- i.e. for a
         top-down grasp, how far above the TCP the palm's own lowest point
-        already is, purely from the gripper's rigid geometry (independent of
-        the arm's current configuration, like ``hand_to_tcp_transform``).
+        already is, purely from the gripper's rigid geometry (pose-
+        independent, like ``hand_to_tcp_transform``).
 
         Needed because the palm is not a point at the hand site: it's a
-        sizeable collision mesh (real half-extent ~10cm along one axis on
-        the stock Panda gripper) whose near face can sit well short of the
-        naive "hand-to-tcp distance", so treating that distance alone as
-        the gripper's reach silently assumes the palm can occupy space it
-        physically can't -- see ``grasp_generator.py``'s use of this for a
-        squat object where doing so put the palm ~2cm into the object's top
-        even though the TCP itself was several cm clear of it.
+        sizeable collision mesh whose near face can sit well short of the
+        naive "hand-to-tcp distance", so treating that distance alone as the
+        gripper's reach silently assumes the palm can occupy space it
+        physically can't -- e.g. for a squat object, it can put the palm
+        into the object's top even though the TCP itself is still clear.
         """
         tcp_local_z = self.hand_to_tcp_transform(hand_site, tcp_site)
         palm_near_local_z = self._geom_far_local_z(palm_geom_name, hand_site)
@@ -410,28 +371,21 @@ class SceneQuery:
 
     def _geom_far_local_z(self, geom_name: str, hand_site: str) -> float:
         """A geom's own farthest extent along the hand frame's local +Z axis
-        -- shared by ``palm_clearance_above_tcp_m`` (the palm sits *before*
-        the TCP, so this is its near face) and ``finger_reach_below_tcp_m``
-        (the fingers extend *past* the TCP, so this is their far reach);
-        which side of the TCP a geom ends up on falls out of the
-        arithmetic, not out of which of the two callers asks.
+        -- shared by ``palm_clearance_above_tcp_m`` (the palm sits before the
+        TCP, so this is its near face) and ``finger_reach_below_tcp_m`` (the
+        fingers extend past the TCP, so this is their far reach); which side
+        of the TCP a geom ends up on falls out of the arithmetic.
 
         For a mesh geom, uses the real vertices transformed directly into
-        the hand's local frame rather than rotating the geom's own
-        (already-axis-aligned-to-the-geom) AABB half-extent into that frame
-        and re-bounding it there -- double-bounding a box through an
-        arbitrary (non-90-degree-permutation) rotation always grows it, and
-        the stock Panda hand's palm mesh sits at just such an angle (~1.5
-        degrees off-axis to ``gripper0_right_ft_frame``) relative to this
-        model's own hand-to-TCP frame. Measured directly against that real
-        mesh: the AABB-rotation approach overstates the palm's near-face
-        reach by ~9mm versus the vertices' own true extent -- not a
-        rounding error, a real ~9mm of grasp depth (see
-        ``grasp_generator.py``'s ``min_safe_for_palm``) given away to a
-        bounding box the palm doesn't actually fill in that direction.
-        Other geom types keep the cheaper AABB-rotation bound: a box *is*
-        its own AABB in its local frame, so there is nothing to gain there,
-        and the primitives used elsewhere for this (finger geoms) are
+        the hand's local frame rather than rotating the geom's own AABB
+        half-extent into that frame and re-bounding it there -- double-
+        bounding a box through an arbitrary rotation always grows it, and
+        the stock Panda hand's palm mesh sits at a slight off-axis angle to
+        ``gripper0_right_ft_frame``, enough to meaningfully overstate the
+        palm's near-face reach (real grasp depth given away to a bounding
+        box the palm doesn't actually fill). Other geom types keep the
+        cheaper AABB-rotation bound: a box is its own AABB in its local
+        frame, and the primitives used elsewhere (finger geoms) are
         capsules/boxes, not meshes.
         """
         hand_pos, hand_quat = self.site_pose(hand_site)
@@ -467,16 +421,14 @@ class SceneQuery:
         """How far *past* the TCP, along the hand frame's approach axis, the
         farthest-reaching finger geom extends -- i.e. for a top-down grasp,
         how far below the TCP the fingertips already reach, purely from the
-        gripper's rigid geometry (pose-independent, like
-        ``palm_clearance_above_tcp_m``, which this mirrors for the opposite
-        end of the approach: fingers extend *past* the TCP instead of
-        stopping short of it like the palm does).
+        gripper's rigid geometry (pose-independent, mirroring
+        ``palm_clearance_above_tcp_m`` for the opposite end of the approach).
 
         Needed so a grasp height doesn't ask the fingertips to reach below
-        the surface a thin object rests on. Verified against cream_cheese_1
-        (2cm tall): targeting its exact geometric mid-height put the rigid
-        finger body ~1cm into the floor even though the TCP itself was still
-        comfortably above it.
+        the surface a thin object rests on -- targeting a short object's
+        exact geometric mid-height can otherwise put the rigid finger body
+        into the floor even though the TCP itself is still comfortably
+        above it.
         """
         tcp_local_z = self.hand_to_tcp_transform(hand_site, tcp_site)
         farthest = tcp_local_z
@@ -502,13 +454,11 @@ class SceneQuery:
         """Like ``body_geom_ids``, but excluding purely-visual geoms
         (``contype == 0 and conaffinity == 0``, robosuite/MuJoCo's convention
         for a render-only mesh that never participates in physics). Needed
-        wherever a body's *physical* shape matters and its geom set includes
-        such a geom -- e.g. a LIBERO container's high-poly visual mesh
-        alongside the handful of simple boxes (floor + walls) that actually
-        model its collision geometry. The visual mesh's own bounding box
-        spans the whole hollow container as if it were solid, since an AABB
-        can't represent concavity -- exactly the shape the simple box geoms
-        are there to approximate correctly instead."""
+        wherever a body's physical shape matters -- e.g. a LIBERO container's
+        high-poly visual mesh alongside the simple boxes (floor + walls)
+        that actually model its collision geometry. The visual mesh's own
+        bounding box spans the whole hollow container as if it were solid,
+        since an AABB can't represent concavity."""
         return [
             g
             for g in self.body_geom_ids(body_name, include_children=include_children)
@@ -558,11 +508,8 @@ class SceneQuery:
     def body_collision_extent_world(self, body_name: str) -> BodyExtent | None:
         """Like ``body_extent_world``, but over only the body's real
         collision geoms (see ``body_collision_geom_ids``) -- excludes a
-        body's purely-visual mesh, whose own bounding box can extend past its
-        actual physical collision shape (e.g. a container rendered with a
-        smooth high-poly mesh but collision-modeled as a handful of simple
-        boxes -- the mesh's AABB can disagree with where the real collidable
-        surface is)."""
+        body's purely-visual mesh, whose own bounding box can extend past
+        its actual physical collision shape."""
         bid = self.body_id(body_name)
         return self._merged_extent_world(self.body_collision_geom_ids(body_name), self.data.xpos[bid])
 
@@ -570,21 +517,16 @@ class SceneQuery:
         """Axis-aligned half-extents of a body's collision geoms **in the
         body's own local frame** -- i.e. invariant to the body's current
         world orientation, unlike ``body_extent_world``, whose world-axis-
-        aligned box inflates under rotation (a box rotated 45 degrees needs a
-        bigger world-aligned AABB to cover it, even though the object's own
-        shape hasn't changed).
+        aligned box inflates under rotation.
 
-        Use this wherever the extent will be re-rotated by a *different*
+        Use this wherever the extent will be re-rotated by a different
         orientation later -- e.g. fitting collision spheres to an object at
         grasp time, to be checked at whatever orientation it's carried at
-        during transport/place. Reusing ``body_extent_world`` there double-
-        counts rotation (once baked into the stored extent at whatever angle
-        the object happened to be at when grasped, again when the caller
-        re-rotates it by the current orientation), inflating the fitted
-        sphere far beyond the object's true size -- a real bug found via a
-        soup can's fitted collision radius (~6cm) coming out barely smaller
-        than the hover clearance above a basket rim, making every placement
-        candidate spuriously read as colliding with the basket wall.
+        during transport/place. Reusing ``body_extent_world`` there would
+        double-count rotation (once baked into the stored extent, again when
+        the caller re-rotates it), inflating the fitted sphere far beyond
+        the object's true size and making placement candidates spuriously
+        read as colliding.
         """
         gids = self.body_geom_ids(body_name)
         if not gids:
@@ -615,12 +557,11 @@ class SceneQuery:
         """Sample points on/near the real surface of a body's collision
         geometry (box corners, capsule/cylinder rings -- see
         ``_geom_sample_points_local``), all in the body's own local
-        (pose-independent) frame. Shared by whatever needs the body's TRUE
-        shape rather than just its axis-aligned bounding box, which can't
-        represent orientation at all: fitting collision spheres to a
-        carried object (``attached_object.fit_spheres_from_geoms``) and
-        fitting an oriented bounding box for grasp candidates
-        (``grasp_generator``'s OBB-based center-grasp orientation)."""
+        (pose-independent) frame. Shared by whatever needs the body's true
+        shape rather than just its axis-aligned bounding box: fitting
+        collision spheres to a carried object
+        (``attached_object.fit_spheres_from_geoms``) and fitting an oriented
+        bounding box for grasp candidates."""
         gids = self.body_collision_geom_ids(body_name)
         if not gids:
             return np.zeros((0, 3))
@@ -673,11 +614,11 @@ class SceneQuery:
     ) -> np.ndarray:
         """Like ``body_surface_points_local``, but dense enough for point-
         cloud-based grasp inference (a learned detector like Contact-GraspNet
-        expects hundreds+ of points; the sparse version's 8 box corners/~33
-        capsule points/7 sphere points are only ever meant to bound a shape
-        for OBB-fitting, not represent its surface). Still pure ground-truth
-        mesh geometry -- grids box/mesh faces and adds more rings/latitude
-        bands for round primitives, no camera rendering involved."""
+        expects hundreds+ of points; the sparse version is only meant to
+        bound a shape for OBB-fitting, not represent its surface). Still
+        pure ground-truth mesh geometry -- grids box/mesh faces and adds
+        more rings/latitude bands for round primitives, no camera rendering
+        involved."""
         gids = self.body_collision_geom_ids(body_name)
         if not gids:
             return np.zeros((0, 3))
@@ -770,14 +711,12 @@ class SceneQuery:
             r, half_len = float(size[0]), float(size[1])
             return np.array([r, r, half_len + r])
         if geom_type == mujoco.mjtGeom.mjGEOM_PLANE:
-            # A plane's geom_size is a *rendering* hint (visual quad half-width
-            # in xy, grid-line spacing in z) -- not physical geometry. Treating
-            # it as a literal box half-extent (as the box/mesh fallback below
-            # does) makes a ground plane's "half-extent" 12.5cm+ thick, so
-            # anything resting *on* it reads as already deep inside the slab
-            # (a real bug this exact fix was written against -- see
-            # tests/test_collision.py::test_attached_sphere_ignores_ground_plane).
-            # Model it as a thin, effectively-2D slab instead.
+            # A plane's geom_size is a rendering hint (visual quad half-width
+            # in xy, grid-line spacing in z), not physical geometry. Treating
+            # it as a literal box half-extent (like the box/mesh fallback
+            # below) makes a ground plane read as a thick slab, so anything
+            # resting on it would read as already deep inside it. Model it as
+            # a thin, effectively-2D slab instead.
             half_xy = float(size[0]) if size[0] > 0 else 50.0  # 0 means "infinite" per MuJoCo convention
             half_xy2 = float(size[1]) if size[1] > 0 else 50.0
             return np.array([half_xy, half_xy2, 1e-4])
@@ -875,18 +814,12 @@ class SceneQuery:
         ``SceneQuery`` built directly from (model, data), e.g. in tests, has
         no live sim to reuse).
 
-        The fallback path exists mainly for that case -- reusing the live
-        sim's context is not just an optimization. A real full rollout
-        showed a bare ``mujoco.Renderer`` corrupting *robosuite's own*
-        subsequent video frames into solid noise, reproduced with a minimal
-        before/after screenshot: creating (and especially closing) a second,
-        independent GL context steals the process's thread-local "current"
-        context away from robosuite's, which never re-binds its own context
-        on later ``render()`` calls (it isn't written to expect one to have
-        moved) -- so once stolen, every later robosuite render comes out
-        garbage for the rest of the process, not just the frame right after.
-        Rendering through the live sim's own context is the actual fix,
-        rather than trying to hand context ownership back afterward.
+        Reusing the live sim's context is not just an optimization: creating
+        (and especially closing) a second, independent GL context steals the
+        process's thread-local "current" context away from robosuite's,
+        which never re-binds its own on later ``render()`` calls -- so once
+        stolen, every later robosuite render comes out as garbage for the
+        rest of the process.
         """
         if self._render_sim is not None:
             return self._render_depth_and_body_ids_via_sim(camera_name, height, width)
@@ -902,11 +835,9 @@ class SceneQuery:
             width=width, height=height, camera_name=camera_name, depth=True, segmentation=True
         )
         # robosuite's raw sim.render() is OpenGL row order (row 0 = bottom of
-        # image) -- flip to the standard top-to-bottom order deproject_camera_
-        # depth assumes (the same convention mujoco.Renderer already returns
-        # unflipped, confirmed empirically -- see LiberoManipulationEnv.
-        # render_rgb_frame's own docstring for the same flip on its own
-        # sim.render()-derived frames).
+        # image) -- flip to the standard top-to-bottom order
+        # deproject_camera_depth assumes (mujoco.Renderer already returns
+        # that order unflipped).
         seg = np.asarray(seg)[::-1]
         depth_normalized = np.asarray(depth_normalized, dtype=np.float32)[::-1]
         depth = np.asarray(get_real_depth_map(sim, depth_normalized), dtype=np.float32)
@@ -921,31 +852,24 @@ class SceneQuery:
         self, camera_name: str, height: int, width: int
     ) -> tuple[np.ndarray, np.ndarray]:
         """Fallback used only when there's no live sim to render through
-        (``self._render_sim is None``). Two things had to be worked out
-        empirically against this package's actual installed mujoco (3.5.0),
-        not assumed from docs:
+        (``self._render_sim is None``). Two things to watch for:
 
-        1. Offscreen multisampling (``model.vis.quality.offsamples``, 4 by
-           default) blends object-id colors at silhouette edges, and
-           ``mujoco.Renderer``'s segmentation decode has no bounds check
-           against that -- confirmed by a real ``IndexError`` at an
-           anti-aliased edge pixel. Multisampling is disabled here for the
-           duration of this one render (via a temporary flip, since
-           ``self.model`` may be the *same* object a live robosuite env
-           also renders with -- restored in ``finally`` either way) rather
-           than left off permanently, so video/other rendering elsewhere
-           keeps its antialiasing.
+        1. Offscreen multisampling (``model.vis.quality.offsamples``) blends
+           object-id colors at silhouette edges, and ``mujoco.Renderer``'s
+           segmentation decode has no bounds check against that, causing an
+           ``IndexError`` at anti-aliased edges. Disabled here only for the
+           duration of this one render (``self.model`` may be shared with a
+           live robosuite env's own rendering, restored in ``finally``).
         2. ``mujoco.Renderer``'s segmentation mode must be enabled and then
-           ``update_scene`` called *again* before rendering -- calling
+           ``update_scene`` called again before rendering -- calling
            ``render()`` right after ``enable_segmentation_rendering()``
            without refreshing the scene reuses a stale id table and hits the
            same ``IndexError``.
 
-        No row flip is needed on this path's output (confirmed by
-        deprojecting a real object's pixel and checking it lands on that
-        object's known world position) -- ``mujoco.Renderer`` already returns
-        standard top-to-bottom row order, unlike robosuite's own raw
-        ``sim.render()`` (see ``_render_depth_and_body_ids_via_sim``)."""
+        No row flip is needed on this path's output -- ``mujoco.Renderer``
+        already returns standard top-to-bottom row order, unlike robosuite's
+        own raw ``sim.render()`` (see ``_render_depth_and_body_ids_via_sim``).
+        """
         old_samples = self.model.vis.quality.offsamples
         self.model.vis.quality.offsamples = 0
         renderer = None
