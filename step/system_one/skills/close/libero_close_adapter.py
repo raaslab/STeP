@@ -85,22 +85,13 @@ class LiberoCloseAdapter(_ServoMixin):
 
         approach_positions = np.asarray(plan_result.planned_trajectory.metadata["approach_positions"])
         push_positions = np.asarray(plan_result.planned_trajectory.metadata["push_positions"])
-        # push_positions is only door_arc_waypoints (10) raw IK solutions
-        # spanning the whole door swing -- far too sparse for direct 1-step-
-        # per-index tracking, which demanded the full rotation in ~10 control
-        # steps and produced the jerky, inefficient, collision-prone pushes
-        # seen on real microwave rollouts. Re-run it through the same
-        # velocity-limited resampling the FREE_SPACE leg already gets.
-        print(f"[DEBUGCLOSE] raw push_positions len={len(push_positions)}", flush=True)
+        # The raw arc is only ~10 IK solutions over the whole swing -- too sparse
+        # to track one per step, so resample it like the FREE_SPACE leg.
         push_plan = TimeParameterizer(self.config.time_param).parameterize(
             MotionPlan(success=True, joint_names=self.joint_names, geometric_path=push_positions)
         )
         if push_plan.positions is not None:
-            print(f"[DEBUGCLOSE] densified push_positions len={len(push_plan.positions)}", flush=True)
-            print(f"[DEBUGCLOSE] raw[-1]={push_positions[-1]}", flush=True)
-            print(f"[DEBUGCLOSE] densified[-1]={push_plan.positions[-1]}", flush=True)
             push_positions = push_plan.positions
-        print(f"[DEBUGCLOSE] final_target_pos={final_target_pos}, contact_quat_wxyz={contact_quat_wxyz}", flush=True)
         # One continuous reference: FREE_SPACE to standoff, descent, then
         # push to closed -- no gripper-state change partway, so nothing to split into two tracked legs.
         full_reference = np.concatenate([traj.positions, approach_positions[1:], push_positions[1:]], axis=0)
@@ -145,13 +136,6 @@ class LiberoCloseAdapter(_ServoMixin):
             trace=trace,
         )
         steps += result.steps
-        ee_trace = np.asarray(trace.ee_positions)
-        print(f"[DEBUGCLOSE] n_ee_positions={len(ee_trace)}", flush=True)
-        for i in range(0, len(ee_trace), max(1, len(ee_trace)//15)):
-            print(f"[DEBUGCLOSE]   step {i}: ee={ee_trace[i]}", flush=True)
-        if len(ee_trace):
-            print(f"[DEBUGCLOSE]   step LAST: ee={ee_trace[-1]}", flush=True)
-            print(f"[DEBUGCLOSE] dist(last_ee, final_target_pos)={np.linalg.norm(ee_trace[-1]-final_target_pos):.4f}", flush=True)
         plan_result.diagnostics["settle"] = result.as_diagnostics()
         plan_result.diagnostics["motion_trace"] = {"push": trace.summary()}
 

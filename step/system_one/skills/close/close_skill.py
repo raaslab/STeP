@@ -54,7 +54,7 @@ from ..ik_utils import solve_ik_robust as _solve_ik_robust
 from ...motion.kinematics import IKSolver
 from ...motion.ompl_planner import MotionPlanner
 from ...motion.panda import FINGER_JOINT_NAMES
-from ...motion.scene_query import SceneQuery, quat_mul_wxyz
+from ...motion.scene_query import SceneQuery, quat_mul_wxyz, rotmat_to_quat_wxyz
 from ..open_drawer.open_drawer_skill import (
     _orientation_from_approach_and_reference,
     _unit,
@@ -595,17 +595,20 @@ class CloseSkill:
         qpos_samples = np.linspace(qpos_current, qpos_closed, len(waypoints_world))
         denom = qpos_open_reference - qpos_closed
 
-        # Orientation at each waypoint: approach axis along the arc's own
-        # tangent direction, reference axis fixed to the hinge axis.
+        # Hand pointing down, pushing with the side of the fingers, which are
+        # spread along the door face. Pointing the hand along the push instead
+        # (away from the robot, with the door only ~0.4m from the base) folded
+        # the wrist back onto the arm: joint 2 pinned at its limit, 4.7 rad
+        # from home, and the plan either failed or couldn't be tracked.
+        down = np.array([0.0, 0.0, -1.0])
         quats = []
         for i in range(len(waypoints_world)):
             if i < len(waypoints_world) - 1:
                 tangent = waypoints_world[i + 1] - waypoints_world[i]
             else:
                 tangent = waypoints_world[i] - waypoints_world[i - 1]
-            approach_world = _unit(tangent)
-            quat, _ = _orientation_from_approach_and_reference(approach_world, axis_world)
-            quats.append(quat)
+            x_axis = _unit(np.cross(np.array([0.0, 0.0, 1.0]), _unit(tangent)))
+            quats.append(rotmat_to_quat_wxyz(np.column_stack([x_axis, np.cross(down, x_axis), down])))
         # Approach direction for the standoff search: the same tangent the
         # first waypoint uses, so the arm arrives already moving the way it'll push.
         approach_world0 = _unit(waypoints_world[1] - waypoints_world[0]) if len(waypoints_world) > 1 else axis_world

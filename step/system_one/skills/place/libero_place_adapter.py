@@ -109,20 +109,42 @@ class LiberoPlaceAdapter(_ServoMixin):
         ik = IKSolver(joint_names=self.joint_names, site_name=self.ee_site)
         start_q = scene.get_qpos(self.joint_names)
         rng = np.random.default_rng(0)
-        pre_q = None
+        # The pose in front of the opening is low (the object enters just above
+        # the container floor), where the carried object's spheres overhang into
+        # the table -- so it's checked on exact geometry, and the planned move
+        # stops 10cm above it, finishing with a straight descent.
+        above_hand = pre_hand + np.array([0.0, 0.0, 0.10])
+        # Arm-only checks run without the carried object, which otherwise sits
+        # at its current spot in the scene and reads as an obstacle.
+        no_object = scene.clone()
+        no_object.set_free_body_qpos(attached.object_name, np.array([0.0, 0.0, -5.0]), obj_quat)
+        arm_checker = CollisionChecker(no_object, self.joint_names, self.ee_site, ROBOT_BODIES, GRIPPER_BODIES, self.config.collision)
+        pre_q = above_q = None
+        last_contacts: list[str] = []
         for attempt in range(8):
             seed = start_q if attempt == 0 else rng.uniform(lo, hi)
             sol = solve_ik_robust(ik, scene, pre_hand, hand_quat, seed, rng, n_restarts=2)
-            if sol.success and not checker.check(
-                sol.q, phase=CollisionPhase.PLACE_APPROACH, attached=attached, goal_container_body=side.container_body
+            if not sol.success:
+                continue
+            arm = arm_checker.check(sol.q, phase=CollisionPhase.PLACE_APPROACH, goal_container_body=side.container_body)
+            exact = checker.attached_exact_contacts(sol.q, attached)
+            if arm.in_collision or exact:
+                last_contacts = [str(c) for c in arm.contacts[:3]] + [str(c) for c in exact[:3]]
+                continue
+            above = solve_ik_robust(ik, scene, above_hand, hand_quat, sol.q, rng, n_restarts=2)
+            if not above.success or checker.check(
+                above.q, phase=CollisionPhase.PLACE_APPROACH, attached=attached, goal_container_body=side.container_body
             ).in_collision:
-                pre_q = sol.q
-                break
+                last_contacts = ["pose 10cm above the opening approach is blocked"]
+                continue
+            pre_q, above_q = sol.q, above.q
+            break
         if pre_q is None:
+            result.diagnostics["pre_insert_contacts"] = last_contacts
             return _fail("no collision-free arm pose in front of the opening", 0)
         planner = MotionPlanner(self.joint_names, lo, hi, checker, self.config.planner)
         motion = planner.plan(
-            start_q, [pre_q], phase=CollisionPhase.PLACE_APPROACH, attached=attached, goal_container_body=side.container_body
+            start_q, [above_q], phase=CollisionPhase.PLACE_APPROACH, attached=attached, goal_container_body=side.container_body
         )
         if not motion.success:
             return _fail(f"planning to the opening failed: {motion.failure_reason}", 0)
@@ -134,7 +156,7 @@ class LiberoPlaceAdapter(_ServoMixin):
             joint_names=self.joint_names,
             ee_site=self.ee_site,
             approach_start_idx=len(traj.positions) + cfg.max_settle_steps,
-            target_pos=pre_hand,
+            target_pos=above_hand,
             target_quat_wxyz=hand_quat,
             collision_checker=checker,
             mpc_horizon=int(self.config.mpc.get("horizon", 16)),
@@ -156,6 +178,8 @@ class LiberoPlaceAdapter(_ServoMixin):
         )
         steps = tracked.steps
         result.diagnostics["to_opening"] = tracked.as_diagnostics()
+        descend_steps, _ = self._servo_line(pre_hand, hand_R, self.env.close_gripper_cmd, 60, step_callback)
+        steps += descend_steps
 
         insert_steps, stalled = self._servo_line(final_hand, hand_R, self.env.close_gripper_cmd, 120, step_callback)
         steps += insert_steps
