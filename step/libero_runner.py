@@ -602,6 +602,16 @@ def _decompose_or_annotate_errors(plan: dict[str, Any], errors_path: Path) -> di
     """
     from .system_two.stl_plan import decompose_and_validate
 
+    system2_plan = plan.get("system2_plan")
+    if (
+        isinstance(system2_plan, dict)
+        and isinstance(system2_plan.get("formula"), dict)
+        and not system2_plan.get("subtasks")
+        and system2_plan.get("type") != "stl_spec"
+    ):
+        # The model sometimes labels a global-formula plan "skill_graph";
+        # go by the content, or the decomposer rejects a valid plan.
+        plan = {**plan, "system2_plan": {**system2_plan, "type": "stl_spec"}}
     decomposed_plan, result = decompose_and_validate(plan)
     if decomposed_plan is None:
         errors_path.write_text("\n".join(result.errors))

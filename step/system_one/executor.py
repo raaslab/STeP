@@ -975,6 +975,13 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                 }
             return self._run_side_insert_place(env, sub, side, plan, attached_state, motion_config, max_steps, outdir)
 
+        last_target = getattr(self, "_last_transport_target", None)
+        if place_surface == "top" and goal_point_xyz is None and last_target and last_target[0] == attached_state.object_name:
+            # Set down where transport checked the spot was clear, not wherever
+            # tracking drifted to (1.5cm off put a moka pot onto its neighbor).
+            # NaN height: place still measures the support surface itself.
+            goal_point_xyz = [last_target[1][0], last_target[1][1], float("nan")]
+
         wait_steps_used = self._wait_for_stl_start(
             adapter, sub, task_steps_so_far=task_steps_so_far, gripper_cmd=env.close_gripper_cmd, env=env
         )
@@ -1192,6 +1199,8 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
             goal_radius_m=goal_radius_m,
         )
         steps += wait_steps_used
+        hover = (result.diagnostics or {}).get("hover_xyz")
+        self._last_transport_target = (attached_state.object_name, hover) if result.success and hover else None
         # Transport never detaches on success; it holds the object at the hover
         # pose for the following place subtask to take over.
         status: dict[str, Any] = {

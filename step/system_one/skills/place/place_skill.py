@@ -32,6 +32,9 @@ class PlaceSampleConfig:
     # Extra inset beyond "footprint fully on the surface" when picking a top-surface
     # spot. Zero: two moka pots only fit a 19cm burner when each sits flush to an edge.
     top_surface_footprint_margin_m: float = 0.0
+    # Real-geometry gap required between a placed object and its neighbors, so
+    # set-down drift doesn't land it on them (two moka pots at touching distance did).
+    neighbor_clearance_m: float = 0.01
     hover_clearance_m: float = 0.06  # above the container's rim before descending
     drop_clearance_m: float = 0.02  # above the container's floor (or the next object already in it)
     # Withdraw distance before checking release; a just-released object can still read as

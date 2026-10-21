@@ -325,33 +325,44 @@ class CollisionChecker:
         attached: AttachedObjectState,
         goal_container_body: str | None = None,
         drop_m: float = 0.0,
+        clearance_m: float = 0.0,
     ) -> list[tuple[str, str, float]]:
         """Penetrating contacts of the carried object's real collision geoms
         (not its spheres) at configuration q, optionally lowered drop_m below
         the hand. For static goal-pose checks where packing is tight: the
         spheres make a moka pot ~25% wider than it is, enough to rule out
-        two pots side by side on a burner. Gripper and goal-surface contact are ignored."""
+        two pots side by side on a burner. Gripper and goal-surface contact are
+        ignored. clearance_m also tests the object shifted that far each way
+        horizontally -- contacts only register on penetration, so touching
+        distance would otherwise pass with no slack for set-down drift."""
         scratch = self.base_scene.clone()
         scratch.set_qpos(self.joint_names, q)
         scratch.forward()
         hand_pos, hand_quat = scratch.site_pose(self.ee_site)
         obj_pos, obj_quat = compose_world_pose(hand_pos, hand_quat, attached.grasp_transform_hand_from_object)
-        scratch.set_free_body_qpos(attached.object_name, obj_pos - np.array([0.0, 0.0, drop_m]), obj_quat)
         obj_geoms = set(scratch.body_collision_geom_ids(attached.object_name))
         ignored = set(self.robot_geom_ids)
         if goal_container_body is not None:
             ignored |= set(scratch.body_collision_geom_ids(goal_container_body))
-        mujoco.mj_collision(scratch.model, scratch.data)
+        base = obj_pos - np.array([0.0, 0.0, drop_m])
+        shifts = [np.zeros(3)]
+        if clearance_m > 0.0:
+            shifts += [clearance_m * np.array(v, dtype=float) for v in ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0))]
         out = []
-        for i in range(scratch.data.ncon):
-            c = scratch.data.contact[i]
-            i1, i2, dist = int(c.geom1), int(c.geom2), float(c.dist)
-            if (i1 in obj_geoms) == (i2 in obj_geoms):
-                continue
-            other = i2 if i1 in obj_geoms else i1
-            if other in ignored or dist >= 0.0:
-                continue
-            out.append((scratch.geom_name(i1), scratch.geom_name(i2), dist))
+        for shift in shifts:
+            scratch.set_free_body_qpos(attached.object_name, base + shift, obj_quat)
+            mujoco.mj_collision(scratch.model, scratch.data)
+            for i in range(scratch.data.ncon):
+                c = scratch.data.contact[i]
+                i1, i2, dist = int(c.geom1), int(c.geom2), float(c.dist)
+                if (i1 in obj_geoms) == (i2 in obj_geoms):
+                    continue
+                other = i2 if i1 in obj_geoms else i1
+                if other in ignored or dist >= 0.0:
+                    continue
+                out.append((scratch.geom_name(i1), scratch.geom_name(i2), dist))
+            if out:
+                break
         return out
 
     def check_edge(

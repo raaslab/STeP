@@ -42,9 +42,11 @@ class PlannerConfig:
 class CollisionConfig:
     self_margin_m: float = 0.005 # This one is legacy 
     env_margin_m: float = 0.01
-    # Smaller than env_margin_m: the attached-object sphere fit already
-    # over-approximates, so a full margin made clear containers read as colliding.
-    attached_margin_m: float = 0.007
+    # Clearance kept around the carried object's spheres in transit. 0.7cm was
+    # enough when the spheres were ~2x too wide; with the tight fit it let a
+    # carried moka pot skim (and topple) its neighbor. Goal poses that need to
+    # pack tighter are checked on exact geometry instead.
+    attached_margin_m: float = 0.02
     # Tolerated finger (not palm) interpenetration with the grasp target
     # during TERMINAL_APPROACH, mirroring real gripper compliance. 0.0 disables it.
     finger_overlap_tolerance_m: float = 0.006

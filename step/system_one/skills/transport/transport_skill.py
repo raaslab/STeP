@@ -236,7 +236,8 @@ class TransportSkill:
                     object_contacts = []
                     for drop_m in (0.0, pcfg.hover_clearance_m):
                         object_contacts += self.collision_checker.attached_exact_contacts(
-                            candidate.q, attached, goal_container_body, drop_m=drop_m
+                            candidate.q, attached, goal_container_body, drop_m=drop_m,
+                            clearance_m=pcfg.neighbor_clearance_m,
                         )
                     if object_contacts:
                         last_rejection = f"carried_object_in_collision:{object_contacts[:4]}"
