@@ -21,3 +21,7 @@ cluster/
 scripts/tune_*.py
 scripts/plot_close_robustness.py
 scripts/scripted_close_fail_then_recover.py
+
+# Internal planning notes
+CONTACT_GRASPNET_PLAN.md
+STL_DECOMPOSITION_PLAN.md
