@@ -1,11 +1,8 @@
-"""Shared grasp-candidate image rendering, used by both ``scripts/
-visualize_grasp_poses.py`` (manual debugging) and ``LiberoPickAdapter.run()``
-(an automatic save on every real pick) so the two stay in sync.
+"""Shared grasp-candidate image rendering, used by both manual debugging
+scripts and LiberoPickAdapter.run() so the two stay in sync.
 
-Draws a dot at each candidate's grasp position plus a short line along the
-gripper's closing axis, so a rim grasp's radial straddle is visible. Center
-candidates are blue, rim-edge orange, other/unlabeled strategies yellow; the
-selected candidate is green and labeled "SELECTED".
+Draws each candidate's position and closing axis: center candidates blue,
+rim-edge orange, other/unlabeled yellow; the selected one is green and labeled.
 """
 
 from __future__ import annotations
@@ -20,9 +17,8 @@ from ...motion.types import GraspCandidate
 
 
 def camera_project(model: Any, data: Any, camera_name: str, height: int, width: int, points_world: np.ndarray) -> np.ndarray:
-    """World (N,3) -> pixel (N,2) [row, col] for a MuJoCo camera, matching the
-    same up/down flip ``LiberoManipulationEnv.render_rgb_frame`` applies to
-    its own rendered frames."""
+    """World (N,3) -> pixel (N,2) [row, col] for a MuJoCo camera, with the same
+    up/down flip LiberoManipulationEnv.render_rgb_frame applies."""
     import mujoco
 
     cam_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, camera_name)
@@ -52,8 +48,8 @@ def render_grasp_candidates_image(
     candidates: list[GraspCandidate],
     selected_grasp: GraspCandidate | None = None,
 ):
-    """A PIL Image of ``frame_rgb`` with every candidate's closing axis
-    overlaid, the ``selected_grasp`` (if any, matched by pose) highlighted."""
+    """A PIL Image of frame_rgb with every candidate's closing axis
+    overlaid, the selected_grasp (if any, matched by pose) highlighted."""
     from PIL import Image, ImageDraw, ImageFont
 
     height, width = frame_rgb.shape[0], frame_rgb.shape[1]

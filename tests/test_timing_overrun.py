@@ -125,7 +125,7 @@ def test_annotate_timing_overruns_noop_on_clean_run():
 
 def test_annotate_timing_overruns_noop_on_exception_fallback_summary():
     """A prior attempt that raised (executor exception, not a plan) leaves
-    `summary` without a "records" key at all -- must not crash."""
+    summary without a "records" key at all -- must not crash."""
     fresh_context = {"entities": []}
     previous_summary = {"success": False, "error": "RuntimeError: boom"}
     assert _annotate_timing_overruns(fresh_context, previous_summary) == []

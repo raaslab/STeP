@@ -125,9 +125,9 @@ def build_global_developer_prompt(scene_context: dict[str, Any] | None = None) -
     """EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md).
 
     Asks the VLM for one global STL formula for the whole task instead of a
-    pre-decomposed ``subtasks`` list. The ordered subtask sequence is derived
-    afterward by ``step/system_two/stl_plan.py:decompose()``, not by the model.
-    Not used by the default `build_developer_prompt` pipeline.
+    pre-decomposed subtasks list. The ordered subtask sequence is derived
+    afterward by step/system_two/stl_plan.py:decompose(), not by the model.
+    Not used by the default build_developer_prompt pipeline.
     """
     entity_lines = []
     if scene_context is not None:

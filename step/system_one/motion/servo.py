@@ -1,10 +1,9 @@
 """Shared low-level servo/actuation helpers for executor-facing motion adapters.
 
-Extracted from ``libero_pick_adapter.py`` so ``LiberoOpenDrawerAdapter`` doesn't
-duplicate the same Cartesian-delta servo math: both adapters convert a
-joint-space MPC/reference target into the clipped-delta OSC_POSE action the
-legacy stage machine's ``BaseManipulationEnv._compose_full_action`` already
-expects, via FK on a scratch ``SceneQuery`` -- never the live sim directly.
+Converts a joint-space MPC/reference target into the clipped-delta OSC_POSE
+action the legacy stage machine's BaseManipulationEnv._compose_full_action
+expects, via FK on a scratch SceneQuery -- never the live sim directly.
+Shared by every pick/drawer/transport/place adapter.
 """
 
 from __future__ import annotations
@@ -14,6 +13,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ..orientation_utils import orientation_error_rotvec
+from .attached_object import refresh_grasp_transform
 from .collision import CollisionPhase
 from .mpc import JointSpaceMPC, MPCContext
 from .scene_query import SceneQuery, quat_to_rotmat_wxyz
@@ -21,15 +21,12 @@ from .types import MPCCostConfig
 
 
 def wait_steps(adapter, n_steps: int, gripper_cmd: float, step_callback=None) -> int:
-    """EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md, "wait skill" section).
-
-    Hold the current end-effector pose still for ``n_steps`` ticks (zero
-    Cartesian-delta each tick, ``gripper_cmd`` held constant by the caller).
-    Used to satisfy a not-before STL timing constraint by literally waiting
-    rather than releasing early. ``adapter`` only needs a
-    ``_step_env(cart_pos, cart_ori, gripper_cmd)`` method, which every
-    ``_ServoMixin`` subclass and ``LiberoPlaceAdapter`` has, so this one
-    function serves pick, transport, and place.
+    """EXPERIMENTAL: holds the end-effector pose still for n_steps ticks
+    (zero Cartesian-delta, gripper_cmd held constant), to satisfy a
+    not-before STL timing constraint by literally waiting rather than
+    releasing early. adapter only needs a
+    _step_env(cart_pos, cart_ori, gripper_cmd) method, shared by pick,
+    transport, and place.
     """
     zero = np.zeros(3, dtype=np.float32)
     steps = 0
@@ -43,16 +40,11 @@ def wait_steps(adapter, n_steps: int, gripper_cmd: float, step_callback=None) ->
 
 def is_settle_stalled(recent_errors: list[float], window: int, tol_m: float) -> bool:
     """True once a settle loop's rolling window of position errors shows no
-    meaningful improvement over ``window`` consecutive steps.
+    meaningful improvement over window consecutive steps.
 
-    Settle loops keep servoing toward a fixed final pose until the real
-    (laggy) controller converges or ``max_settle_steps`` runs out. When the
-    target sits right at a real contact boundary (e.g. fingers closing
-    against the object, or a drawer resisting at the end of its travel), the
-    loop never converges or gets any closer -- it just pushes into and eases
-    off the obstacle for the rest of the budget. Detecting that plateau and
-    breaking out early stops the pointless struggling without changing the
-    final outcome.
+    This plateaus when the target sits at a real contact boundary (e.g.
+    fingers closing on the object, or a drawer resisting at full travel) --
+    detecting it and breaking out early stops pointless struggling without changing the outcome.
     """
     if len(recent_errors) < window:
         return False
@@ -67,18 +59,14 @@ def real_nonpermitted_contacts(
     target_object_body: str | None,
     permitted_contact_geom_ids: set[int] | None = None,
 ) -> list[list]:
-    """Real contacts from the *live* sim (not a hypothetical ``q``) involving
-    the robot/gripper that ``CollisionChecker`` would not have permitted --
-    i.e. a genuine collision, not the deliberate fingerpad<->target contact
-    ``TERMINAL_APPROACH`` allows. Reuses ``CollisionChecker``'s own
-    ``_permitted``/``_finger_overlap_within_tolerance`` logic so this
-    reports exactly what the planner itself would flag, not a cruder "any
+    """Real contacts from the live sim that CollisionChecker would not
+    have permitted -- i.e. a genuine collision, not the deliberate
+    fingerpad<->target contact TERMINAL_APPROACH allows. Reuses
+    CollisionChecker's own permitted-contact logic, not a cruder "any
     negative distance" check that fires on sub-millimeter numerical grazing.
 
-    ``permitted_contact_geom_ids``, when given, also excludes gripper<->target
-    contact through those specific geoms -- needed by a skill (e.g. ``close``)
-    whose intended contact is made by the palm, not the fingerpads
-    ``_permitted`` alone recognizes."""
+    permitted_contact_geom_ids additionally excuses gripper contact on
+    specific geoms, e.g. the palm-driven push a close skill makes."""
     target_ids = set(scene.body_geom_ids(target_object_body)) if target_object_body else set()
     out: list[list] = []
     for g1n, g2n, dist in scene.compute_contacts():
@@ -103,11 +91,9 @@ def real_nonpermitted_contacts(
 @dataclass
 class MotionTraceRecorder:
     """Accumulates a compact, textual/numeric stand-in for "what did this
-    look like" for one MPC-tracked phase (descent/pull/retreat), for
-    ``execution_summary.json``. Nobody debugging a run reviews the saved
-    video frame-by-frame -- this is what lets a bad-looking run (arm
-    wandering, visibly colliding, jerking) actually be diagnosed from the
-    JSON alone."""
+    look like" for one MPC-tracked phase, written into
+    execution_summary.json so a bad-looking run (wandering, colliding,
+    jerking) can be diagnosed from the JSON alone, without reviewing video."""
 
     ee_positions: list = field(default_factory=list)
     min_clearance_m: float = float("inf")
@@ -162,21 +148,17 @@ class MotionTraceRecorder:
 
 
 class _ServoMixin:
-    """Requires ``self.env``, ``self.joint_names``, ``self.ee_site`` on the
-    including class (set by each adapter's ``__init__``)."""
+    """Requires self.env, self.joint_names, self.ee_site on the
+    including class (set by each adapter's __init__)."""
 
     def servo_to_home(self, n_steps: int = 60, step_callback=None) -> int:
-        """Densely interpolate the arm back to its own reset configuration,
+        """Densely interpolate the arm back to its reset configuration,
         gripper open, and return the steps consumed.
 
-        A skill otherwise starts from wherever the previous one finished --
-        often mid-reach over the spot it just released something -- and
-        planning a fresh approach from there was a recurring source of
-        planner timeouts and failed transports. Resetting first costs a
-        fixed, cheap joint-space move and gives every skill the same known
-        starting point. Joint-space interpolation rather than one Cartesian
-        move to home's end-effector pose, for the reason in
-        DrawerConfig.return_home_steps.
+        A skill otherwise starts wherever the previous one finished -- often
+        mid-reach over what it just released -- and planning fresh from there
+        was a frequent source of planner timeouts and failed transports.
+        Uses joint-space interpolation, not a single Cartesian move to home's EE pose.
         """
         home_q = np.asarray(self.env.env.robots[0].init_qpos, dtype=np.float64)
         current_q = SceneQuery.from_robosuite_sim(self.env.env.sim).get_qpos(self.joint_names)
@@ -232,11 +214,10 @@ class _ServoMixin:
 
 @dataclass
 class TrackAndSettleResult:
-    """Everything a ``Libero*Adapter`` needs to build its own
-    ``plan_result.diagnostics[...]`` entry for one tracked leg. ``steps`` is
-    just this call's own increment (add it to your running total);
-    ``settle_steps`` is how many were spent past the end of ``reference``
-    (the hold-and-converge portion)."""
+    """Everything a Libero*Adapter needs for its own
+    plan_result.diagnostics[...] entry for one tracked leg. steps is
+    this call's own increment; settle_steps is how many were spent past
+    the end of reference (the hold-and-converge portion)."""
 
     steps: int
     settle_steps: int
@@ -247,10 +228,8 @@ class TrackAndSettleResult:
     wrong_obstacle_contacts: list | None = None
 
     def as_diagnostics(self) -> dict:
-        # ``wrong_obstacle_contacts`` is always present (None when not
-        # requested/not stalled) -- callers that check it
-        # (``check_wrong_obstacle=True``) index it unconditionally, the same
-        # way pick's original inline dict always carried the key.
+        # Always present (None when unused) so callers that check it with
+        # check_wrong_obstacle=True can index it unconditionally.
         return {
             "steps": self.settle_steps,
             "converged": self.converged,
@@ -292,41 +271,39 @@ def track_and_settle(
     target_object_body: str | None = None,
     permitted_contact_geom_ids: set[int] | None = None,
     trace: "MotionTraceRecorder | None" = None,
+    max_reference_lead_m: float | None = None,
+    max_hold_per_waypoint_steps: int = 30,
 ) -> TrackAndSettleResult:
-    """Track ``reference`` via a fresh collision-aware ``JointSpaceMPC``
-    (FREE_SPACE below ``approach_start_idx``, TERMINAL_APPROACH at/after it --
-    pass ``0`` for an always-TERMINAL_APPROACH leg, e.g. a pull/turn, or a
-    number >= the eventual tracking budget for an always-FREE_SPACE leg, e.g.
-    transport), then keep holding at ``(target_pos, target_quat_wxyz)`` until
-    the real controller actually converges or stalls.
+    """Track reference via a fresh collision-aware JointSpaceMPC
+    (FREE_SPACE below approach_start_idx, TERMINAL_APPROACH at/after it),
+    then hold at (target_pos, target_quat_wxyz) until the controller
+    converges or stalls. Pass approach_start_idx=0 for an
+    always-TERMINAL_APPROACH leg (e.g. pull/turn); pass a number >= the
+    tracking budget for an always-FREE_SPACE leg (e.g. transport).
 
-    This is the one control loop every ``Libero*Adapter.run()`` used to
-    hand-roll independently (pick, open_drawer, close, transport, stove each
-    had their own near-identical copy); a new skill adapter now calls this
-    once per tracked leg instead of re-deriving it.
+    mpc_step_kwargs are merged into every mpc.step() call for
+    skill-specific extra context. target_object_body is used only for
+    trace recording and the wrong-obstacle check.
 
-    ``mpc_step_kwargs`` are merged into every ``mpc.step()`` call -- different
-    skills need different extra context there (e.g. transport has no single
-    "target object" since the carried object is itself part of the robot's
-    collision geometry for that leg). ``target_object_body`` here is used
-    only for trace recording and the wrong-obstacle check below.
+    terminal_approach_uses_mpc=False tracks the raw reference instead of
+    the MPC once TERMINAL_APPROACH starts -- needed by close's descent+push,
+    where the MPC's smoothness cost fights the deliberate stall-into-contact.
 
-    ``terminal_approach_uses_mpc=False`` switches to plain joint-space
-    reference tracking once TERMINAL_APPROACH starts -- needed by close's
-    descent+push, where the MPC's smoothness/effort cost fights the
-    deliberate stall-into-contact a push requires.
+    check_orientation_convergence=False ignores orientation error for
+    convergence (stove's turn leg, where the hand rotates with the knob).
 
-    ``check_orientation_convergence=False`` (stove's turn leg) ignores
-    orientation error for the convergence gate, since the hand rotates with
-    the knob and would never converge against a fixed pre-turn target.
+    max_reference_lead_m holds the reference index until the hand is within
+    that distance of the current waypoint's hand position (at most
+    max_hold_per_waypoint_steps per waypoint), so a slow arm can't fall
+    behind and then cut straight across to the end -- e.g. dragging a carried
+    object through a neighbor the planned path went around. Measured in
+    Cartesian space since the servo only controls the hand; the redundant
+    joints never converge on the waypoint's exact configuration.
 
-    ``check_wrong_obstacle``/``abort_on_stall`` (pick only, so far): on a
-    stall, tell a real stuck-against-a-different-object contact apart from a
-    benign tracking-lag plateau. A benign plateau (``abort_on_stall=False``
-    and no wrong-obstacle contact found) keeps the loop running instead of
-    giving up, since bailing out there would hand the next phase a wrong
-    starting XY with no way to correct it. A real wrong-obstacle contact, or
-    ``abort_on_stall=True``, always breaks regardless.
+    check_wrong_obstacle/abort_on_stall: on a stall, tells a real
+    stuck-against-a-different-object contact apart from a benign
+    tracking-lag plateau, which keeps the loop running instead of bailing
+    with a wrong starting point for the next phase.
     """
     mpc = JointSpaceMPC(joint_names, ee_site, horizon=mpc_horizon, cost_config=mpc_cost_config)
     ctx = MPCContext(reference=reference)
@@ -335,6 +312,10 @@ def track_and_settle(
 
     max_hold_steps = max_steps if max_steps is not None else len(reference) + max_settle_steps
     tracking_budget = min(max_hold_steps, len(reference) + max_settle_steps)
+    if max_reference_lead_m is not None:
+        # Gated progress spends steps without advancing t0, so the budget
+        # has to count real steps instead.
+        tracking_budget = max_hold_steps
 
     local_steps = 0
     pos_err = ori_err = float("inf")
@@ -343,11 +324,15 @@ def track_and_settle(
     wrong_obstacle_contacts: list | None = None
     recent_pos_errs: list[float] = []
     t0 = 0
-    while t0 < tracking_budget:
+    held_steps = 0
+    while local_steps < tracking_budget if max_reference_lead_m is not None else t0 < tracking_budget:
         phase = CollisionPhase.FREE_SPACE if t0 < approach_start_idx else CollisionPhase.TERMINAL_APPROACH
         live_scene = SceneQuery.from_robosuite_sim(adapter.env.env.sim)
         q_current = live_scene.get_qpos(joint_names)
 
+        carried = mpc_step_kwargs.get("attached")
+        if carried is not None and getattr(adapter.env, "_is_grasped", lambda: False)():
+            refresh_grasp_transform(carried, live_scene, ee_site)
         if terminal_approach_uses_mpc or phase == CollisionPhase.FREE_SPACE:
             mpc_result = mpc.step(
                 live_scene,
@@ -363,9 +348,8 @@ def track_and_settle(
             step_min_clearance = mpc_result.min_clearance
             step_replan_requested = mpc_result.replan_requested
         else:
-            # Deliberate contact phase (e.g. close's push): track the
-            # planned reference directly, no MPC optimization. See this
-            # function's own docstring for why.
+            # Deliberate contact phase (e.g. close's push): track the planned
+            # reference directly, with no MPC optimization fighting the contact.
             ref_idx = min(t0, len(reference) - 1)
             joint_target = reference[ref_idx]
             step_min_clearance = float("inf")
@@ -374,7 +358,17 @@ def track_and_settle(
         cart_pos, cart_ori = adapter._servo_toward_joint_target(live_scene, joint_target)
         adapter._step_env(cart_pos, cart_ori, gripper_cmd)
         local_steps += 1
-        t0 += 1
+        if max_reference_lead_m is None or t0 >= len(reference):
+            t0 += 1
+        else:
+            waypoint_scene = live_scene.clone()
+            waypoint_scene.set_qpos(joint_names, reference[t0])
+            waypoint_pos = waypoint_scene.site_pose(ee_site)[0]
+            hand_pos = SceneQuery.from_robosuite_sim(adapter.env.env.sim).site_pose(ee_site)[0]
+            held_steps += 1
+            if float(np.linalg.norm(hand_pos - waypoint_pos)) <= max_reference_lead_m or held_steps >= max_hold_per_waypoint_steps:
+                t0 += 1
+                held_steps = 0
         if step_callback is not None:
             step_callback()
 
@@ -415,8 +409,7 @@ def track_and_settle(
                     ]
                     if wrong_obstacle_contacts or abort_on_stall:
                         break
-                    # Benign plateau, not a real obstacle -- keep going. See
-                    # this function's own docstring.
+                    # Benign plateau, not a real obstacle -- keep going.
                     continue
                 if abort_on_stall:
                     break

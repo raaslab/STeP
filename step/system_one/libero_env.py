@@ -333,10 +333,15 @@ class LiberoManipulationEnv(BaseManipulationEnv):
                 raise
             self._episode_terminated = True
             return self._last_obs, 0.0, True, {"episode_already_terminated": True}
-        self._episode_terminated = bool(done)
+        # LIBERO's done is just its success check, not a termination --
+        # latching it froze the arm mid-skill (e.g. holding an object inside
+        # the goal region, before release) since every later step no-oped.
+        if done:
+            info = dict(info or {})
+            info["libero_success"] = True
         self._last_obs = obs
         self._refresh_scene_objects(obs)
-        return obs, reward, done, info
+        return obs, reward, False, info
 
     # ----------------------------------------------------- observation api
 

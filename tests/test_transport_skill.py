@@ -12,7 +12,7 @@ from step.system_one.skills.transport.transport_skill import TransportSkill
 
 def _attach_object_near_gripper(scene, ik, object_body, joint_names):
     """Move the arm's own scratch qpos to a plausible top-down pose just
-    above ``object_body`` and attach it there -- a realistic (small)
+    above object_body and attach it there -- a realistic (small)
     hand-to-object transform, not an arbitrary/far-apart one, so the
     resulting AttachedObjectState is geometrically sensible for
     TransportSkill's own hover-pose math to build on."""
@@ -28,7 +28,7 @@ def _attach_object_near_gripper(scene, ik, object_body, joint_names):
     attached = manager.attach(attach_scene, object_body, HAND_SITE)
 
     # Lift a few cm clear of the object before treating this as the
-    # transport leg's own `start_q` -- a real completed pick always leaves
+    # transport leg's own start_q -- a real completed pick always leaves
     # the gripper closed and lifted off the object by the time transport
     # begins, never sitting right at the grasp descent pose itself (which
     # would trivially read as FREE_SPACE-in-collision with the fingers
@@ -72,7 +72,7 @@ def test_transport_skill_produces_feasible_plan(libero_drawer_scene):
 
 @requires_libero_drawer
 def test_transport_skill_reaches_hover_pose_above_measured_container_top(libero_drawer_scene):
-    """The planned hover pose's height should sit `hover_clearance_m` above
+    """The planned hover pose's height should sit hover_clearance_m above
     the cabinet's own measured top surface, not some other value -- a
     direct check that TransportSkill and PlaceSkill agree on where "over
     the goal" is (see this module's own docstring on why that matters)."""

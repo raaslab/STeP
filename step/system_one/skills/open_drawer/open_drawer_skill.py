@@ -1,18 +1,8 @@
-"""Planning-only ``OpenDrawerSkill``: grasp a drawer/cabinet handle and plan a
-pull along its own slide-joint axis.
-
-Deliberately *not* built on ``GraspCandidate``/``PickSkill``'s OR-object-set
-machinery: a fixture has exactly one physically correct grasp axis (the
-handle's long axis) and exactly one correct post-grasp motion (a straight
-pull along the joint's own travel direction, not a free 6-DoF carry), so a
-small purpose-built skill is simpler than bending ``PickSkill`` to fit.
-
-Grasp orientation convention matches ``grasp_generator.py``: local +Z is the
-approach axis, local +X is the closing axis. Here the approach is horizontal
-(along the measured pull axis) rather than top-down, so the frame is built
-from two measured directions -- the pull axis (approach) and the handle's
-long axis (which must map to the non-closing axis, since the fingers straddle
-it rather than close along it).
+"""Planning-only OpenDrawerSkill: grasps a drawer/cabinet handle and plans
+a pull along its own slide-joint axis, instead of PickSkill's generic grasp
+search, since a fixture has exactly one correct grasp axis and pull motion.
+Orientation follows grasp_generator.py's convention (+Z approach, +X
+closing), built from the measured pull axis and the handle's long axis.
 """
 
 from __future__ import annotations
@@ -41,27 +31,18 @@ from ...motion.types import IKResult, PlannerFailureReason, SkillFailureReason, 
 
 @dataclass
 class DrawerConfig:
-    """Tuning for ``OpenDrawerSkill``/``LiberoOpenDrawerAdapter`` (slide-joint
-    drawers/cabinets only -- see ``motion/articulation.py``)."""
+    """Tuning for OpenDrawerSkill/LiberoOpenDrawerAdapter (slide-joint
+    drawers/cabinets only)."""
 
     approach_standoff_m: float = 0.08
-    # Downward tilts (radians) tried for the handle approach, in order. 0 is
-    # the straight-along-the-pull-axis approach, best when the space in front
-    # of the drawer is clear; the tilted ones bring the hand in from above
-    # instead, which is the only way past clutter sitting in that space.
-    # Opening a drawer doesn't need a clean grasp, so a hook-style tilted
-    # approach is an acceptable fallback, not a compromise.
+    # Downward tilts tried in order; 0 is straight along the pull axis, the
+    # rest bring the hand in from above to clear clutter in front of the drawer.
     approach_tilts_rad: tuple[float, ...] = (0.0, 0.35, 0.61, 0.87)  # 0, 20, 35, 50 degrees
-    # Wrist roll about the approach axis. Only the plain pinch (fingers
-    # above/below the handle bar) is kept -- rolls of pi/2 and +/-45 were
-    # tried and measured worse (can't close on the bar, or close but can't
-    # clear the tabletop); the real blocker is clutter in front of the
-    # cabinet, not the wrist angle.
+    # Wrist roll about the approach axis; other rolls tested worse for
+    # closing on the bar, so only the plain pinch is kept.
     approach_rolls_rad: tuple[float, ...] = (0.0,)  # straight pinch only
-    # Offsets applied to the handle target, as (along-pull-axis, vertical)
-    # metres. Aiming dead centre drives the fingers into the bar itself, so a
-    # few offsets around it are tried instead -- opening a drawer doesn't
-    # need the bar centred between the pads, just caught when pulled.
+    # (along-pull-axis, vertical) offsets from the handle's exact centre, so
+    # fingers aren't driven straight into the bar.
     grasp_offsets_m: tuple[tuple[float, float], ...] = (
         (0.0, 0.0),
         (0.0, 0.02),
@@ -72,51 +53,33 @@ class DrawerConfig:
         (0.0, -0.02),
         (-0.015, 0.0),
     )
-    # How close the hand has to end up to the handle for the pull to count as
-    # "the handle is between the fingers". Looser than a grasp test (fingers
-    # are ~8cm apart open, so some slack is fine), but tight enough to still
-    # reject an approach that landed on the cabinet face near a neighbouring
-    # handle instead.
+    # How close the hand must land to count the handle as captured -- loose
+    # enough for finger slack, tight enough to reject a neighbouring handle.
     handle_capture_radius_m: float = 0.045
-    # Clearance left on each side of the handle when approaching with
-    # pre-narrowed fingers (see OpenDrawerSkill's approach_finger_qpos), so
-    # the handle passes cleanly between them without needing the full open
-    # span -- which wouldn't fit the gap above a lower drawer's handle.
+    # Clearance left per side when approaching with pre-narrowed fingers, so
+    # the handle fits between them without needing the full open span.
     approach_finger_clearance_m: float = 0.006
-    # IK is not unique -- different seeds can converge to different elbow/
-    # wrist configurations reaching the same pose while sweeping through
-    # different parts of the scene. This many (grasp, standoff) candidate
-    # pairs are tried before giving up, taking the first whose connecting
-    # segment is actually collision-clear.
+    # IK is not unique; this many (grasp, standoff) pairs are tried before
+    # giving up, taking the first whose segment is collision-clear.
     pose_selection_attempts: int = 6
-    # Same standoff-candidate search PickSkill uses (see
-    # standoff_search.standoff_candidates) -- the nominal straight-back
-    # standoff is tried first for the simple case, with these mattering only
-    # once that's blocked by clutter sitting directly in that one path.
+    # These matter only once the nominal straight-back standoff is blocked
+    # by clutter sitting directly in that one path.
     standoff_distance_multipliers: tuple[float, ...] = (1.0, 2.5, 4.0)
     standoff_lateral_offsets_m: tuple[float, ...] = (0.05, 0.08, 0.12)
     standoff_lateral_directions: int = 8
-    # RRTConnect is stochastic and can occasionally return only an
-    # "approximate" (rejected) solution or hit its timeout on a genuinely
-    # feasible start/goal pair; this many attempts are retried before
-    # reporting NO_FEASIBLE_CANDIDATE.
+    # RRTConnect is stochastic and can return only an approximate solution
+    # or time out on a feasible pair; retried this many times before giving up.
     planning_attempts: int = 3
-    # Tried largest-first; the first fraction of the joint's full measured
-    # travel that's both IK-reachable and collision-clear wins, rather than
-    # failing outright when the full travel distance isn't reachable.
+    # Tried largest-first; the first IK-reachable, collision-clear fraction
+    # of full travel wins, instead of failing when full travel isn't reachable.
     pull_fraction_fallbacks: tuple[float, ...] = (0.85, 0.7, 0.5, 0.3)
     # Fraction of the joint's full qpos range travelled (0=closed, 1=open)
     # required to call the drawer "open".
     open_threshold_frac: float = 0.8
     retreat_m: float = 0.08
     retreat_steps: int = 40
-    # After retreating, servo back to the robot's home/reset joint config
-    # (``robot.init_qpos``) before ending the subtask -- the handle-approach
-    # IK solution is often an awkward configuration (elbow twisted, wrist
-    # near a limit) that otherwise leaves the next subtask's IK solve cramped.
-    # Dense joint-space interpolation rather than a single Cartesian move,
-    # since commanding home's Cartesian pose directly can converge to a
-    # different elbow config than true home (IK is not unique).
+    # Return to robot.init_qpos after retreating so the handle-approach's
+    # often-awkward elbow/wrist config doesn't carry into the next subtask's IK.
     return_home_steps: int = 60
 
 
@@ -128,7 +91,7 @@ def _unit(v: np.ndarray) -> np.ndarray:
 
 
 def _roll_about(vec: np.ndarray, axis: np.ndarray, angle_rad: float) -> np.ndarray:
-    """Rodrigues rotation of ``vec`` about ``axis`` -- rolls the gripper about
+    """Rodrigues rotation of vec about axis -- rolls the gripper about
     its own approach axis without changing where the hand is aimed."""
     a = _unit(np.asarray(axis, dtype=np.float64))
     c, s = float(np.cos(angle_rad)), float(np.sin(angle_rad))
@@ -138,12 +101,10 @@ def _roll_about(vec: np.ndarray, axis: np.ndarray, angle_rad: float) -> np.ndarr
 def _orientation_from_approach_and_reference(
     approach_world: np.ndarray, reference_axis_world: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Hand-frame quaternion (WXYZ) whose local +Z is ``approach_world`` and
-    whose local +X (closing axis) is perpendicular to both ``approach_world``
-    and ``reference_axis_world``, so the fingers close across the handle's
-    long axis rather than along it. Also returns that closing axis, which
-    callers need to measure the handle's width along it (see
-    ``articulation.estimate_handle_closing_width_m``)."""
+    """Hand-frame quaternion (WXYZ) whose local +Z is approach_world and
+    whose local +X is perpendicular to both approach_world and
+    reference_axis_world, so fingers close across the handle's long axis.
+    Also returns that closing axis, which callers need for handle-width estimation."""
     z_axis = _unit(np.asarray(approach_world, dtype=np.float64))
     x_axis = _unit(np.cross(np.asarray(reference_axis_world, dtype=np.float64), z_axis))
     y_axis = np.cross(z_axis, x_axis)
@@ -165,13 +126,10 @@ def handle_grasp_pose(
 
 @dataclass
 class DrawerHandleGraspCandidate:
-    """One accepted candidate from ``find_drawer_handle_grasp``: a reachable,
-    collision-free, closure-safe standoff->grasp pair for this drawer's
-    handle, plus the per-candidate finger/orientation parameters for the
-    tilt/roll/offset that won. Shared by ``OpenDrawerSkill`` (pulls
-    +``pull_axis_world`` afterward) and ``CloseSkill``'s grasp-based drawer
-    closing (retracts -``pull_axis_world`` instead) -- identical search,
-    opposite post-grasp motion."""
+    """A reachable, collision-free, closure-safe standoff->grasp pair for a
+    drawer handle, plus the finger/orientation params for the tilt/roll/offset
+    that won. Shared by OpenDrawerSkill (pulls +pull_axis_world) and
+    CloseSkill (retracts -pull_axis_world) from an identical search."""
 
     standoff_ik: IKResult
     grasp_ik: IKResult
@@ -197,16 +155,12 @@ def find_drawer_handle_grasp(
     edge_resolution: float,
     rng: np.random.Generator,
 ) -> tuple[DrawerHandleGraspCandidate | None, str]:
-    """Search ``cfg``'s tilt x roll x offset x standoff grid for a candidate
-    approach to this drawer's handle that is IK-reachable, has a
-    collision-free descent, and survives the fingers actually closing on it.
-    Accepts the first candidate that passes all three checks rather than an
-    exhaustive best-of-all-candidates search. Shared by ``OpenDrawerSkill``
-    and ``CloseSkill`` so both search identically.
-
-    Returns ``(candidate, last_rejection)`` -- ``candidate`` is ``None`` on
-    failure, with ``last_rejection`` naming the last rejection reason seen.
-    """
+    """Searches cfg's tilt x roll x offset x standoff grid for the first
+    candidate that is IK-reachable, has a collision-free descent, and
+    survives the fingers closing on the handle. Shared by OpenDrawerSkill
+    and CloseSkill so both search identically. Returns
+    (candidate, last_rejection); candidate is None on failure,
+    with last_rejection naming the last rejection reason seen."""
     reference_axis_world = _unit(np.cross(np.array([0.0, 0.0, 1.0]), pull_axis_world))
     approach_plan: list[tuple] = []
     for tilt_rad, roll_rad, (depth_off, vert_off) in (
@@ -227,22 +181,20 @@ def find_drawer_handle_grasp(
         )
         tilt_half_travel = float(np.clip(tilt_width_m / 2.0, 0.0, 0.04))
         tilt_finger_qpos = np.array([tilt_half_travel, -tilt_half_travel])
-        # Offset the aim point off the bar's exact centre: `depth_off` runs
-        # along the pull axis (negative = deeper, toward the drawer front),
-        # `vert_off` straight up/down.
+        # Offset the aim point off the bar's centre: depth_off runs along the
+        # pull axis (negative = deeper), vert_off straight up/down.
         tilt_grasp_pos = (
             grasp_pos + pull_axis_world * float(depth_off) + np.array([0.0, 0.0, float(vert_off)])
         )
-        # Approach with the fingers already narrowed to just wider than the
-        # handle, rather than fully open -- a fully-open gripper can't fit
-        # through the clearance above some handles.
+        # Approach with fingers narrowed to just wider than the handle --
+        # fully open can't fit through the clearance above some handles.
         tilt_approach_half = float(
             np.clip(tilt_width_m / 2.0 + cfg.approach_finger_clearance_m, 0.0, 0.04)
         )
         tilt_approach_finger_qpos = np.array([tilt_approach_half, -tilt_approach_half])
         for standoff_position in standoff_candidates(
             tilt_grasp_pos,
-            approach_world,  # standoff_candidates wants gripper->target (see handle_grasp_pose)
+            approach_world,  # standoff_candidates wants gripper->target direction
             cfg.approach_standoff_m,
             cfg.standoff_distance_multipliers,
             cfg.standoff_lateral_offsets_m,
@@ -274,9 +226,8 @@ def find_drawer_handle_grasp(
         approach_finger_qpos,
         standoff_position,
     ) in approach_plan:
-        # Robust (multi-restart) solve, not a single seed from start_q --
-        # a single seed missed genuinely reachable+collision-free candidates,
-        # reporting them as unreachable instead.
+        # Multi-restart solve, not a single seed -- a single seed missed
+        # genuinely reachable candidates, reporting them as unreachable.
         candidate_standoff_ik = _solve_ik_robust(
             ik_solver, scene, standoff_position, grasp_quat, start_q, rng,
             n_restarts=cfg.pose_selection_attempts,
@@ -301,10 +252,8 @@ def find_drawer_handle_grasp(
         if descent_check.in_collision:
             last_rejection = "final_descent_in_collision"
             continue
-        # Neither the IK solve above nor `descent_check` move the finger
-        # joints -- they simulate the open gripper reaching this pose, not
-        # what happens when it closes. Validate that explicitly here rather
-        # than finding out from the real gripper closing on a bad pose.
+        # IK and descent_check only simulate the open gripper reaching this
+        # pose, not closing -- validate closure explicitly instead of finding out live.
         closure_check = collision_checker.check_gripper_closure(
             candidate_grasp_ik.q, FINGER_JOINT_NAMES, finger_closed_qpos, drawer.drawer_body
         )
@@ -367,29 +316,14 @@ class OpenDrawerSkill:
             np.max(self.planner.joint_limits_hi - self.planner.joint_limits_lo)
         )
 
-        # How far each finger should travel to close on the handle -- NOT the
-        # joint's mechanical closing limit (qpos=[0,0] meets at the
-        # centerline, which would drive the rigid finger through a
-        # nonzero-width handle). Each finger travels symmetrically from
-        # center, so half the handle's width is the right qpos per joint.
+        # Half the handle's width per joint (fingers travel symmetrically),
+        # not qpos=[0,0] -- that would drive rigid fingers through the handle.
         handle_width_m = estimate_handle_closing_width_m(scene, drawer, pull_axis_world, closing_axis_world)
         finger_half_travel = float(np.clip(handle_width_m / 2.0, 0.0, 0.04))
         finger_closed_qpos = np.array([finger_half_travel, -finger_half_travel])
 
-        # IK is not unique -- different arm configurations reach the same
-        # Cartesian grasp pose while sweeping through different parts of the
-        # scene (e.g. the forearm through clutter sitting on the table).
-        # Solving the standoff first and reseeding the grasp solve from it
-        # (rather than the reverse) lets each standoff candidate reseed grasp
-        # IK into a genuinely different elbow config, instead of locking in
-        # one grasp-target configuration before the standoff is even chosen.
-        #
-        # The handle is also approached along a tilted line, not only
-        # straight along the pull axis: a purely horizontal approach forces
-        # the hand through the thin band of space in front of the cabinet at
-        # handle height, exactly where table clutter tends to sit. Tilting
-        # downward brings the hand in from above instead. The pull itself is
-        # unaffected, since it always follows the drawer joint's own axis.
+        # Approached along a tilted line, not straight along the pull axis --
+        # a horizontal approach forces the hand through clutter at handle height.
         candidate, last_rejection = find_drawer_handle_grasp(
             scene, drawer, grasp_pos, pull_axis_world, start_q,
             self.ik_solver, self.collision_checker, cfg, edge_resolution, self._rng,
@@ -399,9 +333,8 @@ class OpenDrawerSkill:
             grasp_ik, standoff_ik = candidate.grasp_ik, candidate.standoff_ik
             tilt_rad = candidate.tilt_rad
             roll_rad = candidate.roll_rad
-            # Everything downstream -- the pull reference, the diagnostics the
-            # adapter tracks -- must use the aim point that actually passed,
-            # not the handle's raw centre.
+            # Downstream code (pull reference, adapter diagnostics) must use
+            # the aim point that passed, not the handle's raw centre.
             grasp_pos = candidate.grasp_pos
             approach_finger_qpos = candidate.approach_finger_qpos
             grasp_quat = candidate.grasp_quat
@@ -451,10 +384,8 @@ class OpenDrawerSkill:
                 },
             )
 
-        # RRTConnect is stochastic: a feasible start/goal pair can still
-        # occasionally come back as only an "approximate" solution or hit its
-        # time budget from an unlucky tree expansion, so those outcomes are
-        # retried (deterministic failures like START_IN_COLLISION are not).
+        # RRTConnect is stochastic -- a feasible pair can still come back
+        # approximate or time out, so those are retried (unlike deterministic failures).
         plan = None
         for _ in range(cfg.planning_attempts):
             plan = self.planner.plan(
@@ -473,21 +404,16 @@ class OpenDrawerSkill:
                 diagnostics={
                     "detail": f"planning_failed:{plan.failure_reason}",
                     "drawer": drawer.drawer_body,
-                    # Which approach the candidate search settled on -- a
-                    # tilted approach's standoff can be a much harder place
-                    # to plan a path to than the straight-on one.
+                    # Which approach the search settled on -- a tilted
+                    # standoff can be harder to plan a path to than the straight-on one.
                     "approach_tilt_rad": tilt_rad,
                     "approach_roll_rad": roll_rad,
                     "standoff_position": standoff_ik.q.tolist(),
                 },
             )
 
-        # Only the descent (standoff -> grasp) goes into `approach_positions`
-        # -- matching PickSkill's convention: settle onto the grasp pose,
-        # then close the gripper. The pull leg (`grasp_q` -> `pulled_q`) is
-        # kept separate and only tracked after the gripper has actually
-        # closed on the handle; concatenating both into one reference would
-        # drive the pull motion with the gripper still open.
+        # Only the descent goes into approach_positions -- the pull leg is
+        # tracked separately, once the gripper has actually closed on the handle.
         descent_positions = np.linspace(standoff_ik.q, grasp_ik.q, 15)
         plan.metadata["standoff_q"] = standoff_ik.q.tolist()
         plan.metadata["grasp_q"] = grasp_ik.q.tolist()

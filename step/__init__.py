@@ -7,7 +7,7 @@ to direct STL-plan generation.
 import os
 
 # mujoco reads MUJOCO_GL once, at its own import time, to pick a GL backend --
-# must be set before the first `import mujoco` anywhere in the process, hence
+# must be set before the first import mujoco anywhere in the process, hence
 # here (this module's own import always happens first). Default to EGL: the
 # default (GLX, via an existing X connection) intermittently fails with a
 # GLXMakeCurrent BadAccess when a *second* independent GL context is created

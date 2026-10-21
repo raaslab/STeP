@@ -27,8 +27,8 @@ class _StubEnv:
 
 
 class _StubExecutorSelf:
-    """Minimal stand-in for `self` -- _wait_for_stl_start's internal
-    step_callback calls self._capture_video_frame(env), which a bare `None`
+    """Minimal stand-in for self -- _wait_for_stl_start's internal
+    step_callback calls self._capture_video_frame(env), which a bare None
     can't satisfy."""
 
     def _capture_video_frame(self, env, force=False):

@@ -21,24 +21,20 @@ class GraspCandidate:
     """One candidate 6-DoF grasp for a named object.
 
     Quaternion convention: WXYZ everywhere in this package (matches Cap-X's
-    ``libero_privileged.py`` and robosuite's own conventions for LIBERO).
-    Convert to XYZW only at the boundary of a library that requires it (e.g.
-    ``scipy.spatial.transform.Rotation``).
+    libero_privileged.py and robosuite's own LIBERO conventions). Convert
+    to XYZW only at a library boundary that requires it.
 
-    ``grasp_pose_world`` is the panda_hand / TCP frame target (i.e. what
-    ``robot0_eef_pos``/the ``gripper0_right_grip_site`` reports), already
-    converted from any fingertip-frame grasp-net-style output -- see
-    ``grasp_generator.hand_from_fingertip_pose``.
+    grasp_pose_world is the panda_hand / TCP frame target (what
+    robot0_eef_pos/gripper0_right_grip_site reports), already
+    converted from any fingertip-frame grasp-net-style output.
 
-    There is no separate pregrasp pose stored here -- ``PickSkill`` derives an
-    internal standoff point (this grasp pose offset back along
-    ``approach_direction_world``), plans the long-range approach to it under
-    strict ``CollisionPhase.FREE_SPACE``, then validates (via
-    ``CollisionChecker.check_edge``, never blind execution) a short final
-    descent from there under ``TERMINAL_APPROACH``. Permitting gripper<->
-    target contact for the entire approach instead (rather than just this
-    short final leg) lets RRTConnect bump or shove the object anywhere along
-    a long path. See ``PickSkill``'s module docstring for more.
+    No separate pregrasp pose is stored here -- PickSkill derives an
+    internal standoff (this pose offset back along
+    approach_direction_world), plans the approach under
+    CollisionPhase.FREE_SPACE, then validates a short final descent
+    under TERMINAL_APPROACH. Permitting gripper<->target contact for the
+    whole approach instead would let RRTConnect shove the object anywhere
+    along the way.
     """
 
     object_name: str
@@ -141,8 +137,7 @@ class MotionPlan:
 
 @dataclass
 class MPCCostConfig:
-    """Modular MPC cost weights. See ``step/system_one/motion/config.py`` for how
-    this is loaded from ``configs/libero_template.json``'s ``motion.mpc`` block."""
+    """Modular MPC cost weights, loaded from configs/libero_template.json's motion.mpc block."""
 
     tracking_weight: float = 1.0
     terminal_weight: float = 4.0
@@ -176,13 +171,8 @@ class AttachedObjectState:
     grasp_transform_hand_from_object: np.ndarray  # (4,4), object pose expressed in hand frame
     collision_radius_m: float
     attached_at_step: int
-    # Sphere approximation of the object's collision geometry, in the OBJECT's
-    # own body frame: [(local_offset_xyz, radius), ...]. Mirrors Cap-X's
-    # curobo_api.attach_objects_to_robot (SphereFitType sphere-fits the
-    # attached object's mesh onto the robot link) -- see
-    # attached_object.fit_spheres_to_extent for how these are computed and why
-    # (cheap analytic sphere-vs-obstacle distance instead of exact mesh
-    # collision for every planning query while the object is being carried).
+    # Sphere approximation of the object's collision geometry, in the
+    # OBJECT's own frame: [(local_offset_xyz, radius), ...].
     collision_spheres_object_frame: list[tuple[np.ndarray, float]] = field(default_factory=list)
 
 
@@ -209,7 +199,7 @@ class SkillFailureReason(str, Enum):
 
 @dataclass
 class SkillResult:
-    """Typed result for the unified ``Pick`` (and future transport/place) skill."""
+    """Typed result for the unified Pick (and future transport/place) skill."""
 
     success: bool
     selected_object: str | None = None
@@ -227,7 +217,7 @@ class SkillResult:
 @dataclass
 class CandidateScore:
     """Per-(object, grasp) score used to rank OR-set candidates. Lower total_cost wins;
-    a candidate with ``feasible=False`` is never selected regardless of cost."""
+    a candidate with feasible=False is never selected regardless of cost."""
 
     object_name: str
     grasp: GraspCandidate

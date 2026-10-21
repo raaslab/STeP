@@ -1,18 +1,10 @@
-"""Executor-facing adapter for the ``close`` skill: wires ``CloseSkill``'s
-push plan (drawer or microwave door) into a live ``LiberoManipulationEnv``.
-
-Structurally simpler than ``LiberoOpenDrawerAdapter``: since closing never
-grasps anything, there is no "close the gripper on the handle" event to gate
-a second leg on -- the gripper stays open for the *entire* motion (FREE_SPACE
-approach through the push; contact is made by the palm/wrist, not the
-fingers), so the whole plan tracks as one continuous MPC reference
-(FREE_SPACE up to the standoff, then TERMINAL_APPROACH from there through to
-the closed target), the same single-loop pattern ``LiberoOpenDrawerAdapter``
-uses only for its own pre-grasp leg.
-
-No grip-verification gate either (nothing to verify a grip on) -- success is
-purely structural: how far the joint's qpos actually moved toward closed.
-"""
+"""Executor-facing adapter for the close skill: wires CloseSkill's
+push plan (drawer or microwave door) into a live LiberoManipulationEnv.
+Simpler than LiberoOpenDrawerAdapter: since closing never grasps
+anything, the gripper stays open for the whole motion and the plan tracks as
+one continuous MPC reference (FREE_SPACE to the standoff, then
+TERMINAL_APPROACH through to the closed target). There's no grip-verification
+gate either -- success is purely structural, from how far the joint's qpos moved toward closed."""
 
 from __future__ import annotations
 
@@ -26,7 +18,7 @@ from ...motion.panda import EE_SITE, FINGER_JOINT_NAMES, GRIPPER_BODIES, HAND_SI
 from ...motion.scene_query import SceneQuery
 from ...motion.servo import MotionTraceRecorder, _ServoMixin, track_and_settle
 from ...motion.time_parameterize import TimeParameterizer
-from ...motion.types import MPCCostConfig, SkillFailureReason, SkillResult
+from ...motion.types import MotionPlan, MPCCostConfig, SkillFailureReason, SkillResult
 from .close_skill import CloseSkill
 
 
@@ -62,9 +54,8 @@ class LiberoCloseAdapter(_ServoMixin):
     ) -> tuple[SkillResult, int, dict]:
         constraints = constraints or {}
 
-        # Same reasoning as LiberoOpenDrawerAdapter: plan the approach from a
-        # known, fixed starting configuration rather than wherever the
-        # previous subtask left the arm.
+        # Plan the approach from a known, fixed starting configuration
+        # rather than wherever the previous subtask left the arm.
         pre_home_steps = self._servo_to_home(step_callback)
 
         scene = self._build_scene()
@@ -82,8 +73,7 @@ class LiberoCloseAdapter(_ServoMixin):
         final_target_pos = np.asarray(plan_result.diagnostics["final_target_position"])
         contact_quat_wxyz = np.asarray(plan_result.diagnostics["contact_quat_wxyz"])
         # Same permitted-contact geom set CloseSkill validated the plan
-        # against -- see its own comment on why a push (palm-first, not
-        # fingerpad-first) needs this passed explicitly.
+        # against -- a push (palm-first, not fingerpad-first) needs this passed explicitly.
         target_geom_ids = set(scene.body_geom_ids(target_body))
 
         traj = TimeParameterizer(self.config.time_param).parameterize(plan_result.planned_trajectory)
@@ -95,32 +85,36 @@ class LiberoCloseAdapter(_ServoMixin):
 
         approach_positions = np.asarray(plan_result.planned_trajectory.metadata["approach_positions"])
         push_positions = np.asarray(plan_result.planned_trajectory.metadata["push_positions"])
-        # One continuous reference: FREE_SPACE up to the standoff, then
-        # descent onto the fixture, then the push through to closed -- no
-        # gripper-state change happens partway, unlike open's separate pull
-        # leg, so there's nothing to split into two tracked legs for.
+        # push_positions is only door_arc_waypoints (10) raw IK solutions
+        # spanning the whole door swing -- far too sparse for direct 1-step-
+        # per-index tracking, which demanded the full rotation in ~10 control
+        # steps and produced the jerky, inefficient, collision-prone pushes
+        # seen on real microwave rollouts. Re-run it through the same
+        # velocity-limited resampling the FREE_SPACE leg already gets.
+        print(f"[DEBUGCLOSE] raw push_positions len={len(push_positions)}", flush=True)
+        push_plan = TimeParameterizer(self.config.time_param).parameterize(
+            MotionPlan(success=True, joint_names=self.joint_names, geometric_path=push_positions)
+        )
+        if push_plan.positions is not None:
+            print(f"[DEBUGCLOSE] densified push_positions len={len(push_plan.positions)}", flush=True)
+            print(f"[DEBUGCLOSE] raw[-1]={push_positions[-1]}", flush=True)
+            print(f"[DEBUGCLOSE] densified[-1]={push_plan.positions[-1]}", flush=True)
+            push_positions = push_plan.positions
+        print(f"[DEBUGCLOSE] final_target_pos={final_target_pos}, contact_quat_wxyz={contact_quat_wxyz}", flush=True)
+        # One continuous reference: FREE_SPACE to standoff, descent, then
+        # push to closed -- no gripper-state change partway, so nothing to split into two tracked legs.
         full_reference = np.concatenate([traj.positions, approach_positions[1:], push_positions[1:]], axis=0)
         approach_start_idx = len(traj.positions)
 
         checker = skill.collision_checker
         cfg = self.config.execution
         steps = pre_home_steps
-        # Open the entire time -- there is nothing to grasp, contact is made
-        # by the palm/wrist, and CloseSkill's own planning-time collision
-        # checks never override finger qpos, so they validate against the
-        # default/open posture that execution must match.
+        # Open the entire time -- contact is made by the palm/wrist, and
+        # CloseSkill's collision checks validate against the default/open posture execution must match.
         gripper_cmd = self.env.open_gripper_cmd
         trace = MotionTraceRecorder()
-        # See ``track_and_settle``'s own docstring (servo.py) for the shared
-        # loop this wraps. ``terminal_approach_uses_mpc=False`` is this
-        # skill's real divergence from the others: once TERMINAL_APPROACH
-        # starts, track the planned reference directly with no MPC
-        # optimization -- descent and push are contact BY DESIGN, and the
-        # MPC's smoothness/effort cost was measured trading off against that
-        # sustained contact instead of driving firmly through it. The
-        # planning stage already decided this point and push are the ones to
-        # use; a controller second-guessing that only produces a worse
-        # outcome.
+        # terminal_approach_uses_mpc=False: track the planned reference
+        # directly with no MPC smoothing -- descent and push are contact BY DESIGN.
         result = track_and_settle(
             self,
             full_reference,
@@ -151,12 +145,18 @@ class LiberoCloseAdapter(_ServoMixin):
             trace=trace,
         )
         steps += result.steps
+        ee_trace = np.asarray(trace.ee_positions)
+        print(f"[DEBUGCLOSE] n_ee_positions={len(ee_trace)}", flush=True)
+        for i in range(0, len(ee_trace), max(1, len(ee_trace)//15)):
+            print(f"[DEBUGCLOSE]   step {i}: ee={ee_trace[i]}", flush=True)
+        if len(ee_trace):
+            print(f"[DEBUGCLOSE]   step LAST: ee={ee_trace[-1]}", flush=True)
+            print(f"[DEBUGCLOSE] dist(last_ee, final_target_pos)={np.linalg.norm(ee_trace[-1]-final_target_pos):.4f}", flush=True)
         plan_result.diagnostics["settle"] = result.as_diagnostics()
         plan_result.diagnostics["motion_trace"] = {"push": trace.summary()}
 
-        # Structural success check: how far the joint's qpos actually ended
-        # up, not whether the settle loop itself converged (a real close can
-        # stall a few mm short of the mechanical stop and still count).
+        # Structural success check: how far the qpos actually ended up, not
+        # whether the settle loop converged (a near-stop stall still counts).
         final_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
         qpos_final = float(final_scene.get_qpos([joint_name])[0])
         denom = qpos_open_reference - qpos_closed
@@ -170,8 +170,7 @@ class LiberoCloseAdapter(_ServoMixin):
         }
 
         # Release and retreat clear of the fixture regardless of outcome, so
-        # a following subtask doesn't start with the gripper wedged against
-        # it -- same reasoning as open_drawer's own retreat.
+        # a following subtask doesn't start with the gripper wedged against it.
         gripper_cmd = self.env.open_gripper_cmd
         push_axis = np.asarray(plan_result.diagnostics["contact_position"]) - final_target_pos
         push_axis_norm = float(np.linalg.norm(push_axis))

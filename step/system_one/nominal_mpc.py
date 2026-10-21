@@ -130,7 +130,7 @@ class STLCartesianMPC:
         For a bounded window start<=predicate<=end, the MPC receives two
         differentiable STL-style costs:
 
-        * before ``start``: penalize predicted states that would make the
+        * before start: penalize predicted states that would make the
           predicate true too early, using a continuous event-target proxy;
         * inside/near the window: increase attraction to the event target as
           the deadline approaches.

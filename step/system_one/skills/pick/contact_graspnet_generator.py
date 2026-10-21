@@ -1,59 +1,27 @@
-"""Learned grasp-candidate generator: Contact-GraspNet, called in-process.
+"""Learned grasp-candidate generator: Contact-GraspNet, called in-process
+against contact_graspnet_pytorch.GraspEstimator rather than through a
+separate server. Requires contact_graspnet_pytorch and a real checkpoint
+installed; never imported unless explicitly enabled (see _load_real_estimator).
 
-Runs directly against ``contact_graspnet_pytorch.GraspEstimator`` -- the same
-class Cap-X's own perception server (``capx/serving/
-launch_contact_graspnet_server.py``, MIT License, https://github.com/capgym/
-cap-x) wraps in a FastAPI endpoint -- rather than talking to a separate
-server process. This module is meant to be imported by a
-``run_libero_step.py`` process running on a machine with
-``contact_graspnet_pytorch`` and a real checkpoint installed; this dev
-environment (no CUDA) never imports ``contact_graspnet_pytorch`` at all --
-see ``_load_real_estimator``.
+Returned candidates are handed to PickSkill via CompositeGraspGenerator
+alongside the heuristic generator's -- this generator only proposes plausible
+poses, feasibility filtering happens downstream.
 
-Feeds ``GraspGenerator``'s existing contract (see ``grasp_generator.py``):
-returned candidates are handed to ``PickSkill`` alongside
-``PrivilegedTopDownGraspGenerator``'s via ``CompositeGraspGenerator``, which
-does its own IK/collision/OMPL feasibility filtering -- this generator's job
-is only to propose plausible poses, not to guess which one will work.
+Point clouds come from real agentview/robot0_eye_in_hand depth +
+ground-truth segmentation, fused across both views -- a dense ground-truth
+mesh sample looks nothing like the partial, occluded views the network was trained on.
 
-Point cloud construction renders real ``agentview``/``robot0_eye_in_hand``
-depth + ground-truth segmentation (``SceneQuery.render_depth_and_body_ids``/
-``deproject_camera_depth``) and fuses both views, mirroring Cap-X's own
-multi-camera capture for its LIBERO integration. Cap-X segments objects with
-a vision model since it has no sim ground truth to rely on; this generator
-uses MuJoCo's own ground-truth instance segmentation instead, consistent with
-the rest of this "privileged" package.
-
-A few non-obvious correctness requirements worth flagging for anyone
-touching this file:
-
-- The point cloud must be a real camera capture, not a dense ground-truth
-  mesh sample -- a fully unoccluded 360-degree sample looks nothing like the
-  partial, occluded views Contact-GraspNet was trained on and lands grasps
-  well off the actual object.
-- Every point cloud handed to the estimator must be expressed in **OpenCV**
-  camera convention (+Y down, +Z into the scene), via
-  ``_mujoco_to_opencv_cam_mat`` -- ``predict_grasps`` assumes this convention
-  internally, and MuJoCo/OpenGL's own convention (+Y up, +Z away from view)
-  differs on exactly those two axes. Feeding it world-frame or MuJoCo-
-  convention points produces a systematic, viewpoint-independent offset.
-- When ``filter_grasps``'s tight contact-to-segment-cloud filter leaves zero
-  survivors, retry by re-expressing the same point cloud in a freshly
-  sampled synthetic camera frame rather than loosening the filter (mirrors
-  Cap-X's own server-side retry loop). ``_predict_with_viewpoint_retries``
-  below implements this.
-- ``GraspCandidate.gripper_width`` must come from ``predict_scene_grasps``'s
-  own ``gripper_openings`` output, not ``None`` -- ``PickSkill`` closes the
-  fingers fully shut whenever width is unknown, which collides with the
-  object almost by construction.
-- The grasp position is the network's own ``contact_pts``, not
-  ``transform[:3, 3]`` (which ``build_6d_grasp`` returns pre-offset behind
-  the true touch point by the checkpoint's gripper depth), and must be used
-  directly with **no** ``hand_from_fingertip_pose`` conversion --
-  ``GraspCandidate.grasp_pose_world``'s contract (``types.py``) is the TCP
-  frame, which ``contact_pts`` already is; converting to the hand/flange
-  frame shifts the target ~10cm along the approach axis into the wrong
-  physical point.
+A few correctness requirements:
+- Every point cloud must be in OpenCV camera convention (+Y down, +Z into the
+  scene), via _mujoco_to_opencv_cam_mat -- feeding world-frame or
+  MuJoCo-convention points produces a systematic position offset.
+- When filter_grasps leaves zero survivors, retry in a freshly sampled
+  synthetic camera frame rather than loosening the filter (see _predict_with_viewpoint_retries).
+- GraspCandidate.gripper_width must come from predict_scene_grasps's
+  own gripper_openings, never None -- PickSkill closes fully shut otherwise.
+- The grasp position is contact_pts, not transform[:3, 3] (offset
+  behind the touch point by the checkpoint's gripper depth), used directly
+  with no hand_from_fingertip_pose conversion -- GraspCandidate.grasp_pose_world's contract is already the TCP frame.
 """
 
 from __future__ import annotations
@@ -73,25 +41,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ContactGraspNetConfig:
-    """Tuning for ``ContactGraspNetGenerator`` -- a learned grasp-candidate
-    source, called in-process. When enabled, ``LiberoPickAdapter`` uses it
-    *instead of* ``PrivilegedTopDownGraspGenerator``, not composited with it
-    (see ``libero_pick_adapter.py``'s comment: PickSkill's OR-set cost
-    function tends to prefer the heuristic's cheap-but-possibly-wrong
-    candidates over the network's). Disabled by default so nothing changes
-    for a machine without ``contact_graspnet_pytorch`` or a real checkpoint
-    installed (that package is only ever imported lazily, inside
-    ``_load_real_estimator``, never at module import time).
-
-    CUDA is *not* required: ``contact_graspnet_pytorch`` ships no compiled CUDA
-    extensions (its PointNet++ ops are pure PyTorch), so CPU inference works."""
+    """Tuning for ContactGraspNetGenerator. When enabled, LiberoPickAdapter
+    uses it instead of the heuristic generator, not composited (PickSkill's
+    cost function tends to prefer the heuristic's cheap-but-wrong candidates).
+    Disabled by default; CUDA not required since its PointNet++ ops are pure PyTorch."""
 
     enabled: bool = False
-    # Path to the Contact-GraspNet checkpoint directory (expects model.pt
-    # plus its config.yaml alongside it, matching Cap-X's own server loader).
-    # Machine-specific, so it must never be hardcoded to one person's checkout:
-    # the CONTACT_GRASPNET_CHECKPOINT_DIR environment variable overrides
-    # whatever is configured here (see _load_real_estimator).
+    # Checkpoint directory (model.pt + config.yaml). Machine-specific --
+    # CONTACT_GRASPNET_CHECKPOINT_DIR overrides whatever is set here.
     checkpoint_dir: str = ""
     # "auto" resolves to cuda when available, else cpu. An explicit "cuda"/"cpu"/
     # "mps" is honored as-is.
@@ -99,28 +56,19 @@ class ContactGraspNetConfig:
     forward_passes: int = 1
     local_regions: bool = True
     filter_grasps: bool = True
-    # Returned candidates are capped at this many (by score) before being
-    # handed to PickSkill, so a large network output doesn't blow up the
-    # downstream IK/collision feasibility search.
+    # Capped at this many (by score) before PickSkill's IK/collision search,
+    # so a large network output doesn't blow it up.
     max_candidates: int = 32
-    # Cameras rendered and fused for the point cloud (SceneQuery.
-    # render_depth_and_body_ids/deproject_camera_depth) -- standard LIBERO/
-    # robosuite camera names; mirrors Cap-X's own agentview + wrist-camera
-    # fusion for its LIBERO integration. A camera not present in a given
-    # model is skipped, not an error.
+    # Cameras rendered and fused for the point cloud; a camera missing from a
+    # given model is skipped, not an error.
     camera_names: list[str] = field(default_factory=lambda: ["agentview", "robot0_eye_in_hand"])
     render_height: int = 480
     render_width: int = 480
-    # Depth far-clip (m) -- drops background/sky rays (MuJoCo reports a very
-    # large depth, not a sentinel, where a ray hits nothing) before they
-    # pollute pc_full.
+    # Depth far-clip (m) -- drops background rays (MuJoCo reports a large
+    # depth, not a sentinel, where nothing is hit) before they pollute pc_full.
     depth_max_m: float = 3.0
-    # Mirrors Cap-X's own synthetic-viewpoint retry: if filter_grasps's tight
-    # contact-to-segment-cloud filter leaves zero survivors, re-express the
-    # same captured points in a freshly sampled synthetic camera frame and
-    # retry, up to this many times, before giving up on this object. No new
-    # rendering needed -- Contact-GraspNet's predictions are sensitive to the
-    # frame its input is expressed in, so re-expression alone changes the result.
+    # If filter_grasps leaves zero survivors, retry in a freshly sampled
+    # synthetic camera frame (no new rendering needed) up to this many times.
     max_viewpoint_retries: int = 10
     viewpoint_xy_extent_m: float = 0.25
     viewpoint_z_min_m: float = 0.4
@@ -128,15 +76,11 @@ class ContactGraspNetConfig:
     # None: a fresh (non-reproducible) RNG per generate() call, matching real
     # deployment. Tests pass a fixed seed for determinism.
     viewpoint_seed: int | None = None
-    # Same value and purpose as GraspSampleConfig.grasp_height_margin_m --
-    # see ContactGraspNetGenerator._generate_for_object's floor/palm-
-    # clearance clamp for why this generator needs it too.
+    # Same purpose as GraspSampleConfig.grasp_height_margin_m: floor/palm clearance margin.
     grasp_height_margin_m: float = 0.01
 
-# Single-object segmap id used for every per-object predict_scene_grasps call
-# -- pc_segments/return dicts only ever hold this one key here, since this
-# generator is called one object at a time (matching PrivilegedTopDown
-# GraspGenerator's own per-object loop in generate()).
+# Single-object segmap id used for every per-object predict_scene_grasps call,
+# since this generator is called one object at a time.
 _SEGMAP_ID = 1
 
 EstimatorFactory = Callable[[ContactGraspNetConfig], Any]
@@ -145,16 +89,9 @@ EstimatorFactory = Callable[[ContactGraspNetConfig], Any]
 def _load_real_estimator(config: ContactGraspNetConfig) -> Any:
     """Construct and load the real Contact-GraspNet PyTorch estimator.
 
-    Imported lazily (only from inside this function body) so that merely
-    importing this module -- or constructing a ``ContactGraspNetGenerator``
-    with ``enabled=False`` -- never requires ``contact_graspnet_pytorch`` or
-    CUDA to be installed. Mirrors ``scene_query.py``'s own pattern for a
-    missing ``mujoco`` install: a clear, actionable error instead of a bare
-    ``ModuleNotFoundError``.
-
-    Call shape transcribed directly from Cap-X's server
-    (``capx/serving/launch_contact_graspnet_server.py``); CPU inference works
-    fine since ``contact_graspnet_pytorch`` ships no compiled CUDA extensions.
+    Imported lazily so merely importing this module, or constructing a
+    disabled generator, never requires contact_graspnet_pytorch or CUDA.
+    CPU inference works fine since it ships no compiled CUDA extensions.
     """
     try:
         import yaml
@@ -192,9 +129,8 @@ def _load_real_estimator(config: ContactGraspNetConfig) -> Any:
         global_config = yaml.safe_load(f)
 
     estimator = GraspEstimator(global_config)
-    # Checkpoints ship as <checkpoint_dir>/config.yaml + <checkpoint_dir>/checkpoints/model.pt --
-    # CheckpointIO.load() joins its checkpoint_dir with the filename, so this must be the
-    # "checkpoints" subdir, not config.checkpoint_dir itself.
+    # CheckpointIO.load() joins checkpoint_dir with the filename, so this must
+    # be the "checkpoints" subdir, not config.checkpoint_dir itself.
     checkpoint_io = CheckpointIO(checkpoint_dir=os.path.join(checkpoint_dir, "checkpoints"), model=estimator.model)
 
     import torch
@@ -203,13 +139,8 @@ def _load_real_estimator(config: ContactGraspNetConfig) -> Any:
     if device in ("", "auto"):
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # CheckpointIO.load() calls torch.load(filename) with no extra arguments, so
-    # the only way to pass these is to wrap torch.load for the duration of the
-    # call. Both are required on any torch >= 2.6, on CPU *and* GPU machines:
-    #   * weights_only: torch 2.6 flipped this default to True, which refuses to
-    #     unpickle this checkpoint's numpy scalars.
-    #   * map_location: the published checkpoint was saved from a CUDA device, so
-    #     loading it anywhere without a GPU raises outright.
+    # torch.load is wrapped since CheckpointIO.load() passes no kwargs: torch>=2.6
+    # needs weights_only=False (numpy scalars) and map_location (checkpoint saved on CUDA).
     original_torch_load = torch.load
 
     def _patched_load(*args, **kwargs):
@@ -228,7 +159,7 @@ def _load_real_estimator(config: ContactGraspNetConfig) -> Any:
 
 
 class ContactGraspNetGenerator(GraspGenerator):
-    """Learned grasp-candidate source. See module docstring."""
+    """Learned grasp-candidate source."""
 
     # Process-wide, so the fallback warning prints once per run rather than
     # once per object per pick.
@@ -247,9 +178,8 @@ class ContactGraspNetGenerator(GraspGenerator):
         self.gripper_max_opening_m = gripper_max_opening_m
 
     def _get_estimator(self) -> Any:
-        # Lazy + cached: constructing this generator (e.g. inside
-        # CompositeGraspGenerator) never by itself loads a checkpoint or
-        # touches CUDA -- only the first real generate() call does.
+        # Lazy + cached: constructing this generator never loads a checkpoint
+        # or touches CUDA -- only the first real generate() call does.
         if self._estimator is None:
             self._estimator = self._estimator_factory(self.config)
         return self._estimator
@@ -262,17 +192,11 @@ class ContactGraspNetGenerator(GraspGenerator):
             try:
                 candidates.extend(self._generate_for_object(scene, name))
             except Exception as exc:
-                # Never let one object's inference failure (bad checkpoint,
-                # CUDA OOM, malformed model output, empty scene geometry)
-                # block picks on other objects or crash the pick attempt --
-                # the heuristic generator's candidates still carry it. See
-                # module docstring / config.py's ContactGraspNetConfig.
+                # Never let one object's inference failure block picks on other
+                # objects or crash the attempt -- the heuristic generator's candidates still carry it.
                 logger.exception("ContactGraspNetGenerator failed for object %r", name)
-                # Also print, once per process: a run that silently falls back
-                # to the heuristic generator produces perfectly plausible
-                # numbers for a grasp method other than the one being reported.
-                # An unconfigured checkpoint path is the common cause and is
-                # otherwise invisible in the logs.
+                # Also print once per process: a silent fallback produces plausible
+                # numbers for the wrong grasp method, and an unconfigured checkpoint path is otherwise invisible in the logs.
                 if not ContactGraspNetGenerator._fallback_warned:
                     ContactGraspNetGenerator._fallback_warned = True
                     print(
@@ -284,12 +208,8 @@ class ContactGraspNetGenerator(GraspGenerator):
 
     def _capture_point_clouds(self, scene: SceneQuery, object_name: str) -> tuple[np.ndarray, np.ndarray]:
         """Real multi-camera depth capture -> (pc_full_world, pc_segment_world),
-        fusing every camera in ``config.camera_names`` by concatenation (see
-        module docstring). A camera missing from this particular MuJoCo model
-        is skipped rather than failing the whole capture -- ``agentview``/
-        ``robot0_eye_in_hand`` are standard on every LIBERO/robosuite env,
-        but this generator isn't LIBERO-specific, and a differently-built
-        scene may only have one of them."""
+        fusing every camera in config.camera_names. A camera missing from this
+        particular model is skipped rather than failing the whole capture."""
         target_bid = scene.body_id(object_name)
         full_chunks: list[np.ndarray] = []
         segment_chunks: list[np.ndarray] = []
@@ -325,28 +245,8 @@ class ContactGraspNetGenerator(GraspGenerator):
         if len(grasps) == 0:
             return []
 
-        # Same floor/palm-clearance clamp as PrivilegedTopDownGraspGenerator
-        # (grasp_generator.py) -- without it, the network can correctly find a
-        # low contact point on a short/thin object that the gripper's hardware
-        # (palm or fingers extending past the TCP) can't actually reach
-        # without hitting the table first.
-        #
-        # Two corrections beyond a direct port of that clamp:
-        # 1. The floor reference must come from the object's own AABB bottom,
-        #    not raw obj_pos[2] -- that assumes a body's origin coincides with
-        #    its base, which isn't true for every asset.
-        # 2. The clamp must also be capped from above (backed off from
-        #    object_top_z by the same margin): for a sufficiently thin object,
-        #    an uncapped floor-driven clamp can push the target above the
-        #    object's own top surface entirely, and capping at exactly
-        #    object_top_z with zero margin just moves the rejection to the
-        #    opposite (too-tight) extreme.
-        #
-        # Uses collision-only extent, not the merged visual+collision extent:
-        # the two can disagree (e.g. a tall decorative handle/spout in the
-        # visual mesh sitting well above the real collision geometry), and
-        # it's the collision geometry that determines what the gripper
-        # actually touches.
+        # Same floor/palm clamp as PrivilegedTopDownGraspGenerator, so the
+        # network can't pick a contact point the gripper would hit the table to reach.
         min_safe_z = None
         extent = scene.body_collision_extent_world(object_name)
         if extent is not None:
@@ -363,27 +263,16 @@ class ContactGraspNetGenerator(GraspGenerator):
         out: list[GraspCandidate] = []
         for i in order:
             transform = grasps[i]
-            # The real touch point is contact_pts, not transform[:3, 3] --
-            # build_6d_grasp's translation is already shifted behind the
-            # contact point by the checkpoint's assumed gripper depth.
-            #
-            # No hand_from_fingertip_pose conversion on top of this:
-            # GraspCandidate.grasp_pose_world's contract (types.py) is the
-            # TCP frame, which contact_pts already is. Converting to the
-            # hand/flange frame instead moves the target along the approach
-            # axis to a different physical point, which IK then drives the
-            # TCP to as if it were still TCP-frame -- landing the fingers
-            # well off where the network intended them to close, even though
-            # tracking itself converges with near-zero error.
+            # Real touch point is contact_pts, not transform[:3, 3] (shifted
+            # behind it by gripper depth) -- used directly, with no hand_from_fingertip_pose conversion (already TCP frame).
             fingertip_pos = contact_pts[i].copy()
             if min_safe_z is not None:
                 fingertip_pos[2] = max(fingertip_pos[2], min_safe_z)
             fingertip_quat = rotmat_to_quat_wxyz(transform[:3, :3])
             grasp_pose = np.concatenate([fingertip_pos, fingertip_quat])
             approach_direction_world = quat_to_approach_axis(fingertip_quat)
-            # The network's own predicted opening, not a guess -- leaving this
-            # None makes PickSkill close the fingers fully shut, which
-            # collides with any object that isn't paper-thin.
+            # The network's own predicted opening -- leaving this None makes
+            # PickSkill close fully shut, colliding with any non-paper-thin object.
             width = float(np.clip(gripper_openings[i], 0.0, self.gripper_max_opening_m))
             out.append(
                 GraspCandidate(
@@ -400,21 +289,10 @@ class ContactGraspNetGenerator(GraspGenerator):
     def _predict_with_viewpoint_retries(
         self, scene: SceneQuery, estimator: Any, pc_full_world: np.ndarray, pc_segment_world: np.ndarray
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """(grasps_world (N,4,4), scores (N,), gripper_openings_m (N,),
-        contact_pts_world (N,3)) -- see module docstring.
-
-        Every attempt goes through a proper OpenCV-convention camera frame,
-        never raw world-frame or MuJoCo-convention points --
-        ``contact_graspnet_pytorch`` assumes OpenCV convention internally
-        (``predict_grasps``/``data.center_pc_convert_cam``), and feeding it
-        anything else produces a systematic, viewpoint-independent position
-        offset that no amount of retrying fixes. ``_mujoco_to_opencv_cam_mat``
-        below performs the needed axis negation.
-
-        The first attempt uses ``config.camera_names``'s first real, rendered
-        camera pose; every retry after that is a freshly sampled synthetic
-        viewpoint looking at the segment's own centroid, mirroring Cap-X's
-        own server-side retry loop."""
+        """Returns (grasps_world (N,4,4), scores (N,), gripper_openings_m (N,),
+        contact_pts_world (N,3)). Every attempt uses a proper OpenCV-convention
+        camera frame -- anything else produces a systematic position offset. The
+        first attempt uses a real rendered camera pose; retries sample a synthetic viewpoint looking at the segment's centroid."""
         center_world = pc_segment_world.mean(axis=0)
         rng = np.random.default_rng(self.config.viewpoint_seed)
 
@@ -452,10 +330,8 @@ class ContactGraspNetGenerator(GraspGenerator):
         pc_segment_world: np.ndarray,
         cam_pose: tuple[np.ndarray, np.ndarray],
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """One predict_scene_grasps call in the given OpenCV-convention
-        (cam_pos_world, cam_mat) camera's frame, with any resulting grasps
-        *and contact points* transformed straight back to world frame --
-        every caller only ever sees world-frame poses/points."""
+        """One predict_scene_grasps call in the given camera frame; resulting
+        grasps and contact points are transformed back to world frame -- callers only ever see world-frame data."""
         cam_pos_world, cam_mat = cam_pose
         pc_full = _world_points_to_frame(pc_full_world, cam_pos_world, cam_mat)
         pc_segment = _world_points_to_frame(pc_segment_world, cam_pos_world, cam_mat)
@@ -473,9 +349,8 @@ class ContactGraspNetGenerator(GraspGenerator):
             return np.zeros((0, 4, 4)), np.zeros((0,)), np.zeros((0,)), np.zeros((0, 3))
         openings = np.asarray(gripper_openings.get(_SEGMAP_ID, [])) if gripper_openings else np.zeros((0,))
         if len(openings) != len(grasps):
-            # contact_graspnet_pytorch's own filter_grasps step can silently drop
-            # the openings entry for a segment -- fall back to this generator's
-            # own max opening rather than crash or misalign scores/openings.
+            # filter_grasps can silently drop the openings entry for a segment --
+            # fall back to this generator's own max opening rather than crash or misalign.
             openings = np.full(len(grasps), self.gripper_max_opening_m)
         contact_pts_frame = np.asarray(contact_pts.get(_SEGMAP_ID, [])) if contact_pts else np.zeros((0, 3))
         if len(contact_pts_frame) != len(grasps):
@@ -488,27 +363,16 @@ class ContactGraspNetGenerator(GraspGenerator):
 
 
 def _mujoco_to_opencv_cam_mat(cam_mat_mujoco: np.ndarray) -> np.ndarray:
-    """MuJoCo/OpenGL camera convention (local +X right, +Y up, +Z *away*
-    from the view direction -- ``SceneQuery.camera_pose_world``'s
-    convention) -> OpenCV convention (+X right, +Y down, +Z *into* the
-    scene) that ``contact_graspnet_pytorch`` expects, by negating the local
-    Y and Z basis vectors (columns 1, 2) -- exactly what
-    ``contact_graspnet_pytorch.data.center_pc_convert_cam`` does to its own
-    OpenGL-format camera poses."""
+    """MuJoCo/OpenGL camera convention (+Y up, +Z away from view) -> OpenCV
+    convention (+Y down, +Z into scene) that contact_graspnet_pytorch expects, by negating the local Y and Z basis vectors."""
     return cam_mat_mujoco @ np.diag([1.0, -1.0, -1.0])
 
 
 def _sample_synthetic_opencv_camera_frame(
     center_world: np.ndarray, rng: np.random.Generator, xy_extent_m: float, z_min_m: float, z_max_m: float
 ) -> tuple[np.ndarray, np.ndarray]:
-    """A random (cam_pos_world, cam_mat) in OpenCV convention -- a camera at
-    a random pose near ``center_world``, oriented to look at it. Mirrors
-    Cap-X's ``sample_random_camera_viewpoint``/``camera_so3_looking_at_origin``
-    (``capx/integrations/vision/graspnet.py``), generalized from "looking at
-    the world origin" to "looking at an arbitrary target", and built directly
-    in OpenCV convention (+Z forward into the scene, +Y down) rather than via
-    ``_mujoco_to_opencv_cam_mat`` -- there's no real MuJoCo camera here to
-    convert from."""
+    """A random (cam_pos_world, cam_mat) in OpenCV convention, at a random pose
+    near center_world oriented to look at it -- built directly in OpenCV convention since there's no real MuJoCo camera to convert from."""
     offset = np.array(
         [
             rng.uniform(-xy_extent_m, xy_extent_m),
@@ -538,9 +402,8 @@ def _frame_points_to_world(points_frame: np.ndarray, cam_pos_world: np.ndarray, 
 
 
 def _frame_transform_to_world(transform_frame: np.ndarray, cam_pos_world: np.ndarray, cam_mat: np.ndarray) -> np.ndarray:
-    """A 4x4 SE3 transform expressed in a synthetic camera's frame -> world
-    frame (inverts ``_world_points_to_frame``: world = frame @ cam_mat.T +
-    cam_pos_world, applied to both the rotation and translation parts)."""
+    """A 4x4 SE3 transform in a synthetic camera's frame -> world frame,
+    applying world = frame @ cam_mat.T + cam_pos_world to both rotation and translation."""
     out = np.eye(4)
     out[:3, :3] = cam_mat @ transform_frame[:3, :3]
     out[:3, 3] = cam_mat @ transform_frame[:3, 3] + cam_pos_world
@@ -548,8 +411,6 @@ def _frame_transform_to_world(transform_frame: np.ndarray, cam_pos_world: np.nda
 
 
 def quat_to_approach_axis(quat_wxyz: np.ndarray) -> np.ndarray:
-    """The hand frame's local +Z axis (this package's approach-axis
-    convention -- see ``grasp_generator.py``'s module docstring) expressed in
-    world coordinates, for a WXYZ quaternion."""
+    """The hand frame's local +Z axis (this package's approach-axis convention), expressed in world coordinates."""
     R = quat_to_rotmat_wxyz(quat_wxyz)
     return R[:, 2]

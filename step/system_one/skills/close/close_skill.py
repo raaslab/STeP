@@ -1,48 +1,37 @@
-"""Planning-only ``CloseSkill``: shut a drawer/cabinet level or a microwave
-door.
+"""Planning-only CloseSkill: shut a drawer/cabinet level or a microwave
+door. Closing completes on contact -- unlike opening (which must hook a
+handle to pull it), there is nothing to catch or miss on the way in. A
+microwave door closes as an open-palm push along its swept arc with the
+gripper open throughout.
 
-Closing completes on contact -- unlike opening a drawer (which must hook a
-handle to pull it), there is nothing to catch and nothing to miss on the way
-in. A microwave door closes as an open-palm push (see ``_execute_door`` and
-``LiberoCloseAdapter``'s docstring): the gripper stays open, and contact is
-made by the palm/wrist pushing straight through the door's swept arc.
-
-A drawer/cabinet level tries **three** strategies, in order, each a fallback
-for when the previous one can't even find a reachable approach (a strategy
-that reaches but can't fully close reports that failure as-is, rather than
+A drawer/cabinet level tries three strategies in order, each a fallback for
+when the previous one can't even find a reachable approach (a strategy that
+reaches but can't fully close reports that failure as-is, rather than
 falling back silently past a real contact):
 
-1. **Linear, no tilt, a single predefined point** (``_execute_drawer_linear``):
-   keeps the arm's homed approach direction and tilt and goes to one fixed
-   standoff/contact/push point, rather than searching many. Tried first
-   because a wrist rotated into a tilted search frame tends to sweep the
-   forearm into clutter next to the cabinet that a home-tilt approach never
-   has to pass. Neither leg runs a collision check: the static checker is
-   measurably too conservative both about the descent (IK non-uniqueness
-   makes an equally valid posture look blocked) and about contact with
-   whatever's resting inside the drawer during the push, which a real
-   MPC-tracked push simply nudges aside rather than jamming against.
-2. **Grasp-and-retract** (``_execute_drawer_grasp``): reuses
-   ``open_drawer_skill.find_drawer_handle_grasp`` verbatim -- the same
-   tilt/roll/offset/standoff search and narrowed-finger approach
-   ``OpenDrawerSkill`` uses to grasp the handle to pull it open -- then
-   retracts along *minus* the measured pull axis instead, dragging the
-   drawer shut. A narrowed-finger grasp sweeps a smaller profile than an
-   open palm needing flush contact, so it can reach handles the push can't.
-3. **Open-palm push, tilted** (``_execute_drawer_push``, final fallback):
-   approach with an open gripper along a tilted line and continue straight
-   through the handle until the palm/wrist has pushed the drawer's front
-   face flush to its closed end. Needs ``CollisionChecker``'s
-   ``permitted_contact_geom_ids`` (previously unused by any caller), since
-   ``_permitted()`` otherwise only ever allows fingerpad<->target contact,
-   never palm<->target.
+1. **Linear, no tilt, a single predefined point** (_execute_drawer_linear):
+   keeps the arm's homed approach direction/tilt and goes to one fixed
+   standoff/contact/push point rather than searching many, since a tilted
+   wrist tends to sweep the forearm into clutter a home-tilt approach
+   avoids. Runs no collision check on either leg -- the static checker is
+   too conservative about descent posture and about contact with whatever
+   is resting inside the drawer during the push.
+2. **Grasp-and-retract** (_execute_drawer_grasp): reuses
+   open_drawer_skill.find_drawer_handle_grasp verbatim, then retracts
+   along *minus* the measured pull axis to drag the drawer shut. A
+   narrowed-finger grasp sweeps a smaller profile than an open palm, so it
+   can reach handles the push can't.
+3. **Open-palm push, tilted** (_execute_drawer_push, final fallback):
+   approach open-handed along a tilted line and continue through until the
+   palm/wrist pushes the drawer flush to its closed end. Needs
+   CollisionChecker's permitted_contact_geom_ids, since
+   _permitted() otherwise only ever allows fingerpad<->target contact.
 
 All three strategies (and the microwave door) return the same diagnostics/
-``plan.metadata`` shape (``approach_positions`` standoff->first-contact,
-``push_positions`` contact->closed) plus a ``"kind"`` diagnostic
-(``"drawer_grasp"``, ``"drawer"``, or ``"door"``) so ``LiberoCloseAdapter``
-knows whether to close the gripper on contact and release it before
-retreating (grasp) or leave it open throughout (push/door).
+plan.metadata shape (approach_positions standoff->first-contact,
+push_positions contact->closed) plus a "kind" diagnostic so
+LiberoCloseAdapter knows whether to close the gripper on contact and
+release before retreating (grasp) or leave it open throughout (push/door).
 """
 
 from __future__ import annotations
@@ -78,61 +67,36 @@ from ...motion.types import PlannerFailureReason, SkillFailureReason, SkillResul
 
 @dataclass
 class CloseConfig:
-    """Tuning for ``CloseSkill``/``LiberoCloseAdapter`` -- closes a drawer
-    (slide joint) or a microwave door (hinge joint) by pushing it shut with
-    a closed gripper, never grasping it. Pushing has none of
-    ``DrawerConfig``'s grasp-precision machinery (offsets, tilts, per-angle
-    finger width) because a closed fist just needs to *contact* the fixture
-    somewhere and keep moving through it -- there is no handle to miss."""
+    """Tuning for CloseSkill/LiberoCloseAdapter -- closes a drawer
+    (slide joint) or microwave door (hinge joint) by pushing it shut. Pushing
+    skips DrawerConfig's grasp-precision machinery, since contacting the
+    fixture anywhere and moving through it is enough; there's no handle to miss."""
 
     approach_standoff_m: float = 0.08
-    # Higher than every other skill's pose_selection_attempts (6) -- needed
-    # for the microwave door specifically: its vertical hinge axis means
-    # every approach reaches sideways across the robot's own base, and a
-    # perturbed-seed DLS solve converges to a self-colliding elbow far more
-    # often than not, so more restarts are needed to find a clean one.
-    # Drawer closing doesn't need this itself but shares the field.
+    # Higher than other skills' pose_selection_attempts (6) -- the microwave
+    # door's vertical hinge axis pushes every approach into a self-colliding elbow more often.
     pose_selection_attempts: int = 24
     standoff_distance_multipliers: tuple[float, ...] = (1.0, 2.5, 4.0)
     standoff_lateral_offsets_m: tuple[float, ...] = (0.05, 0.08, 0.12)
     standoff_lateral_directions: int = 8
-    # Drawer branch only (see DrawerConfig.approach_tilts_rad): a purely
-    # horizontal approach sweeps the forearm through whatever sits on the
-    # table in front of the cabinet at handle height. Not used by the door
-    # branch, whose approach direction comes from the arc's own tangent.
+    # Drawer branch only -- a horizontal approach sweeps the forearm through
+    # table clutter at handle height. The door branch uses the arc's own tangent instead.
     approach_tilts_rad: tuple[float, ...] = (0.0, 0.35, 0.61, 0.87)
-    # Drawer branch only -- mirrors DrawerConfig.pull_fraction_fallbacks
-    # (tried largest/most-closed first): pushing all the way to the joint's
-    # exact closed end can bring the palm into contact with whatever sits
-    # flush around the drawer opening once shut (e.g. the drawer above it in
-    # a stacked cabinet). A push that only gets most of the way still counts
-    # as closed (see close_threshold_frac) and avoids that tight clearance.
+    # Tried largest/most-closed first -- the exact closed end can bring the
+    # palm into contact with whatever sits flush around the opening once shut.
     close_fraction_fallbacks: tuple[float, ...] = (1.0, 0.95, 0.9, 0.85, 0.75, 0.6)
-    # ``_execute_drawer_linear`` only: a fixed orientation (yaw about world
-    # +Z, then roll about the resulting local +Z, then tilt about the
-    # resulting local +X -- these three span the full orientation space)
-    # plus a fixed height offset relative to the handle. All four are pinned
-    # rather than swept, tuned by hand against real physics rollouts rather
-    # than the static collision checker, which is too conservative for this
-    # leg (see close_fraction_fallbacks). scripts/tune_close_drawer.py
-    # exposes all four as CLI flags for further tuning.
+    # _execute_drawer_linear only: fixed yaw/roll/tilt + height offset,
+    # pinned (not swept) and tuned by hand against real physics rollouts.
     linear_yaws_deg: tuple[float, ...] = (90.0,)
     linear_roll_deg: float = 0.0
     linear_tilt_deg: float = -30.0
     linear_height_offsets_m: tuple[float, ...] = (0.0,)
     planning_attempts: int = 3
-    # Number of Cartesian waypoints FK-sampled along a microwave door's
-    # swept closing arc (see articulation.measure_door_close_arc) -- each is
-    # IK-solved in sequence, warm-started from the previous one, to build the
-    # joint-space reference the MPC tracks. Irrelevant for a drawer, whose
-    # closing path is a straight line (2 endpoints, IK-solved directly).
+    # Cartesian waypoints sampled along a microwave door's swept closing arc,
+    # each IK-solved in sequence and warm-started from the previous one. Irrelevant for a drawer's straight-line path.
     door_arc_waypoints: int = 10
-    # Fraction of the joint's full qpos range still open, required to call
-    # the fixture "closed" -- the mirror image of
-    # DrawerConfig.open_threshold_frac, just checked in the other direction
-    # (<= this counts as closed, vs. >= open_threshold_frac counts as open).
-    # Looser than 0.0 because a real push rarely drives the joint to its
-    # exact mechanical zero.
+    # Fraction of the joint's full qpos range still open, required to call it
+    # "closed" -- looser than 0.0 since a real push rarely reaches the exact mechanical zero.
     close_threshold_frac: float = 0.15
     retreat_m: float = 0.06
     retreat_steps: int = 40
@@ -144,8 +108,8 @@ def _normalize(name: str) -> str:
 
 
 def _yaw_about_world_z(quat_wxyz: np.ndarray, degrees: float) -> np.ndarray:
-    """Rotate a world-frame orientation by ``degrees`` about the world +Z
-    axis (applied on the left) -- used by ``_execute_drawer_linear`` to turn
+    """Rotate a world-frame orientation by degrees about the world +Z
+    axis (applied on the left) -- used by _execute_drawer_linear to turn
     the fixed predefined-point approach while keeping the arm's home tilt."""
     half = np.radians(float(degrees)) / 2.0
     yaw_quat = np.array([np.cos(half), 0.0, 0.0, np.sin(half)])
@@ -153,7 +117,7 @@ def _yaw_about_world_z(quat_wxyz: np.ndarray, degrees: float) -> np.ndarray:
 
 
 def _roll_about_local_z(quat_wxyz: np.ndarray, degrees: float) -> np.ndarray:
-    """Rotate an orientation by ``degrees`` about its own local +Z axis (the
+    """Rotate an orientation by degrees about its own local +Z axis (the
     approach direction), applied on the right -- unlike the world-Z yaw
     above, this spins the fingers around the fixed approach direction
     without changing which way the palm faces."""
@@ -163,7 +127,7 @@ def _roll_about_local_z(quat_wxyz: np.ndarray, degrees: float) -> np.ndarray:
 
 
 def _tilt_about_local_x(quat_wxyz: np.ndarray, degrees: float) -> np.ndarray:
-    """Rotate an orientation by ``degrees`` about its own (post-yaw,
+    """Rotate an orientation by degrees about its own (post-yaw,
     post-roll) local +X axis, applied on the right -- the third independent
     rotation; composed after yaw and roll, the three span the full
     orientation space."""
@@ -187,7 +151,7 @@ class CloseSkill:
         self._rng = np.random.default_rng(self.config.planner.seed)
 
     def _resolve_target(self, scene: SceneQuery, target_ref: str):
-        """Returns ``("drawer", DrawerHandle)`` or ``("door", MicrowaveDoor)``.
+        """Returns ("drawer", DrawerHandle) or ("door", MicrowaveDoor).
         Tries whichever kind the name hints at first (LIBERO's microwave
         names always contain "micro"), only falling back to the other kind
         on failure -- guards against the resolvers' permissive "only one
@@ -235,13 +199,8 @@ class CloseSkill:
         contact_pos, _flat_contact_quat, pull_axis_world, travel_m, _closing_axis = handle_grasp_pose(scene, drawer)
         _, _, qpos_closed, qpos_open = measure_pull_axis_and_travel(scene, drawer)
         qpos_current = float(scene.get_qpos([drawer.joint_name])[0])
-        # NOT simply (qpos_current - qpos_closed): `qpos_open` isn't
-        # guaranteed to be greater than `qpos_closed` -- a drawer's local
-        # joint axis can point opposite to the world-measured
-        # `pull_axis_world`. The qpos delta must be normalized into a
-        # fraction of the full (qpos_open-qpos_closed) range before scaling
-        # by travel_m/pull_axis_world, or this can push the drawer further
-        # open instead of closed.
+        # NOT simply (qpos_current - qpos_closed): qpos_open isn't guaranteed
+        # greater than qpos_closed, so the delta must be normalized into a fraction of the full range first.
         frac_open = (
             (qpos_current - qpos_closed) / (qpos_open - qpos_closed)
             if abs(qpos_open - qpos_closed) > 1e-9
@@ -278,29 +237,14 @@ class CloseSkill:
         qpos_open: float,
         _edge_resolution: float,
     ) -> SkillResult | None:
-        """Approach and push with the SAME orientation the arm already has
-        at ``start_q`` (its homed pose) -- no wrist rotation at all, tried
-        before both other strategies. A wrist rotated into a tilted search
-        frame tends to sweep the forearm into clutter next to the cabinet;
-        holding the home orientation sidesteps that at the source.
-
-        Deliberately not a search: a single predefined point in front of the
-        drawer and a single push straight through it, at a fixed height
-        above the handle. A standoff/lateral/yaw search was tried and made
-        this worse -- it kept preferring degenerate points that only cleared
-        the checker because they'd drifted clear of the drawer's face
-        entirely, over the one point a real rollout confirmed actually
-        works. Neither leg runs a collision check, for the same reason the
-        static checker is too conservative here: about the descent itself
-        (IK non-uniqueness can make an equally valid posture look blocked)
-        and about contact with whatever's resting inside the drawer, which a
-        real MPC-tracked push simply nudges aside. IK success is still
-        required for both legs, just not a static checker's approval.
-
-        Returns ``None`` (not a ``SkillResult``) only when the predefined
-        point isn't even IK-reachable at all, telling the caller to fall
-        back to the other strategies.
-        """
+        """Approach and push with the arm's current (homed) orientation --
+        no wrist rotation, tried before the other strategies since a tilted
+        wrist tends to sweep the forearm into cabinet clutter. Uses a single
+        predefined standoff/contact/push point rather than a search, and
+        skips collision checking on either leg since the static checker is
+        too conservative about descent posture and about contact with
+        whatever's resting inside the drawer. IK success is still required
+        for both legs. Returns None only when that point isn't IK-reachable at all."""
         cfg = self.config.close
         # The arm's actual current orientation, not a recomputed home pose --
         # valid since the adapter always homes the arm before planning.
@@ -314,8 +258,7 @@ class CloseSkill:
         aim_pos = contact_pos + np.array([0.0, 0.0, float(height_offset_m)])
 
         # One candidate: this point, right in front of the drawer. No
-        # collision veto (see the method's docstring) -- IK success alone
-        # is the requirement, not a static check's approval of the posture.
+        # collision veto -- IK success alone is the requirement.
         standoff_position = aim_pos - cfg.approach_standoff_m * approach_world
         standoff_ik = _solve_ik_robust(
             self.ik_solver, scene, standoff_position, home_quat, start_q, self._rng,
@@ -331,8 +274,7 @@ class CloseSkill:
             return None
 
         # Try the most-closed target first, falling back only on outright
-        # IK infeasibility (never on collision -- see the method's own
-        # docstring for why that check is dropped for this leg).
+        # IK infeasibility, never on collision (dropped for this leg).
         push_ik = None
         push_target_pos = None
         for fraction in cfg.close_fraction_fallbacks:
@@ -394,17 +336,13 @@ class CloseSkill:
         qpos_open: float,
         edge_resolution: float,
     ) -> SkillResult | None:
-        """Grasp the handle exactly like ``OpenDrawerSkill`` does, then
-        retract along *minus* the measured pull axis instead of plus it --
-        dragging the drawer shut instead of pulling it further open.
+        """Grasp the handle like OpenDrawerSkill does, then retract along
+        *minus* the pull axis to drag the drawer shut instead of pulling it open.
 
-        Returns ``None`` (not a ``SkillResult``) when no reachable,
-        collision-free, closure-safe grasp exists at all, telling the caller
-        to fall back to the push strategy untouched. Returns a real
-        ``SkillResult`` once a grasp was found, since a grasped-but-can't-
-        retract failure is distinct and worth reporting, not falling back
-        past.
-        """
+        Returns None only when no reachable grasp exists at all, so the
+        caller falls back to the push strategy; once a grasp is found, a
+        real SkillResult is returned even on a failed retract, since
+        that's a distinct, worth-reporting failure."""
         candidate, grasp_rejection = find_drawer_handle_grasp(
             scene, drawer, contact_pos, pull_axis_world, start_q,
             self.ik_solver, self.collision_checker, self.config.drawer, edge_resolution, self._rng,
@@ -427,10 +365,7 @@ class CloseSkill:
                 last_rejection = "retract_target_ik_failed"
                 continue
             # Validated with the CLOSED-finger geometry, not check_edge's
-            # open-gripper default -- the real motion keeps the fingers
-            # closed on the handle for the whole retract, so a configuration
-            # that looks clear open-handed could still drag it into a
-            # neighbor.
+            # open-gripper default, since the real retract keeps fingers closed the whole time.
             retract_check = self.collision_checker.check_edge(
                 candidate.grasp_ik.q, retract_ik.q, resolution=edge_resolution,
                 phase=CollisionPhase.TERMINAL_APPROACH, target_object_body=drawer.drawer_body,
@@ -514,11 +449,8 @@ class CloseSkill:
         edge_resolution: float,
     ) -> SkillResult:
         cfg = self.config.close
-        # A push makes contact with the PALM, not the fingerpads --
-        # CollisionChecker._permitted() only ever allows fingerpad<->target
-        # contact, so permitted_contact_geom_ids explicitly allows the whole
-        # gripper to press against the target while the forearm/other robot
-        # links still count any contact as a real violation.
+        # A push contacts with the PALM, not the fingerpads --
+        # permitted_contact_geom_ids explicitly allows that, since _permitted() otherwise only allows fingerpad contact.
         target_geom_ids = set(scene.body_geom_ids(drawer.drawer_body))
         reference_axis_world = _unit(np.cross(np.array([0.0, 0.0, 1.0]), pull_axis_world))
 
@@ -526,9 +458,8 @@ class CloseSkill:
         best_fallback = None  # (open_frac_reached, standoff_ik, contact_ik, push_ik, contact_quat)
         last_rejection = "no_ik_attempted"
         for tilt_rad in cfg.approach_tilts_rad:
-            # Same direction the grasp approach uses, brought in from above
-            # at steeper tilts -- closing continues straight through that
-            # direction rather than reversing, unlike opening's pull leg.
+            # Same direction the grasp approach uses, brought in from above at
+            # steeper tilts -- closing continues straight through, unlike opening's pull leg.
             approach_world = _unit(
                 -pull_axis_world * float(np.cos(tilt_rad)) + np.array([0.0, 0.0, -1.0]) * float(np.sin(tilt_rad))
             )
@@ -564,9 +495,8 @@ class CloseSkill:
                 if descent_check.in_collision:
                     last_rejection = "approach_descent_in_collision"
                     continue
-                # Tried largest (most-closed) fraction first -- see
-                # CloseConfig.close_fraction_fallbacks's own comment for why
-                # a full push isn't always the reachable one.
+                # Tried largest (most-closed) fraction first -- a full push
+                # isn't always the reachable one.
                 push_found = False
                 for fraction in cfg.close_fraction_fallbacks:
                     push_target_frac = contact_pos - fraction * frac_open * travel_m * pull_axis_world
@@ -600,9 +530,8 @@ class CloseSkill:
                 break
 
         if best is None and best_fallback is not None:
-            # Same "best feasible wins" fallback as the door branch -- the
-            # adapter's own post-execution structural check still gates on
-            # close_threshold_frac, so this never ships a false "success".
+            # Best-feasible-wins fallback -- the adapter's post-execution
+            # check still gates on close_threshold_frac, so this never ships a false "success".
             _, standoff_ik, contact_ik, push_ik, contact_quat, push_target_frac = best_fallback
             best = (standoff_ik, contact_ik, push_ik, contact_quat, push_target_frac)
 
@@ -651,8 +580,8 @@ class CloseSkill:
             np.max(self.planner.joint_limits_hi - self.planner.joint_limits_lo)
         )
 
-        # See _execute_drawer_push's comment: a push contacts with the palm,
-        # which CollisionChecker._permitted() never allows on its own.
+        # A push contacts with the palm, which CollisionChecker._permitted()
+        # never allows on its own.
         target_geom_ids = set(scene.body_geom_ids(door.door_body))
 
         waypoints_world, qpos_current, qpos_closed, axis_world, _pivot_world = measure_door_close_arc(
@@ -661,16 +590,13 @@ class CloseSkill:
         lo, hi = scene.joint_qpos_range([door.joint_name])
         lo, hi = float(lo[0]), float(hi[0])
         qpos_open_reference = hi if qpos_closed == lo else lo
-        # Same sampling measure_door_close_arc used internally -- needed
-        # here to know how "closed" the door would be if the chain below
+        # Needed to know how "closed" the door would be if the chain below
         # only makes it partway along the arc.
         qpos_samples = np.linspace(qpos_current, qpos_closed, len(waypoints_world))
         denom = qpos_open_reference - qpos_closed
 
         # Orientation at each waypoint: approach axis along the arc's own
-        # tangent direction (the way the door is being pushed at that point),
-        # reference axis fixed to the hinge axis -- mirrors
-        # open_drawer_skill's own approach/reference convention.
+        # tangent direction, reference axis fixed to the hinge axis.
         quats = []
         for i in range(len(waypoints_world)):
             if i < len(waypoints_world) - 1:
@@ -681,8 +607,7 @@ class CloseSkill:
             quat, _ = _orientation_from_approach_and_reference(approach_world, axis_world)
             quats.append(quat)
         # Approach direction for the standoff search: the same tangent the
-        # first waypoint uses, so the arm arrives already moving the way it
-        # will immediately continue pushing.
+        # first waypoint uses, so the arm arrives already moving the way it'll push.
         approach_world0 = _unit(waypoints_world[1] - waypoints_world[0]) if len(waypoints_world) > 1 else axis_world
 
         best = None
@@ -719,12 +644,8 @@ class CloseSkill:
                 last_rejection = "approach_descent_in_collision"
                 continue
 
-            # Chain as much of the arc as is actually IK/collision feasible,
-            # same "take the best feasible" shape as
-            # DrawerConfig.pull_fraction_fallbacks -- requiring the full arc
-            # is a much tighter kinematic constraint than a drawer's short
-            # straight pull, so a partial prefix that gets the door past
-            # `close_threshold_frac` counts as a real close, not a compromise.
+            # Chain as much of the arc as is IK/collision feasible -- the full
+            # arc is a tighter constraint than a drawer's straight pull, so a partial prefix past threshold counts.
             arc_qs = [contact_ik.q]
             reached_idx = 0
             for i in range(1, len(waypoints_world)):
@@ -760,10 +681,8 @@ class CloseSkill:
             break
 
         if best is None and best_fallback is not None:
-            # No candidate reached the close threshold outright, but some
-            # chain got partway there -- not a silent downgrade, since the
-            # adapter's structural success check still gates on
-            # close_threshold_frac after execution.
+            # No candidate reached the threshold outright, but some chain got
+            # partway -- not a silent downgrade, since the adapter re-gates on close_threshold_frac after execution.
             _, standoff_ik, contact_ik, arc_qs = best_fallback
             best = (standoff_ik, contact_ik, arc_qs)
 
@@ -807,15 +726,8 @@ class CloseSkill:
     # ------------------------------------------------------------ shared
 
     def _plan_free_space(self, scene: SceneQuery, start_q, goal_q, target_object_body: str, planning_attempts: int):
-        # RRTConnect is stochastic -- see OpenDrawerSkill.execute()'s
-        # identical retry loop for why repeated attempts help.
-        #
-        # The fixture being closed isn't a neutral obstacle to route around:
-        # an open drawer's face already sticks out right next to the
-        # standoff, and `target_object_body` alone only exempts fingerpad
-        # contact, not the palm/wrist grazing it. Permit contact with the
-        # fixture's own geoms wholesale here, or FREE_SPACE reach can be
-        # blocked by the very fixture the arm is about to press against.
+        # target_object_body alone only exempts fingerpad contact, not the
+        # palm/wrist grazing it near the standoff, so its geoms are permitted wholesale here.
         permitted_contact_geom_ids = set(scene.body_geom_ids(target_object_body))
         plan = None
         for _ in range(planning_attempts):

@@ -23,14 +23,14 @@ import numpy as np
 
 
 def _import_libero_benchmark():
-    """Return ``(benchmark_module, get_libero_path)``.
+    """Return (benchmark_module, get_libero_path).
 
-    Handles both a properly pip/uv-installed ``libero`` (single-level --
-    ``from libero import benchmark``, e.g. Cap-X's own ``.venv-libero``,
+    Handles both a properly pip/uv-installed libero (single-level --
+    from libero import benchmark, e.g. Cap-X's own .venv-libero,
     which is how a "normal" LIBERO checkout is actually packaged) and a
-    double-nested vendored checkout reached via ``_ensure_libero_on_path``
-    (``from libero.libero import benchmark`` -- the historical vlm-stl
-    layout, where the repo root itself is added to ``sys.path`` instead of
+    double-nested vendored checkout reached via _ensure_libero_on_path
+    (from libero.libero import benchmark -- the historical vlm-stl
+    layout, where the repo root itself is added to sys.path instead of
     the package root).
     """
     try:
@@ -41,8 +41,8 @@ def _import_libero_benchmark():
 
 
 def _import_libero_env():
-    """Return the ``OffScreenRenderEnv`` class, single- or double-nested (see
-    ``_import_libero_benchmark``)."""
+    """Return the OffScreenRenderEnv class, single- or double-nested (see
+    _import_libero_benchmark)."""
     try:
         from libero.envs import OffScreenRenderEnv
     except ImportError:
@@ -51,12 +51,12 @@ def _import_libero_env():
 
 
 def _patch_torch_load_for_libero() -> None:
-    """LIBERO's ``benchmark.get_task_init_states`` calls ``torch.load(path)`` with
-    no ``weights_only`` argument. PyTorch >= 2.6 flipped that default to ``True``,
+    """LIBERO's benchmark.get_task_init_states calls torch.load(path) with
+    no weights_only argument. PyTorch >= 2.6 flipped that default to True,
     which cannot unpickle LIBERO's numpy-backed init-state files.
 
-    Without this, ``get_libero_init_state``'s own bare ``except`` swallows the
-    resulting ``UnpicklingError`` and returns ``None``, so ``--init-state-id`` is
+    Without this, get_libero_init_state's own bare except swallows the
+    resulting UnpicklingError and returns None, so --init-state-id is
     *silently ignored* and every rollout runs the BDDL default layout instead --
     i.e. an N-init-state benchmark secretly evaluates one state N times. The
     init-state files ship inside the pinned LIBERO checkout and are trusted, so
@@ -82,8 +82,8 @@ def _ensure_libero_on_path() -> None:
     """Add the LIBERO source tree to sys.path if libero is not already importable.
 
     The LIBERO repo is checked in at <workspace>/LIBERO/libero, so the package
-    root (the directory that contains the top-level ``libero/`` package) is the
-    ``LIBERO/libero`` subdirectory relative to this file's repository root.
+    root (the directory that contains the top-level libero/ package) is the
+    LIBERO/libero subdirectory relative to this file's repository root.
     """
     try:
         import libero  # noqa: F401
@@ -95,8 +95,8 @@ def _ensure_libero_on_path() -> None:
     here = Path(__file__).resolve()
     # Walk up to find the repo root (contains LIBERO/ sibling directory).
     # The pip package root is LIBERO/ itself; add that so that
-    # `import libero` resolves to LIBERO/libero/ and
-    # `from libero.libero import …` resolves to LIBERO/libero/libero/.
+    # import libero resolves to LIBERO/libero/ and
+    # from libero.libero import … resolves to LIBERO/libero/libero/.
     for parent in here.parents:
         candidate = parent / "LIBERO"
         if (candidate / "libero" / "libero").is_dir():
@@ -218,7 +218,7 @@ def infer_objects_from_obs(obs: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Extract object poses from a LIBERO observation dict.
 
     LIBERO/robosuite observations commonly include keys like
-    ``<object>_pos`` and ``<object>_quat``.  This parser deliberately ignores
+    <object>_pos and <object>_quat.  This parser deliberately ignores
     robot/eef/camera keys and returns a normalized object map.
     """
     objects: dict[str, dict[str, Any]] = {}
@@ -277,12 +277,12 @@ def infer_objects_from_mujoco(env: Any) -> dict[str, dict[str, Any]]:
 
 def infer_drawer_fixtures(env: Any) -> list[dict[str, Any]]:
     """Discover slide-jointed drawer/cabinet fixtures in the live LIBERO env
-    (e.g. ``wooden_cabinet_1``'s top/middle/bottom drawers) and return them as
+    (e.g. wooden_cabinet_1's top/middle/bottom drawers) and return them as
     scene-context entities. Unlike movable objects, these never appear in
-    ``infer_objects_from_obs`` -- LIBERO only emits ``<name>_pos``/``_quat``
-    obs keys for ``env.objects_dict``, never for ``env.fixtures_dict`` -- so
+    infer_objects_from_obs -- LIBERO only emits <name>_pos/_quat
+    obs keys for env.objects_dict, never for env.fixtures_dict -- so
     without this, System 2 has no real entity to reference and can only
-    hallucinate a name like ``top_drawer_handle`` for an "open the drawer"
+    hallucinate a name like top_drawer_handle for an "open the drawer"
     instruction. Lazily imports the motion package's MuJoCo introspection
     (pure model discovery, no LIBERO API needed) to avoid a hard dependency
     for callers that never touch LIBERO/mujoco.
@@ -453,7 +453,7 @@ def infer_named_region_entities(env: Any) -> list[dict[str, Any]]:
         world_half = np.abs(R) @ local_half
         radius = float(min(world_half[0], world_half[1])) * 0.8
 
-        # `site_name` is already fully namespaced by robosuite's own
+        # site_name is already fully namespaced by robosuite's own
         # instance-prefixing when it merges the asset into the scene (the
         # source XML just declares name="back_contain_region"; the compiled
         # model's real name is "desk_caddy_1_back_contain_region") -- use it
@@ -470,7 +470,7 @@ def infer_named_region_entities(env: Any) -> list[dict[str, Any]]:
         # suffix ("back_contain_region"), but a site with *no* distinguishing
         # label at all is left as the bare suffix alone ("contain_region") --
         # its own underscore was already consumed stripping the object
-        # prefix, so `.endswith(_NAMED_REGION_SITE_SUFFIX)` (which requires
+        # prefix, so .endswith(_NAMED_REGION_SITE_SUFFIX) (which requires
         # a leading "_") silently fails to match and never reduces it to ""
         # the way it should. Strip the bare suffix too, then any leftover
         # trailing "_", so both cases correctly converge on "" for a
@@ -528,8 +528,8 @@ def infer_named_region_entities(env: Any) -> list[dict[str, Any]]:
 
 def infer_cabinet_support_entities(env: Any) -> list[dict[str, Any]]:
     """Discover each drawer cabinet's own static frame body (see
-    ``discover_cabinet_support_bodies`` for why this is a *different* body
-    from any drawer level) and return it as a ``support_object`` scene
+    discover_cabinet_support_bodies for why this is a *different* body
+    from any drawer level) and return it as a support_object scene
     entity, so "place X on top of the cabinet" has a real name to target --
     without this, System 2 has nothing to reference but a drawer level
     itself (already seen hallucinating a drawer's name as a stand-in for
@@ -615,12 +615,12 @@ def infer_cabinet_support_entities(env: Any) -> list[dict[str, Any]]:
 
 
 def infer_table_support_entity(env: Any) -> list[dict[str, Any]]:
-    """Register the scene's own tabletop as a resolvable ``support_object``
+    """Register the scene's own tabletop as a resolvable support_object
     entity, so System 2 has a simple, always-available "somewhere clear"
     destination for temporarily relocating an object -- e.g. moving a bowl
     out of a drawer's way before opening it (see prompts.py's rule on this).
 
-    Deliberately *not* discovered via ``infer_objects_from_mujoco`` (which
+    Deliberately *not* discovered via infer_objects_from_mujoco (which
     explicitly excludes any body name containing "table", since it's scene
     furniture, not a manipulable/placeable object in the usual sense) --
     registered here on purpose instead, since placing something *on* the
@@ -677,19 +677,19 @@ def infer_table_support_entity(env: Any) -> list[dict[str, Any]]:
 
 def infer_stove_fixtures(env: Any) -> list[dict[str, Any]]:
     """Register each stove/burner fixture (discovered the same way
-    ``discover_knobs`` finds its turn-on target -- by hinge joint, not by
-    name) as a resolvable ``support_object`` entity, so "turn on the stove
+    discover_knobs finds its turn-on target -- by hinge joint, not by
+    name) as a resolvable support_object entity, so "turn on the stove
     and put the moka pot on it" has one real name to reference for *both*
     the turn_on target and the place/transport goal.
 
     Without this, a stove is invisible to System 2 -- it never appears in
-    ``infer_objects_from_obs`` (LIBERO only emits `<name>_pos`/`_quat` obs
-    keys for movable ``env.objects_dict`` members, never fixtures) and
-    ``infer_objects_from_mujoco``'s own body-name filter excludes it too
-    (``flat_stove_1_base`` matches the "base" exclusion). Confirmed directly
+    infer_objects_from_obs (LIBERO only emits <name>_pos/_quat obs
+    keys for movable env.objects_dict members, never fixtures) and
+    infer_objects_from_mujoco's own body-name filter excludes it too
+    (flat_stove_1_base matches the "base" exclusion). Confirmed directly
     on a real libero_10 rollout: with no stove entity to reference, System 2
     picked the only other object in the scene wide of the mark instead
-    (`chefmate_8_frypan_1`, a frypan sharing the table) for *both*
+    (chefmate_8_frypan_1, a frypan sharing the table) for *both*
     params.object on the turn_on subtask and params.goal_region on the
     place -- turn_on still worked by luck (resolve_knob falls back to "the
     only knob available" when a name doesn't match anything), but the moka
@@ -774,22 +774,22 @@ def infer_stove_fixtures(env: Any) -> list[dict[str, Any]]:
 
 
 def merge_drawer_fixtures_into_scene_context(scene_context: dict[str, Any], env: Any) -> dict[str, Any]:
-    """Append discovered drawer/cabinet entities (see ``infer_drawer_fixtures``),
+    """Append discovered drawer/cabinet entities (see infer_drawer_fixtures),
     their cabinets' own static frame bodies (see
-    ``infer_cabinet_support_entities``), the scene's own tabletop (see
-    ``infer_table_support_entity``), and any named sub-region sites like a
-    caddy's own compartments (see ``infer_named_region_entities``) into
-    ``scene_context["entities"]``, skipping any name already present. A
+    infer_cabinet_support_entities), the scene's own tabletop (see
+    infer_table_support_entity), and any named sub-region sites like a
+    caddy's own compartments (see infer_named_region_entities) into
+    scene_context["entities"], skipping any name already present. A
     plain drawer/cabinet-level entity
     has no meaningful single xyz/geometry entry to add -- its entity record
     (name/role/aliases) is enough for System 2 to reference it by name and
-    for ``resolve_drawer``/``resolve_body_name`` to look it up again from the
+    for resolve_drawer/resolve_body_name to look it up again from the
     live model at execution time. A cabinet/table support entity is
-    different: it also carries a ``_geometry`` entry (popped into
-    ``scene_context["geometry"]`` here, matching
-    ``update_scene_context_from_objects``'s own convention) since the
-    *legacy* transport backend's ``SceneResolver.resolve_goal()`` -- unlike
-    ``open``'s own live re-measurement -- has no other way to find a
+    different: it also carries a _geometry entry (popped into
+    scene_context["geometry"] here, matching
+    update_scene_context_from_objects's own convention) since the
+    *legacy* transport backend's SceneResolver.resolve_goal() -- unlike
+    open's own live re-measurement -- has no other way to find a
     fixture's position and silently falls back to a workspace-center
     placeholder without it."""
     updated = copy.deepcopy(scene_context)
@@ -859,19 +859,19 @@ def merge_drawer_fixtures_into_scene_context(scene_context: dict[str, Any], env:
 def refresh_drawer_blocking_flags(scene_context: dict[str, Any], env: Any) -> dict[str, Any]:
     """Recompute and (re-)stamp the drawer clearance/approach-corridor flags
     against a live, already-built scene_context -- unconditionally, ignoring
-    ``disable_drawer_preemptive_flags``.
+    disable_drawer_preemptive_flags.
 
     For a reactive-replanning experiment that deliberately withholds this
     hint on the *first* attempt (so System 2 has to try the open blind and
     actually fail first), the recall snapshot is exactly the point where
     revealing it is no longer "cheating": the failure already happened, and
-    a rejected ``open`` that never even got a grip leaves the scene visually
+    a rejected open that never even got a grip leaves the scene visually
     unchanged, so this is often the only signal that lets a recall connect
     the failure to a specific object instead of repeating the identical
     blind plan (confirmed directly: without it, a recall re-issued the exact
     same open-only plan, reasoning "no precomputed blockage flag is
     present"). Only used from the recall snapshot path -- the initial
-    snapshot goes through ``snapshot_scene_context``'s own gated call
+    snapshot goes through snapshot_scene_context's own gated call
     instead."""
     updated = copy.deepcopy(scene_context)
     entities = updated.get("entities", [])
@@ -897,7 +897,7 @@ def _annotate_drawer_clearance_conflicts(
     """Precompute, in code rather than leaving it to System 2's own arithmetic,
     which other objects sit too close to each drawer cabinet's own footprint
     to leave room for that drawer to open -- and stamp the verdict directly
-    onto that object's entity ``notes`` (mutated in place).
+    onto that object's entity notes (mutated in place).
 
     This exists because asking the LLM to do this distance/threshold
     computation itself (rule 15a in prompts.py) turned out unreliable in
@@ -956,7 +956,7 @@ def _annotate_drawer_approach_corridor(
     """Flag objects sitting in the straight line the gripper must travel to
     reach a drawer handle.
 
-    Distinct from ``_annotate_drawer_clearance_conflicts``, which asks whether
+    Distinct from _annotate_drawer_clearance_conflicts, which asks whether
     an object fouls the *drawer's own swing*. That misses the other way a
     drawer becomes unopenable: the handle stays perfectly clear while the
     space the *arm* needs to get to it does not. Measured on the middle
@@ -1322,14 +1322,14 @@ def apply_libero_experiment_geometry(scene_context: dict[str, Any]) -> dict[str,
 
 
 def bddl_goal_object_names(bddl_file: str | Path | None) -> list[str]:
-    """Object instances named in a BDDL ``:goal`` block, in the order they
+    """Object instances named in a BDDL :goal block, in the order they
     appear -- conventionally the manipulated object first, then what it must end
     up on/in.
 
     Read from the BDDL rather than from the language string or from discovered
     entity roles: the goal is the task's own machine-readable statement of which
     objects matter, and it stays correct across init states and across the role
-    guesses in ``role_for_object_name``.
+    guesses in role_for_object_name.
     """
     if not bddl_file:
         return []
@@ -1367,15 +1367,15 @@ def relocate_obstacle_into_path(env: Any, scene_context: dict[str, Any], bddl_fi
     it in another.
 
     The obstacle is NOT placed on the segment itself. It goes on the
-    perpendicular bisector, offset by ``h``, which is what makes the placement
-    solvable on short spans: at offset ``h`` the distance to the path is ``h``
-    (so the constraint binds while ``h < margin``) but the distance to each
-    endpoint is ``hypot(span/2, h)``, which grows with ``h`` and can exceed the
-    margin even when ``span/2`` alone does not. Placing the obstacle on the line
-    instead forces ``span >= 2*margin``, which fails on the many LIBERO tasks
+    perpendicular bisector, offset by h, which is what makes the placement
+    solvable on short spans: at offset h the distance to the path is h
+    (so the constraint binds while h < margin) but the distance to each
+    endpoint is hypot(span/2, h), which grows with h and can exceed the
+    margin even when span/2 alone does not. Placing the obstacle on the line
+    instead forces span >= 2*margin, which fails on the many LIBERO tasks
     whose pick and goal are barely 12cm apart.
 
-    So ``h`` is chosen from the window
+    So h is chosen from the window
 
         h >= sqrt((margin + buffer)^2 - (span/2)^2)   # endpoints stay reachable
         h <= margin - buffer                          # the path still violates

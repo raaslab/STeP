@@ -167,7 +167,7 @@ def test_rim_edge_yaw_closes_radially(libero_scene):
         theta = c.metadata["rim_angle_rad"]
         radial_dir = np.array([np.cos(theta), np.sin(theta)])
         yaw = c.metadata["yaw_rad"]
-        close_axis = np.array([-np.sin(yaw), np.cos(yaw)])
+        close_axis = np.array([np.cos(yaw), np.sin(yaw)])
         # Parallel or anti-parallel to the radial direction (a parallel-jaw
         # gripper's closing axis is symmetric, so either sign is correct).
         assert abs(np.dot(close_axis, radial_dir)) > 0.999
@@ -180,7 +180,7 @@ def test_zero_yaw_top_down_quat_is_wxyz_0100():
     version, this no longer goes through the full generator, since the
     actual candidate yaw is now fit to each object's real geometry (see
     grasp_generator._object_xy_obb_world) and generally isn't 0.
-    ``test_generates_top_down_approach`` already covers that every generated
+    test_generates_top_down_approach already covers that every generated
     candidate points straight down regardless of its yaw."""
     from step.system_one.skills.pick.grasp_generator import _TOP_DOWN_QUAT_WXYZ
     from step.system_one.motion.scene_query import quat_mul_wxyz, quat_to_rotmat_wxyz
@@ -223,7 +223,7 @@ def test_grasp_height_clamped_above_palm_clearance(libero_scene):
     """For a short/squat object, the plain AABB-center height would put the
     palm's own collision geometry into the object's top (the palm is a real,
     sizeable mesh, not a point at the TCP -- see
-    ``SceneQuery.palm_clearance_above_tcp_m``'s docstring). The generator
+    SceneQuery.palm_clearance_above_tcp_m's docstring). The generator
     must raise the grasp height above that plain center formula in this
     case, by exactly the configured clamp."""
     gen = PrivilegedTopDownGraspGenerator(GraspSampleConfig(num_yaw_samples=1))

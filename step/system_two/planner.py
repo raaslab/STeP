@@ -20,11 +20,11 @@ class DirectSTLPlanner:
         model: str | None = None,
         developer_prompt_fn: Callable[[dict[str, Any] | None], str] | None = None,
     ) -> None:
-        """`developer_prompt_fn` is an EXPERIMENTAL hook (see
-        STL_DECOMPOSITION_PLAN.md): pass `build_global_developer_prompt` (or
-        use `mode="stl_spec"`, see `for_mode`) to get the single-global-formula
+        """developer_prompt_fn is an EXPERIMENTAL hook (see
+        STL_DECOMPOSITION_PLAN.md): pass build_global_developer_prompt (or
+        use mode="stl_spec", see for_mode) to get the single-global-formula
         prompt variant instead of the default per-subtask one. Defaults to
-        today's `build_developer_prompt`, so existing callers are unaffected.
+        today's build_developer_prompt, so existing callers are unaffected.
         """
         api_key = os.environ.get("OPENAI_API_KEY", "").strip()
         if not api_key:
@@ -45,8 +45,8 @@ class DirectSTLPlanner:
         model: str | None = None,
     ) -> "DirectSTLPlanner":
         """EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md) convenience constructor.
-        `mode="skill_graph"` (default pipeline) or `mode="stl_spec"` (single
-        global formula, decomposed after the fact by `stl_plan.decompose`)."""
+        mode="skill_graph" (default pipeline) or mode="stl_spec" (single
+        global formula, decomposed after the fact by stl_plan.decompose)."""
         if mode == "stl_spec":
             prompt_fn = build_global_developer_prompt
         elif mode == "skill_graph":

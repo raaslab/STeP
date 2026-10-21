@@ -105,9 +105,9 @@ def _validate_interval(interval: Any, path: str) -> list[str]:
 def validate_global_stl_plan(plan: dict[str, Any]) -> ValidationResult:
     """EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md).
 
-    Validates the single-global-formula plan shape (``system2_plan.type ==
-    "stl_spec"``, a ``formula`` instead of ``subtasks``) produced by
-    ``build_global_developer_prompt`` / ``schemas/stl_global_plan_schema.json``.
+    Validates the single-global-formula plan shape (system2_plan.type ==
+    "stl_spec", a formula instead of subtasks) produced by
+    build_global_developer_prompt / schemas/stl_global_plan_schema.json.
     """
     errors: list[str] = []
     system2_plan = plan.get("system2_plan")
@@ -133,7 +133,7 @@ def validate_global_stl_plan(plan: dict[str, Any]) -> ValidationResult:
 # EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md): predicate-set -> skill lookup
 # used by decompose()/infer_skill_from_predicates() to replace the
 # natural-language skill-grounding rules (7-13/16) in the *legacy*
-# `build_developer_prompt`. Each key is the exact set of predicate names
+# build_developer_prompt. Each key is the exact set of predicate names
 # expected inside one top-level achievement-goal conjunct.
 PREDICATE_TO_SKILL: dict[frozenset[str], str] = {
     frozenset({"PreGrasp", "Grasped"}): "pick",
@@ -151,7 +151,7 @@ PREDICATE_TO_SKILL: dict[frozenset[str], str] = {
 class DecompositionError(ValueError):
     """Raised by decompose()/infer_skill_from_predicates() when a formula's
     top-level structure doesn't match a known, decomposable shape (e.g. a
-    top-level `implies`/`or`, or a predicate set with no registered skill)."""
+    top-level implies/or, or a predicate set with no registered skill)."""
 
 
 def infer_skill_from_predicates(formula: Formula) -> str:
@@ -175,9 +175,9 @@ def split_top_level_and(formula: Formula) -> tuple[list[Formula], list[Formula]]
     """EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md).
 
     Splits a global formula's top-level conjunction into (a) persistent
-    global constraints (top-level `always` conjuncts) and (b) the ordered
+    global constraints (top-level always conjuncts) and (b) the ordered
     sequential achievement goals (everything else), in source order. A
-    formula whose top level is not `and` is treated as one single sequential
+    formula whose top level is not and is treated as one single sequential
     goal with no global constraints (the single-atomic-goal task case).
     """
     if not isinstance(formula, dict):
@@ -307,9 +307,9 @@ def _constraint_covers_window(constraint: Formula, window: tuple[int, int] | Non
 
     Per Algorithm 3, a constraint (l, h, p) is "active" during a slice iff
     the slice's time range falls inside [l, h] -- an invariance constraint is
-    NOT automatically global just because it's a top-level `always`; a bounded
-    `always[a,b]` only covers subtasks whose own absolute window overlaps
-    [a,b]. `interval: null` (this repo's "holds for the entire task"
+    NOT automatically global just because it's a top-level always; a bounded
+    always[a,b] only covers subtasks whose own absolute window overlaps
+    [a,b]. interval: null (this repo's "holds for the entire task"
     convention, per rule 5a in build_global_developer_prompt) or a goal with
     no timed nodes of its own (window is None) always applies -- both cases
     correspond to a constraint whose bound already equals (or exceeds) the
@@ -329,12 +329,12 @@ def decompose(
 ) -> list[dict[str, Any]]:
     """EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md).
 
-    Deterministically derives the ordered `subtasks` list (today's
-    `stl_plan.py`/System 1/`stl_monitor.py` shape) from one global STL
-    formula, instead of the VLM emitting `subtasks` directly. Every top-level
-    `always` conjunct is a persistent constraint and is folded into every
+    Deterministically derives the ordered subtasks list (today's
+    stl_plan.py/System 1/stl_monitor.py shape) from one global STL
+    formula, instead of the VLM emitting subtasks directly. Every top-level
+    always conjunct is a persistent constraint and is folded into every
     subtask whose own absolute window it covers (see _constraint_covers_window
-    -- an unbounded/`interval: null` one covers all of them, matching today's
+    -- an unbounded/interval: null one covers all of them, matching today's
     prompt, which only ever asks for that shape); every other top-level
     conjunct becomes exactly one subtask, in source order (see
     split_top_level_and).
@@ -380,7 +380,7 @@ def decompose_and_validate(plan: dict[str, Any]) -> tuple[dict[str, Any] | None,
     """EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md).
 
     One-call wrapper around validate_global_stl_plan + decompose +
-    validate_stl_plan, for callers (e.g. `libero_runner.py`) that just want a
+    validate_stl_plan, for callers (e.g. libero_runner.py) that just want a
     subtasks-shape plan or a single, unified list of errors -- whichever
     stage failed. Returns (decomposed_plan, ok_result) on success, or
     (None, failing_result) otherwise.
@@ -415,26 +415,26 @@ _LEGACY_GRASP_SKILLS = {"grasp"}
 
 def normalize_legacy_pregrasp_grasp(subtasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Merge any adjacent (pregrasp, grasp)-shaped subtask pair into one
-    unified ``pick`` subtask.
+    unified pick subtask.
 
-    Compatibility boundary for the unified ``Pick(object_or_object_set,
-    constraints)`` skill (``step/system_one/motion/pick_skill.py``): externally,
-    System 1 now expects exactly one ``pick`` subtask per grasp, with
+    Compatibility boundary for the unified Pick(object_or_object_set,
+    constraints) skill (step/system_one/motion/pick_skill.py): externally,
+    System 1 now expects exactly one pick subtask per grasp, with
     PreGrasp/Grasped expressed as two predicate nodes *inside* that one
     subtask's formula -- which is already the only shape today's schema/
-    prompt (`schemas/stl_plan_schema.json`, `step/system_two/prompts.py` rule 7)
+    prompt (schemas/stl_plan_schema.json, step/system_two/prompts.py rule 7)
     ever produces. This function exists for any *external or legacy* plan data
     that might still emit them as two separate subtasks (e.g. an older
     task-spec compiler, a hand-authored eval plan, or a different System 2
     version) -- it is a no-op on any plan already shaped like today's.
 
     Detects a subtask pair shaped like separate pregrasp/grasp steps by either
-    (a) an explicit legacy ``skill`` value (``"pregrasp"``/``"grasp"``, not in
-    the current schema's enum) or (b) a ``pick``-skill subtask whose formula
-    contains only a ``PreGrasp`` predicate immediately followed by another
-    subtask for the same object whose formula contains only a ``Grasped``
-    predicate. Merges the pair into one ``pick`` subtask combining both
-    formulas under ``and`` and re-numbers ``subtask_id`` sequentially.
+    (a) an explicit legacy skill value ("pregrasp"/"grasp", not in
+    the current schema's enum) or (b) a pick-skill subtask whose formula
+    contains only a PreGrasp predicate immediately followed by another
+    subtask for the same object whose formula contains only a Grasped
+    predicate. Merges the pair into one pick subtask combining both
+    formulas under and and re-numbers subtask_id sequentially.
     """
     merged: list[dict[str, Any]] = []
     i = 0
@@ -508,7 +508,7 @@ def _merge_pregrasp_grasp(cur: dict[str, Any], nxt: dict[str, Any]) -> dict[str,
 
 
 def find_predicate_args(formula: Formula, name: str) -> list[Any] | None:
-    """Recursively find the first predicate node named `name` and return its args.
+    """Recursively find the first predicate node named name and return its args.
 
     Used to pull execution hints (e.g. an object-height arg on Grasped) out of
     a subtask's formula tree without needing a full STL interpreter.

@@ -22,10 +22,8 @@ from .scene_resolver import SceneResolver
 
 
 class VideoOverlayMixin:
-    # Minimum width (px) of the caption panel drawn beside the sim frame. The
-    # LIBERO agentview render is only 256px wide, which is far too narrow to
-    # read a prompt or an STL formula in; the panel is sized independently so
-    # widening it never shrinks the simulation image.
+    # Sized independently of the 256px agentview render so widening the
+    # caption panel never shrinks the simulation image.
     _PANEL_MIN_WIDTH = 620
 
     @staticmethod
@@ -86,7 +84,7 @@ class VideoOverlayMixin:
         The sim render is only 256px wide, so the previous below-the-frame bands
         had to wrap every line at 256px and ellipsized most of the prompt and
         essentially every STL formula. A side panel gets its own generous width
-        (``_PANEL_MIN_WIDTH``) without touching the sim image, which is pasted at
+        (_PANEL_MIN_WIDTH) without touching the sim image, which is pasted at
         its native resolution.
 
         All frames in an imageio/ffmpeg movie must have identical dimensions.
@@ -137,10 +135,7 @@ class VideoOverlayMixin:
         dummy = Image.new("RGB", (img.width, 10), "black")
         draw = ImageDraw.Draw(dummy)
 
-        # Budgets are generous now that lines are ~panel_w wide instead of
-        # ~256px: an STL formula like
-        # "(F[0,40](PreGrasp('akita_black_bowl_1','top')) & F[0,90](Grasped(...))) & G(Safe('cookies_1'))"
-        # fits in 3 lines here where it used to be truncated inside 2.
+        # Generous budgets: a full STL formula line can be long.
         prompt_max_lines = 3 if prompt else 0
         subtask_max_lines = 2
         stl_max_lines = 4
@@ -248,9 +243,9 @@ class VideoOverlayMixin:
         """Per-step hook for the ompl_mpc skill adapters.
 
         Those adapters drive the env directly instead of going through
-        ``step_nominal()``, so neither the video capture nor the LIBERO-
+        step_nominal(), so neither the video capture nor the LIBERO-
         Constrained margin sampler would otherwise see their steps. Both hang
-        off the single ``step_callback`` they already expose.
+        off the single step_callback they already expose.
         """
         self._capture_video_frame(env)
         self._sample_constraint_margins(env)
@@ -339,16 +334,8 @@ class VideoOverlayMixin:
         if project is None:
             return frame
 
-        # Table height, measured ONCE and then held fixed.
-        #
-        # Recomputing it per frame made the zone move: it was the median z of the
-        # scene objects, so lifting one raised the median and the zone was drawn
-        # higher, appearing to ride along with the carried object. On a two-object
-        # scene the median is just their mean, so a 20cm lift moved the zone 10cm.
-        #
-        # The minimum is used rather than the median because a zone is painted on
-        # the table, and the lowest object is the one actually resting on it --
-        # a median is pulled upward by anything tall or already stacked.
+        # Measured once and held fixed: recomputing per frame as a median would
+        # shift the zone whenever a carried object is lifted. Uses the minimum, not the median, since the lowest object is the one actually resting on the table.
         table_z = getattr(self, "_keepout_table_z", None)
         if table_z is None:
             try:
@@ -391,6 +378,56 @@ class VideoOverlayMixin:
             return frame
         return np.asarray(Image.alpha_composite(img, overlay).convert("RGB"), dtype=np.uint8)
 
+    def _draw_attached_collision_spheres(self, env: BaseManipulationEnv, frame: np.ndarray) -> np.ndarray:
+        """Paints the carried object's sphere-fit collision approximation
+        (what the attached-object margin check actually sees, not the object's real mesh)."""
+        attached = getattr(self, "_motion_attached_state", None)
+        if attached is None or not attached.collision_spheres_object_frame:
+            return frame
+        height, width = frame.shape[0], frame.shape[1]
+        project = self._keepout_projector(env, width, height)
+        if project is None:
+            return frame
+        sim = getattr(getattr(env, "env", None), "sim", None) or getattr(env, "sim", None)
+        if sim is None:
+            return frame
+        try:
+            from .motion.collision import compose_world_pose
+            from .motion.panda import EE_SITE
+            from .motion.scene_query import SceneQuery, quat_to_rotmat_wxyz
+            from PIL import Image, ImageDraw
+        except ImportError:
+            return frame
+
+        scene = SceneQuery.from_robosuite_sim(sim)
+        hand_pos, hand_quat = scene.site_pose(EE_SITE)
+        obj_pos, obj_quat = compose_world_pose(hand_pos, hand_quat, attached.grasp_transform_hand_from_object)
+        R_obj = quat_to_rotmat_wxyz(obj_quat)
+        cid = sim.model.camera_name2id(self.video_camera)
+        cam_right = np.asarray(sim.data.cam_xmat[cid], dtype=float).reshape(3, 3)[:, 0]
+
+        img = Image.fromarray(np.ascontiguousarray(frame)).convert("RGBA")
+        overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        drew = False
+        for local_offset, radius in attached.collision_spheres_object_frame:
+            center_world = obj_pos + R_obj @ local_offset
+            center_px = project(center_world)
+            edge_px = project(center_world + radius * cam_right)
+            if center_px is None or edge_px is None:
+                continue
+            # Perspective-correct screen radius -- a fixed pixel size would be
+            # wrong as the carried object moves nearer/farther from the camera.
+            r_px = math.hypot(edge_px[0] - center_px[0], edge_px[1] - center_px[1])
+            if r_px < 1.0:
+                continue
+            bbox = [center_px[0] - r_px, center_px[1] - r_px, center_px[0] + r_px, center_px[1] + r_px]
+            draw.ellipse(bbox, fill=(30, 144, 255, 90), outline=(30, 144, 255, 200), width=2)
+            drew = True
+        if not drew:
+            return frame
+        return np.asarray(Image.alpha_composite(img, overlay).convert("RGB"), dtype=np.uint8)
+
     def _capture_video_frame(self, env: BaseManipulationEnv, *, force: bool = False) -> None:
         if self.video_path is None:
             return
@@ -407,11 +444,10 @@ class VideoOverlayMixin:
             frame = np.flipud(frame)
         if self.video_flip_horizontal:
             frame = np.fliplr(frame)
-        # The keep-out is invisible in the simulator -- it is a region, not an
-        # object -- so a rollout video showed the arm apparently moving through
-        # empty table. Draw it into the frame, projected through the same camera,
-        # or the video cannot be used to judge a violation.
+        # The keep-out is a region, not an object, so it's invisible in the
+        # simulator; drawn here or the video can't be used to judge a violation.
         frame = self._draw_keepout_zones(env, frame)
+        frame = self._draw_attached_collision_spheres(env, frame)
         # Keep the robustness line live during the current subtask.
         self._video_current_robustness = self._format_video_robustness(env)
         frame = self._add_prompt_caption(
@@ -456,8 +492,6 @@ class VideoOverlayMixin:
     def _set_video_reflection_overlay(self, result: dict[str, Any] | None) -> None:
         if not isinstance(result, dict):
             return
-        # This field is now used for recall/replanning summaries. Keep the
-        # method name for backward compatibility with old reflection code.
         summary = str(result.get("recall_summary") or result.get("reflection_summary") or "").strip()
         if result.get("trigger") and not summary:
             summary = f"Recall trigger={result.get('trigger')}"

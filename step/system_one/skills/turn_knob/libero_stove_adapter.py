@@ -1,13 +1,9 @@
-"""Executor-facing adapter for the ``turn_on`` skill: wires ``TurnKnobSkill``'s
-grasp-knob + turn plan into a live ``LiberoManipulationEnv``.
-
-Mirrors ``LiberoOpenDrawerAdapter``'s structure (time-parameterize -> MPC
-descent -> close-gripper -> MPC turn -> retreat, same structural success
-check), swapping only the physically different part: the second leg tracks a
-rotation about the knob's axis (``turned_q``) instead of a slide-axis
-translation, and success reads the knob's final qpos against
-``KnobConfig.turn_on_qpos_threshold`` instead of a travel fraction.
-"""
+"""Executor-facing adapter for the turn_on skill: wires TurnKnobSkill's
+grasp-knob + turn plan into a live LiberoManipulationEnv, mirroring
+LiberoOpenDrawerAdapter's time-parameterize -> MPC descent ->
+close-gripper -> MPC turn -> retreat structure. The turn leg tracks a
+rotation about the knob's axis instead of a slide-axis translation, and
+success reads the knob's final qpos against KnobConfig.turn_on_qpos_threshold."""
 
 from __future__ import annotations
 
@@ -85,8 +81,6 @@ class LiberoStoveAdapter(_ServoMixin):
         steps = 0
         gripper_cmd = self.env.open_gripper_cmd
         descent_trace = MotionTraceRecorder()
-        # See ``track_and_settle``'s own docstring (servo.py) for the shared
-        # loop this wraps.
         descent_result = track_and_settle(
             self,
             full_reference,
@@ -117,8 +111,7 @@ class LiberoStoveAdapter(_ServoMixin):
         steps += descent_result.steps
         plan_result.diagnostics["settle"] = descent_result.as_diagnostics()
 
-        # Close the gripper on the knob before tracking the turn leg -- same
-        # reasoning as OpenDrawerSkill's pull leg.
+        # Close the gripper on the knob before tracking the turn leg.
         gripper_cmd = self.env.close_gripper_cmd
         close_dwell_steps = max(int(self.env.close_steps) * 2, 25)
         for _ in range(close_dwell_steps):
@@ -128,9 +121,8 @@ class LiberoStoveAdapter(_ServoMixin):
             if step_callback is not None:
                 step_callback()
 
-        # Diagnostic only (not a hard gate) -- same fingerpad<->target contact
-        # test CollisionChecker itself uses to decide permitted contact,
-        # mirrors LiberoOpenDrawerAdapter's own handle_grip_verification.
+        # Diagnostic only, not a hard gate -- the same fingerpad<->target
+        # contact test CollisionChecker uses to decide permitted contact.
         grip_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
         knob_geom_ids = set(grip_scene.body_geom_ids(knob_body))
         gripped_knob = any(
@@ -141,10 +133,8 @@ class LiberoStoveAdapter(_ServoMixin):
         )
         plan_result.diagnostics["knob_grip_verification"] = {"gripped": gripped_knob}
 
-        # Track the turn leg with its own fresh MPC-tracked reference (not a
-        # continuation of the pre-grasp approach) -- same settle-to-
-        # convergence pattern as the descent phase, for the same reason as
-        # LiberoOpenDrawerAdapter's pull leg.
+        # Fresh MPC-tracked reference for the turn leg, not a continuation of
+        # the pre-grasp approach -- same settle-to-convergence pattern as the descent phase.
         turned_q = np.asarray(plan_result.planned_trajectory.metadata["turned_q"])
         turn_fraction_used = float(plan_result.diagnostics.get("turn_fraction_used") or 0.0)
         current_qpos = float(plan_result.diagnostics["current_qpos"])
@@ -156,9 +146,8 @@ class LiberoStoveAdapter(_ServoMixin):
         current_q = SceneQuery.from_robosuite_sim(self.env.env.sim).get_qpos(self.joint_names)
         turn_reference = np.linspace(current_q, turned_q, 20)
         turn_trace = MotionTraceRecorder()
-        # check_orientation_convergence=False: the hand rotates with the knob,
-        # so checking against the fixed pre-turn orientation would never
-        # converge; only position gates the settle here.
+        # check_orientation_convergence=False: the hand rotates with the
+        # knob, so the fixed pre-turn orientation would never converge; only position gates the settle.
         turn_result = track_and_settle(
             self,
             turn_reference,
@@ -208,9 +197,8 @@ class LiberoStoveAdapter(_ServoMixin):
             "turned_on": qpos_final >= threshold,
         }
 
-        # Release and retreat along the knob's own axis regardless of
-        # outcome -- not back toward the pre-turn grasp pose, since the hand
-        # has rotated with the knob and "backward" would twist back into it.
+        # Retreat along the knob's own axis, not back toward the pre-turn
+        # grasp pose -- the hand has rotated with the knob, so "backward" would twist back into it.
         gripper_cmd = self.env.open_gripper_cmd
         retreat_target = turned_position + self.config.knob.retreat_m * axis_world
         retreat_trace = MotionTraceRecorder()
@@ -229,9 +217,8 @@ class LiberoStoveAdapter(_ServoMixin):
                 real_nonpermitted_contacts(post_scene, checker, CollisionPhase.TERMINAL_APPROACH, knob_body),
             )
 
-        # Re-check after retreating, not before -- the retreat is itself a
-        # contactful motion right next to the knob, so only the post-retreat
-        # qpos reflects its true final state.
+        # Re-check after retreating: the retreat is itself a contactful
+        # motion near the knob, so only post-retreat qpos reflects the true final state.
         post_retreat_scene = SceneQuery.from_robosuite_sim(self.env.env.sim)
         qpos_post_retreat = float(post_retreat_scene.get_qpos([knob.joint_name])[0])
         plan_result.diagnostics["turn_on_verification"]["qpos_post_retreat"] = qpos_post_retreat

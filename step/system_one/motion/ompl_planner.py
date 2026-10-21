@@ -1,16 +1,13 @@
 """Joint-space OMPL RRTConnect motion planner.
 
-Verified against the OMPL 2.0.2 (conda-forge, nanobind-based) Python bindings
-actually installed in this environment -- that binding's API differs from the
-older Boost.Python OMPL wrapper (no ``ob.ScopedState``/``StateValidityCheckerFn``;
-states come from ``SpaceInformation.allocState()`` and the validity checker is
-just a plain Python callable).
+Targets the OMPL 2.0.2 (conda-forge, nanobind) Python bindings actually
+installed here, whose API differs from the older Boost.Python wrapper (states
+come from SpaceInformation.allocState(), validity checker is a plain callable).
 
-Never falls back to unchecked straight-line interpolation: if OMPL can't be
-imported, every call raises ``PlannerUnavailableError`` with a structured
-``MotionPlan(success=False, failure_reason=PLANNER_UNAVAILABLE)`` available via
-``MotionPlanner.unavailable_plan()`` for callers that want a typed result
-instead of an exception.
+Never falls back to unchecked straight-line interpolation -- if OMPL isn't
+available, every call returns a structured
+MotionPlan(success=False, failure_reason=PLANNER_UNAVAILABLE) via
+MotionPlanner.unavailable_plan().
 """
 
 from __future__ import annotations
@@ -91,17 +88,13 @@ class MotionPlanner:
         goal_container_body: str | None = None,
         permitted_contact_geom_ids: set[int] | None = None,
     ) -> MotionPlan:
-        """Plan from ``start_q`` to the best-reachable of ``goal_qs`` (already
-        IK-filtered by the caller -- e.g. ``PickSkill`` tries several grasp
-        candidates' IK solutions as alternate goals for one plan call).
+        """Plan from start_q to the best-reachable of goal_qs (already
+        IK-filtered by the caller).
 
-        Note for callers wrapping this in a "retry planning_attempts times"
-        loop: retrying this exact (start_q, goal_qs) pair does *not* resample
-        a different solution. OMPL seeds its global RNG once per process and
-        refuses later reseeds, so repeated identical calls return
-        byte-identical paths. Retries only help when something about the
-        problem itself differs; to get a better path, give a better goal
-        (see ``TransportSkill``'s nearest-configuration hover-IK selection).
+        Retrying this exact (start_q, goal_qs) pair does *not* resample a
+        different solution: OMPL seeds its global RNG once per process and
+        refuses later reseeds, so identical calls return identical paths.
+        Retries only help when the problem itself differs.
         """
         if not OMPL_AVAILABLE:
             return self.unavailable_plan()
@@ -141,13 +134,8 @@ class MotionPlanner:
                 planning_time_sec=time.time() - t0,
             )
 
-        # Try the trivial straight-line joint-space path to each goal before
-        # invoking a sampling planner at all. RRTConnect returns whatever its
-        # trees happen to connect -- feasible, but with no guarantee of being
-        # direct, and simplification can't recover a direct path it never
-        # found. When the straight line is already collision-free (the
-        # common case for a short hop through open space) it's both optimal
-        # and deterministic, so there's nothing to gain from sampling.
+        # Try the straight-line path first -- RRTConnect returns whatever its
+        # trees connect, not necessarily direct, and simplification can't recover a path it never found.
         edge_resolution = self.config.validity_resolution * float(
             np.max(self.joint_limits_hi - self.joint_limits_lo)
         )
@@ -204,11 +192,8 @@ class MotionPlanner:
                 planning_time_sec=planning_time,
             )
         if str(solved) != "Exact solution":
-            # OMPL's "Approximate solution" means RRTConnect's tree never
-            # actually connected start and goal within budget -- it just
-            # hands back the path to whichever tree node ended up closest.
-            # Treating that as success would silently execute a trajectory
-            # that never reaches the intended target, so it's a failure here.
+            # "Approximate solution" means the trees never actually connected
+            # within budget; treating it as success would execute a path that never reaches the target.
             reason = (
                 PlannerFailureReason.APPROXIMATE_SOLUTION_ONLY
                 if str(solved) == "Approximate solution"
@@ -229,8 +214,7 @@ class MotionPlanner:
         )
 
         # Defense-in-depth: re-validate the whole interpolated path at our own
-        # configurable resolution, independent of OMPL's internal edge
-        # checking during the search itself (never trust vertices alone).
+        # resolution, independent of OMPL's internal edge checking (never trust vertices alone).
         for i in range(len(waypoints) - 1):
             edge = self.collision_checker.check_edge(
                 waypoints[i],

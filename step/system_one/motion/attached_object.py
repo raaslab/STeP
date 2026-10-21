@@ -1,20 +1,14 @@
-"""Attached-object lifecycle: once a grasp is verified, the object's collision
-geometry rides along with the gripper for the rest of planning/execution
-(lift, transport, place) instead of sitting in the static world at its
-pre-grasp resting pose.
+"""Attached-object lifecycle: once a grasp is verified, the object's
+collision geometry rides along with the gripper for the rest of
+planning/execution instead of sitting in the static world at its pre-grasp
+resting pose.
 
-Mirrors Cap-X's ``curobo_api.attach_objects_to_robot``/``plan_with_grasped_
-object`` pattern in spirit (record a grasp-relative transform, stop treating
-the object as a free-standing world obstacle) but adapted to
-``CollisionChecker``/``SceneQuery`` instead of cuRobo's sphere-fit
-``WorldConfig``. See ``collision.py``'s ``compose_world_pose``, which
-re-derives the object's hypothetical world pose from the gripper's current FK
-pose plus the stored transform on every collision check -- so there's no
-separate "remove from world" bookkeeping needed: once an
-``AttachedObjectState`` is passed into ``CollisionChecker.check(...,
-attached=...)``, the object follows the gripper for that check and its
-original resting-pose geoms are simply not queried as a free-standing
-obstacle.
+Mirrors Cap-X's curobo_api.attach_objects_to_robot pattern in spirit
+(record a grasp-relative transform, stop treating the object as a
+free-standing obstacle), adapted to CollisionChecker/SceneQuery.
+collision.compose_world_pose re-derives the object's hypothetical world
+pose from the gripper's FK on every check, so no separate "remove from
+world" bookkeeping is needed.
 """
 
 from __future__ import annotations
@@ -26,25 +20,19 @@ from .types import AttachedObjectState
 
 
 def attached_sphere_infeasible_for_goal(attached: AttachedObjectState, goal_radius_m: float | None) -> bool:
-    """Whether the attached object's own sphere approximation is provably
-    too large to ever fit within a goal region of radius ``goal_radius_m``,
-    regardless of how the arm approaches it.
+    """Whether the attached object's sphere approximation is provably too
+    large to ever fit within a goal region of radius goal_radius_m,
+    regardless of approach.
 
-    The sphere fit (see ``fit_spheres_from_geoms``) bins the object along its
-    longest local axis -- correct for an elongated object but structurally
-    unable to shrink for a flat, plate-shaped one resting on its edge (e.g. a
-    book standing upright), since every cross-section perpendicular to its
-    height stays close to its full face. A thin book carried toward a narrow
-    caddy slot can then be geometrically impossible for the *sphere* to
-    clear even though the real object would fit fine, and the MPC's
-    clearance cost fights that unwinnable conflict for the whole transport.
+    The sphere fit bins the object along its longest axis, which can't
+    shrink for a flat, plate-shaped object resting on its edge (e.g. a book
+    standing upright) -- a thin book toward a narrow caddy slot can be
+    geometrically impossible for the sphere to clear even though the real
+    object fits fine, fighting the MPC's clearance cost for the whole leg.
 
-    Conservative in the safe direction: if every one of the object's fitted
-    spheres already exceeds the goal's radius, no sphere among them could
-    ever satisfy a clearance test there, so it's better to stop treating the
-    (over-approximated) carried object as an obstacle for the rest of this
-    leg and let the arm reach the goal, than to keep contorting the plan
-    away from a conflict the real object may not even have.
+    Conservative: if every fitted sphere already exceeds the goal radius,
+    it's better to stop treating the carried object as an obstacle for the
+    rest of this leg than keep contorting the plan away from an unwinnable conflict.
     """
     if goal_radius_m is None or not attached.collision_spheres_object_frame:
         return False
@@ -53,18 +41,14 @@ def attached_sphere_infeasible_for_goal(attached: AttachedObjectState, goal_radi
 
 
 def fit_spheres_to_extent(extent: BodyExtent, n_spheres: int = 3) -> list[tuple[np.ndarray, float]]:
-    """Approximate a body's AABB as ``n_spheres`` spheres spread along its
+    """Approximate a body's AABB as n_spheres spheres spread along its
     longest axis, each sized to circumscribe the cross-section rectangle
-    perpendicular to that axis (radius = hypotenuse of the other two half-
-    extents) -- can only over-cover the true geometry, never under-cover it,
-    matching the "must not underestimate the object" rule used elsewhere in
-    this pipeline.
+    perpendicular to that axis -- can only over-cover the true geometry,
+    never under-cover it.
 
-    A single sphere (n_spheres=1) is fine for roughly cube-shaped/round
-    objects but very conservative for anything elongated; more spheres
-    tighten the approximation along the long axis. Returned offsets are in
-    the body's own local frame (relative to its origin, already including
-    ``extent.center_offset``).
+    A single sphere is conservative for anything elongated; more spheres
+    tighten the fit along the long axis. Offsets are in the body's own
+    local frame (including extent.center_offset).
     """
     he = np.asarray(extent.half_extents, dtype=np.float64)
     axis = int(np.argmax(he))
@@ -83,55 +67,85 @@ def fit_spheres_to_extent(extent: BodyExtent, n_spheres: int = 3) -> list[tuple[
 
 
 def fit_spheres_from_geoms(scene: SceneQuery, body_name: str, n_spheres: int = 3) -> list[tuple[np.ndarray, float]]:
-    """Fit ``n_spheres`` collision spheres directly from a body's real
-    collision geoms' extreme surface points (box corners / round-primitive
-    rings, see ``SceneQuery.body_surface_points_local``), grouped into bins
-    along the body's longest local axis; each bin sphere is sized to
-    enclose every sample point that falls in it.
+    """Fit n_spheres collision spheres from a body's real collision
+    geoms' extreme surface points, grouped into bins along the body's
+    longest local axis; each sphere encloses every sample point in its bin.
 
-    Tighter than ``fit_spheres_to_extent``'s "treat the whole merged AABB as
-    a worst-case rectangle, use its diagonal" formula whenever the true
-    shape is round or irregular. LIBERO objects are commonly
-    convex-decomposed into many thin wedge-shaped pieces circling a round
-    profile, and the union of their individually-rotated AABBs describes a
-    shape closer to a square than the circle those wedges actually tile --
-    taking that square's diagonal as the fitted radius overestimates enough
-    to make placement candidates above a modestly-sized basket read as
-    colliding with the rim. Sampling real surface points and fitting
-    directly to those avoids compounding that error across neighboring
-    pieces.
+    Tighter than fit_spheres_to_extent's merged-AABB-diagonal formula
+    whenever the true shape is round or irregular: LIBERO objects are often
+    convex-decomposed into wedges circling a round profile, whose unioned
+    AABBs describe a shape closer to a square than the circle they tile,
+    overestimating enough to make placements above a basket read as
+    colliding with the rim.
 
-    Still guaranteed to never under-cover the real geometry, since every
-    sampled point is a true point on (or just outside, for the
-    round-primitive ring) the geom's surface. Falls back to
-    ``fit_spheres_to_extent`` if the body has no discrete collision geoms.
+    An elongated cross-section (e.g. a moka pot's handle) is binned along
+    its second axis too; one sphere per long-axis slice made the pot ~2x its
+    real width, so two pots could never fit side by side on a burner.
+
+    Fit on dense face samples, then any sample left outside every sphere
+    grows its nearest sphere, so the sample set is always fully covered.
+    Falls back to fit_spheres_to_extent if the body has no discrete collision geoms.
     """
-    points = scene.body_surface_points_local(body_name)
+    points_per_edge = 16
+    points = scene.body_surface_points_dense_local(body_name, points_per_edge=points_per_edge)
     if len(points) == 0:
         extent = scene.body_extent_local(body_name)
         return fit_spheres_to_extent(extent, n_spheres) if extent is not None else [(np.zeros(3), 0.05)]
 
     span = points.max(axis=0) - points.min(axis=0)
-    axis = int(np.argmax(span))
-    lo, hi = float(points[:, axis].min()), float(points[:, axis].max())
-    n = max(1, int(n_spheres))
-    edges = np.linspace(lo, hi, n + 1)
-    edges[-1] += 1e-9  # inclusive of the max-position point on the last bin
+    long_ax, mid_ax, short_ax = (int(a) for a in np.argsort(span)[::-1])
+    ratio = float(span[mid_ax]) / max(float(span[short_ax]), 1e-6)
+    n_long = max(1, int(n_spheres))
+    n_mid = min(3, int(np.ceil(1.5 * ratio))) if ratio > 1.3 else 1
 
-    spheres: list[tuple[np.ndarray, float]] = []
-    for i in range(n):
-        mask = (points[:, axis] >= edges[i]) & (points[:, axis] < edges[i + 1])
-        if not np.any(mask):
-            continue
-        member_pts = points[mask]
-        center = member_pts.mean(axis=0)
-        radius = float(np.max(np.linalg.norm(member_pts - center, axis=1)))
-        spheres.append((center, radius))
-    if not spheres:
+    def _bin_index(values: np.ndarray, n: int) -> np.ndarray:
+        lo, hi = float(values.min()), float(values.max())
+        if n == 1 or hi - lo < 1e-9:
+            return np.zeros(len(values), dtype=int)
+        return np.minimum(((values - lo) / (hi - lo) * n).astype(int), n - 1)
+
+    long_bin = _bin_index(points[:, long_ax], n_long)
+    mid_bin = _bin_index(points[:, mid_ax], n_mid)
+    centers: list[np.ndarray] = []
+    radii: list[float] = []
+    for i in range(n_long):
+        for j in range(n_mid):
+            member_pts = points[(long_bin == i) & (mid_bin == j)]
+            if len(member_pts) == 0:
+                continue
+            center = member_pts.mean(axis=0)
+            centers.append(center)
+            radii.append(float(np.max(np.linalg.norm(member_pts - center, axis=1))))
+    if not centers:
         center = points.mean(axis=0)
-        radius = float(np.max(np.linalg.norm(points - center, axis=1)))
-        spheres.append((center, radius))
-    return spheres
+        return [(center, float(np.max(np.linalg.norm(points - center, axis=1))))]
+
+    center_arr = np.asarray(centers)
+    radius_arr = np.asarray(radii)
+    dists = np.linalg.norm(points[:, None, :] - center_arr[None, :, :], axis=2)
+    uncovered = np.all(dists > radius_arr[None, :], axis=1)
+    for k in np.nonzero(uncovered)[0]:
+        nearest = int(np.argmin(dists[k] - radius_arr))
+        radius_arr[nearest] = max(radius_arr[nearest], float(dists[k, nearest]))
+    # Pad by half the face-sample spacing so geometry between samples stays covered.
+    radius_arr += 0.5 * float(np.max(span)) / (points_per_edge - 1)
+    return [(c, float(r)) for c, r in zip(center_arr, radius_arr)]
+
+
+def refresh_grasp_transform(attached: AttachedObjectState, scene: SceneQuery, hand_site: str) -> None:
+    """Re-read the hand-to-object transform from the live sim. A heavy or
+    off-center object (e.g. a moka pot held near its lid) pivots in the
+    fingers after attach, leaving the spheres at the grasp-time pose while the
+    real object swings into neighbors. Only call while it's actually held."""
+    hand_pos, hand_quat = scene.site_pose(hand_site)
+    obj_pos, obj_quat = scene.body_pose(attached.object_name)
+    T_hand = np.eye(4)
+    T_hand[:3, :3] = quat_to_rotmat_wxyz(hand_quat)
+    T_hand[:3, 3] = hand_pos
+    T_obj = np.eye(4)
+    T_obj[:3, :3] = quat_to_rotmat_wxyz(obj_quat)
+    T_obj[:3, 3] = obj_pos
+    attached.grasp_transform_hand_from_object = np.linalg.inv(T_hand) @ T_obj
 
 
 class AttachedObjectManager:
@@ -156,7 +170,7 @@ class AttachedObjectManager:
     ) -> AttachedObjectState:
         """Record the current object-to-hand transform and mark the object
         attached. Call this right after grasp verification succeeds (e.g. once
-        ``_is_grasped()`` first returns True), while the object is still at
+        _is_grasped() first returns True), while the object is still at
         its true grasped pose relative to the gripper."""
         hand_pos, hand_quat = scene.site_pose(hand_site)
         obj_pos, obj_quat = scene.body_pose(object_name)

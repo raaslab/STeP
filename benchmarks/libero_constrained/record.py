@@ -1,4 +1,4 @@
-"""Record a rollout in the shape `score.py` reads.
+"""Record a rollout in the shape score.py reads.
 
 Any policy can be scored on LIBERO-Constrained -- the measures only need where the
 gripper went, where the objects went, and whether the gripper was closed. This

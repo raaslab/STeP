@@ -179,8 +179,8 @@ class STLMonitorMixin:
     def _synthesized_formula_string(self, subtask: dict[str, Any]) -> str | None:
         """Human-readable fallback STL formula for reflected/replanned subtasks.
 
-        Reflection-generated subtasks often omit the compiled `formula` object,
-        which made the video overlay show `STL: —` after a replan. The executor
+        Reflection-generated subtasks often omit the compiled formula object,
+        which made the video overlay show STL: — after a replan. The executor
         can still reconstruct the intended high-level formula from skill+params.
         """
         if not isinstance(subtask, dict):

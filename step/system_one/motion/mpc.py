@@ -1,22 +1,15 @@
 """Joint-space receding-horizon MPC tracker.
 
-Restructured from ``step/system_one/nominal_mpc.py``'s ``STLCartesianMPC``:
-same overall shape (single-integrator rollout, Adam-warm-started differentiable
-cost, softplus barriers, STL timing-window costs), but the state is the 7-DoF
-joint configuration instead of a 3D Cartesian EE position, tracking a
-pre-planned, already-collision-checked time-parameterized OMPL path instead of
-a hand-tuned stage-machine's analytic waypoints.
+Single-integrator rollout optimized by Adam over softplus-barrier costs (STL
+timing windows included), tracking a pre-planned, collision-checked,
+time-parameterized OMPL path in 7-DoF joint space.
 
-Two cost tiers:
-
-* Tracking/terminal/control/smoothness/joint-limit costs are pure, cheap
-  functions of the joint-space rollout.
-* Clearance and STL-timing costs need the end-effector's Cartesian position,
-  via forward kinematics. Rather than finite-differencing through MuJoCo's
-  (non-differentiable) collision engine every iteration -- too slow for a
-  20 Hz control loop -- both costs are smooth penalties around a small set of
-  Cartesian anchor points, with gradients chained through the site Jacobian
-  (``SceneQuery.site_jacobian``) exactly rather than numerically.
+Two cost tiers: tracking/terminal/control/smoothness/joint-limit costs are
+cheap pure functions of the joint-space rollout; clearance and STL-timing
+costs need the end-effector's Cartesian position via FK, computed as smooth
+penalties around anchor points with gradients chained through the site
+Jacobian (exact, not finite-differenced -- MuJoCo's collision engine is
+non-differentiable and too slow for a 20 Hz loop).
 """
 
 from __future__ import annotations
@@ -41,9 +34,8 @@ def _softplus_grad(x: np.ndarray, beta: float = 8.0) -> np.ndarray:
 @dataclass
 class TimingWindow:
     """One STL "not-before start_step / deadline by end_step" constraint on an
-    end-effector-space event target, exactly as flattened by
-    ``executor._timing_windows_for_subtask`` today for the legacy MPC -- the
-    same flattening step feeds this one, only the destination changed."""
+    end-effector-space event target, as flattened by
+    executor._timing_windows_for_subtask."""
 
     predicate: str
     event_target_xyz: np.ndarray
@@ -59,9 +51,7 @@ class ObstacleSphere:
 
 
 # Bodies whose collision extent exceeds this along any axis are treated as
-# structure (table, floor, cabinet carcass), never as an "obstacle sphere" --
-# sphere-fitting something table-sized would repel the arm from the entire
-# tabletop, not just an object sitting on it.
+# structure (table, floor, cabinet), never an obstacle sphere -- sphere-fitting something that large would repel the arm from the whole tabletop.
 _OBSTACLE_MAX_HALF_EXTENT_M = 0.15
 
 
@@ -71,17 +61,13 @@ def build_static_obstacle_spheres(
     exclude_bodies: set[str],
     n_spheres: int = 1,
 ) -> list["ObstacleSphere"]:
-    """Sphere-approximate every body in ``candidate_body_names`` except
-    ``exclude_bodies`` (the current pick/place/open target, excluded by the
-    caller since it's the intended destination) so the MPC's clearance cost
-    (see ``JointSpaceMPC._clearance_cost_and_grad``) can actively push the
-    tracked trajectory away from real, un-planned-for clutter instead of
-    assuming the controller follows the pre-planned path closely enough that
-    whatever it avoided stays avoided.
+    """Sphere-approximate every body in candidate_body_names except
+    exclude_bodies (the current pick/place/open target), so the MPC's
+    clearance cost can actively push the tracked trajectory away from real
+    clutter instead of assuming the pre-planned path stays clear.
 
-    Static by design: called once per skill invocation, not per step, since
-    every candidate body is assumed not to move during the tracked motion. A
-    grasped/carried object is handled separately via ``AttachedObjectState``.
+    Static by design: called once per skill invocation, not per step. A
+    carried object is handled separately via AttachedObjectState.
     """
     from .attached_object import fit_spheres_from_geoms
 
@@ -286,9 +272,9 @@ class JointSpaceMPC:
         attached=None,
     ) -> MPCStepResult:
         """One receding-horizon tick: optimize a horizon of actions from
-        ``q_current``, return the *first* joint command, then shift the warm
+        q_current, return the *first* joint command, then shift the warm
         start for next tick (the actual "recede" happens because the caller
-        re-invokes ``step`` with the new ``q_current`` on the next control
+        re-invokes step with the new q_current on the next control
         tick -- this class holds no episode-long state besides the warm
         start)."""
         u = np.concatenate([self._prev_actions[1:], self._prev_actions[-1:]], axis=0)
