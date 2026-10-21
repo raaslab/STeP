@@ -12,10 +12,66 @@ same STL formula JSON that System 1 already executes.
 2. Capture a LIBERO scene image unless `--image` is supplied.
 3. Ask the LLM for a direct STL skill graph JSON.
 4. Validate the direct STL plan shape.
-5. Execute it with the legacy LIBERO System 1 executor.
+5. Execute it with System 1 (`step/system_one/`).
 
-The legacy executor is still reused from `../vlm-stl` for now, but STeP owns
-its default LIBERO configuration in `configs/`.
+## Installation
+
+STeP's own [pyproject.toml](pyproject.toml) only declares `openai` -- all the
+heavy lifting (LIBERO, robosuite, MuJoCo, contact-graspnet, OMPL) comes from
+a sibling [cap-x](https://github.com/capgym/cap-x) checkout that every
+`scripts/run_libero_*.py` adds to `sys.path` at runtime. Concretely, that
+means:
+
+- STeP and cap-x are expected to live next to each other, e.g.
+  `~/Documents/step/{STeP,cap-x}`.
+- Everything LIBERO-related runs with cap-x's `.venv-libero` (a uv venv,
+  Python 3.12) active -- not a venv inside STeP itself.
+
+Requires a Linux machine with a CUDA-capable GPU (for LIBERO/MuJoCo
+rendering and contact-graspnet) and Python 3.12.
+
+### Quick setup
+
+```bash
+cd STeP
+bash scripts/setup_env.sh
+```
+
+This clones cap-x as a sibling of STeP if it isn't already there, creates
+its `.venv-libero` uv venv with the `libero` + `contactgraspnet` extras,
+bridges in OMPL (see below), and writes `scripts/env.sh` with
+`CONTACT_GRASPNET_CHECKPOINT_DIR` pointed at the checkpoint bundled in
+cap-x's `contact_graspnet_pytorch` submodule -- `configs/libero_template.json`
+ships that setting blank on purpose, and without it every pick silently
+falls back to a heuristic grasp generator instead of the real model. Pass
+`--cap-x-root /path/to/cap-x` if you already have a checkout elsewhere.
+Re-running is safe; each step skips if already done.
+
+**OMPL** has no prebuilt PyPI wheel, so `uv sync` alone can't get you its
+Python bindings. The script bridges it in from a conda-forge build instead:
+it creates (or reuses) a small `ompl_bridge` conda env just to fetch
+prebuilt binaries, then copies the `ompl` package plus its own
+libstdc++/libgcc_s/boost into `.venv-libero` so it never touches your
+system's libstdc++. This needs `conda` on `PATH` once; nothing conda-related
+is required afterwards to run STeP. If `conda` isn't available, you'll need
+to get OMPL's Python bindings into `.venv-libero` some other way (e.g.
+building it from source against that venv's Python).
+
+### Before running anything
+
+```bash
+source ../cap-x/.venv-libero/bin/activate
+source scripts/env.sh
+export OPENAI_API_KEY=...
+```
+
+Sanity check:
+
+```bash
+python -c "from libero.benchmark import get_benchmark; print(get_benchmark('libero_spatial')().n_tasks)"
+```
+
+Should print `10`.
 
 Local LIBERO configs:
 

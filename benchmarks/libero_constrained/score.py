@@ -1,6 +1,6 @@
 """Score LIBERO-Constrained rollouts.
 
-Reads a rollout's `trajectory.npz` and `execution_summary.json` and returns, for
+Reads a rollout's trajectory.npz and execution_summary.json and returns, for
 each task, whether the task succeeded and whether its constraint held.
 
 Everything here is computed from signals any policy can log -- per-step
@@ -54,7 +54,7 @@ def track(roll, name):
 
 
 def first_arrival(roll, obj, dest):
-    """Step at which `obj` first comes within ARRIVAL_RADIUS_M of `dest` in xy."""
+    """Step at which obj first comes within ARRIVAL_RADIUS_M of dest in xy."""
     a, b = track(roll, obj), track(roll, dest)
     if a is None or b is None:
         return None

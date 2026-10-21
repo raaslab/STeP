@@ -2,10 +2,10 @@ import numpy as np
 import pytest
 
 from conftest import HAND_SITE, requires_libero
-from step.system_one.motion.config import GraspSampleConfig
-from step.system_one.motion.skills.grasp_generator import (
+from step.system_one.skills.pick.grasp_generator import (
     CompositeGraspGenerator,
     GraspGenerator,
+    GraspSampleConfig,
     PrivilegedTopDownGraspGenerator,
     hand_from_fingertip_pose,
     yaw_quat_wxyz,
@@ -146,7 +146,7 @@ def test_rim_edge_gated_by_object_class(libero_scene):
     cands = gen.generate(libero_scene, ["alphabet_soup_1_main"])
     assert not any(c.metadata["strategy"] == "rim_edge" for c in cands)
 
-    from step.system_one.motion.skills.grasp_generator import _is_rim_graspable_object_class
+    from step.system_one.skills.pick.grasp_generator import _is_rim_graspable_object_class
 
     assert _is_rim_graspable_object_class("akita_black_bowl_1_main")
     assert _is_rim_graspable_object_class("glazed_rim_porcelain_ramekin_1_main")
@@ -167,7 +167,7 @@ def test_rim_edge_yaw_closes_radially(libero_scene):
         theta = c.metadata["rim_angle_rad"]
         radial_dir = np.array([np.cos(theta), np.sin(theta)])
         yaw = c.metadata["yaw_rad"]
-        close_axis = np.array([-np.sin(yaw), np.cos(yaw)])
+        close_axis = np.array([np.cos(yaw), np.sin(yaw)])
         # Parallel or anti-parallel to the radial direction (a parallel-jaw
         # gripper's closing axis is symmetric, so either sign is correct).
         assert abs(np.dot(close_axis, radial_dir)) > 0.999
@@ -180,9 +180,9 @@ def test_zero_yaw_top_down_quat_is_wxyz_0100():
     version, this no longer goes through the full generator, since the
     actual candidate yaw is now fit to each object's real geometry (see
     grasp_generator._object_xy_obb_world) and generally isn't 0.
-    ``test_generates_top_down_approach`` already covers that every generated
+    test_generates_top_down_approach already covers that every generated
     candidate points straight down regardless of its yaw."""
-    from step.system_one.motion.skills.grasp_generator import _TOP_DOWN_QUAT_WXYZ
+    from step.system_one.skills.pick.grasp_generator import _TOP_DOWN_QUAT_WXYZ
     from step.system_one.motion.scene_query import quat_mul_wxyz, quat_to_rotmat_wxyz
 
     q = quat_mul_wxyz(yaw_quat_wxyz(0.0), _TOP_DOWN_QUAT_WXYZ)
@@ -223,7 +223,7 @@ def test_grasp_height_clamped_above_palm_clearance(libero_scene):
     """For a short/squat object, the plain AABB-center height would put the
     palm's own collision geometry into the object's top (the palm is a real,
     sizeable mesh, not a point at the TCP -- see
-    ``SceneQuery.palm_clearance_above_tcp_m``'s docstring). The generator
+    SceneQuery.palm_clearance_above_tcp_m's docstring). The generator
     must raise the grasp height above that plain center formula in this
     case, by exactly the configured clamp."""
     gen = PrivilegedTopDownGraspGenerator(GraspSampleConfig(num_yaw_samples=1))
@@ -296,7 +296,7 @@ def test_width_estimate_matches_real_obb_and_is_minimal_at_optimum(libero_scene)
     yaws, (b) never be less than the OBB's true short side (the physical
     minimum), and (c) hit exactly that minimum at the fitted-optimal yaw
     (offset 0, always one of the samples)."""
-    from step.system_one.motion.skills.grasp_generator import _object_xy_obb_world
+    from step.system_one.skills.pick.grasp_generator import _object_xy_obb_world
 
     gen = PrivilegedTopDownGraspGenerator(GraspSampleConfig(num_yaw_samples=8, yaw_search_half_range_rad=0.6))
     cands = gen.generate(libero_scene, ["alphabet_soup_1_main"])

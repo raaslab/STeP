@@ -1,8 +1,8 @@
 """Backend-agnostic manipulation environment.
 
 This module factors out everything that does not depend on whether we are
-running in robosuite or on a real UR3e. Concrete backends (``sim_env.py``,
-``real_env.py``) inherit from :class:`BaseManipulationEnv` and only need to
+running in robosuite or on a real UR3e. Concrete backends (sim_env.py,
+real_env.py) inherit from BaseManipulationEnv and only need to
 implement a small set of low-level hooks (read EE pose, read object pose,
 apply a Cartesian command, render a frame, etc).
 
@@ -45,8 +45,8 @@ class BaseManipulationEnv:
     """Common stage-machine + STL-MPC shell shared by sim and real backends.
 
     Subclasses must implement the low-level hooks listed under
-    :py:meth:`BaseManipulationEnv` (search for ``raise NotImplementedError``)
-    and call :py:meth:`_post_init_finalize` once their backend is ready.
+    BaseManipulationEnv (search for raise NotImplementedError)
+    and call _post_init_finalize once their backend is ready.
     """
 
     # ------------------------------------------------------------------ init
@@ -465,7 +465,7 @@ class BaseManipulationEnv:
         """Widen (never shrink) the workspace box so it covers known object
         positions, plus a margin.
 
-        `configs/libero_template.json`'s workspace_bounds is a single static
+        configs/libero_template.json's workspace_bounds is a single static
         box tuned for one scene layout (the kitchen-tabletop demo). Other
         scenes/suites place objects outside that box on some axis, which
         silently clips the pick/place target to the box edge and the arm can
@@ -531,15 +531,15 @@ class BaseManipulationEnv:
         """Reset the underlying simulator / real-robot connection.
 
         Returns a "raw observation" dict that subclasses can later look up via
-        ``_eef_pos`` / ``_cube_pos``. The dict's contents are backend specific.
+        _eef_pos / _cube_pos. The dict's contents are backend specific.
         """
         raise NotImplementedError
 
     def _step_backend(self, full_action: np.ndarray) -> tuple[Dict[str, Any], float, bool, Dict[str, Any]]:
         """Apply a normalized Cartesian action and step the backend by one tick.
 
-        ``full_action`` is shaped ``(action_dim_underlying,)`` and is already
-        clipped into ``[low, high]``. Returns ``(obs, base_reward, terminated, info)``
+        full_action is shaped (action_dim_underlying,) and is already
+        clipped into [low, high]. Returns (obs, base_reward, terminated, info)
         following the robosuite convention.
         """
         raise NotImplementedError
@@ -594,7 +594,7 @@ class BaseManipulationEnv:
     ) -> str:
         """Capture and save a fresh RGB frame of the current scene.
 
-        Default implementation reuses :py:meth:`render_rgb_frame`. Real
+        Default implementation reuses render_rgb_frame. Real
         backends override this to also flush the RealSense buffer.
         """
         from pathlib import Path as _Path
@@ -625,8 +625,8 @@ class BaseManipulationEnv:
         """Re-run perception against a fresh capture (real backend hook).
 
         Default is a no-op for sim. Real backends override to refresh
-        ``scene_objects`` from a fresh RealSense capture between prompts.
-        Returns the (possibly unchanged) ``scene_objects`` dict.
+        scene_objects from a fresh RealSense capture between prompts.
+        Returns the (possibly unchanged) scene_objects dict.
         """
         return dict(self.scene_objects)
 
@@ -656,7 +656,7 @@ class BaseManipulationEnv:
 
     def set_active_object_height(self, height: float | None) -> None:
         """Set the active object's known height (m), e.g. from the Grasped
-        predicate's height arg. Used by :meth:`_effective_grasp_rim_offset` to
+        predicate's height arg. Used by _effective_grasp_rim_offset to
         grasp at roughly mid-height instead of the object's base pose, for
         non-rim objects (cans, bottles, boxes) whose base is at table level.
         """

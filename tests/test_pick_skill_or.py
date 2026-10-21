@@ -2,11 +2,16 @@ import numpy as np
 
 from conftest import EE_SITE, GRIPPER_BODIES, JOINT_NAMES, ROBOT_BODIES, requires_libero
 from step.system_one.motion.collision import CollisionChecker
-from step.system_one.motion.config import GraspSampleConfig, MotionConfig, PlannerConfig
-from step.system_one.motion.skills.grasp_generator import CompositeGraspGenerator, GraspGenerator, PrivilegedTopDownGraspGenerator
+from step.system_one.motion.config import MotionConfig, PlannerConfig
+from step.system_one.skills.pick.grasp_generator import (
+    CompositeGraspGenerator,
+    GraspGenerator,
+    GraspSampleConfig,
+    PrivilegedTopDownGraspGenerator,
+)
 from step.system_one.motion.kinematics import IKSolver
 from step.system_one.motion.ompl_planner import MotionPlanner
-from step.system_one.motion.skills.pick_skill import PickSkill
+from step.system_one.skills.pick.pick_skill import PickSkill
 from step.system_one.motion.types import GraspCandidate, SkillFailureReason
 
 

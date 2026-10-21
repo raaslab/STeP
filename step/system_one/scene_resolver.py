@@ -42,7 +42,7 @@ class SceneResolver:
         return self.manipulated_object_names() | self.support_object_names()
 
     def canonical(self, name: str | None) -> str | None:
-        if name is None:
+        if not isinstance(name, str):
             return None
         lower = name.lower().strip()
         if lower in self.entity_aliases:
@@ -72,12 +72,12 @@ class SceneResolver:
     ) -> tuple[str, tuple[float, float], float | None, float, float]:
         """Returns (canonical_name, (x, y), z, radius, descend_radius).
 
-        ``z`` is ``None`` unless the entity's own geometry carries one (see
-        ``libero_scene.infer_cabinet_support_entities``, the first entity
+        z is None unless the entity's own geometry carries one (see
+        libero_scene.infer_cabinet_support_entities, the first entity
         type to populate it) -- most callers only ever needed XY since a
-        *movable* goal reference gets its Z from ``_object_pos_by_name``'s
+        *movable* goal reference gets its Z from _object_pos_by_name's
         own live tracking instead (a different code path in
-        ``base_env._goal_anchor``). A static fixture like a cabinet has no
+        base_env._goal_anchor). A static fixture like a cabinet has no
         live per-step object pose to read there, so its own measured
         geometry is the only source of a sensible place height -- without
         it, the legacy transport backend's own Z fallback (bare table

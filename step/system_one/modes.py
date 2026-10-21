@@ -38,6 +38,18 @@ RIM_GRASP_KEYWORDS: frozenset[str] = frozenset([
 # just wrong for this specific class.
 FORCE_MANUAL_KEYWORDS: frozenset[str] = frozenset()
 
+# Per-object-class yaw offset (radians), added to MANUAL_DEEP_CENTER_YAW_RAD
+# for ManualDeepCenterGraspGenerator's fixed pose. That generator's own
+# orientation is deliberately non-negotiable in general (see its docstring),
+# but a real demo scenario (a ketchup bottle sitting inside an open drawer,
+# close enough to the drawer's side wall that the default fixed yaw's finger
+# spread clips it) needed a one-off rotation to actually clear the cavity --
+# explicit ask, not a default worth generalizing. Keep this empty/near-empty;
+# add an entry only for a specific, confirmed-necessary case like this one.
+MANUAL_YAW_OVERRIDE_KEYWORDS: dict[str, float] = {
+    "ketchup": np.pi / 2.0,
+}
+
 
 @dataclass(frozen=True)
 class GraspMode:

@@ -1,29 +1,15 @@
 """Joint-space receding-horizon MPC tracker.
 
-Restructured from ``step/system_one/nominal_mpc.py``'s ``STLCartesianMPC``:
-same overall shape (single-integrator rollout, Adam-warm-started differentiable
-cost, softplus barriers, STL timing-window costs), but the state is now the
-7-DoF joint configuration instead of a 3D Cartesian EE position, tracking a
-pre-planned, already-collision-checked time-parameterized OMPL path instead of
-chasing a hand-tuned stage-machine's analytic waypoints.
+Single-integrator rollout optimized by Adam over softplus-barrier costs (STL
+timing windows included), tracking a pre-planned, collision-checked,
+time-parameterized OMPL path in 7-DoF joint space.
 
-Two cost tiers, both differentiable but for different reasons:
-
-* Tracking/terminal/control/smoothness/joint-limit costs are pure functions of
-  the joint-space rollout -- exactly as cheap and analytic as the legacy MPC's
-  Cartesian costs were.
-* Clearance and STL-timing costs need the end-effector's *Cartesian* position,
-  which requires forward kinematics. Rather than finite-differencing through
-  MuJoCo's (non-differentiable) collision engine every iteration -- which
-  would be far too slow for a 20 Hz control loop -- both costs are expressed
-  as smooth penalties around a small set of Cartesian anchor points (obstacle
-  centers / STL event targets), and their gradient w.r.t. the joint rollout is
-  obtained *exactly* (not numerically) by chaining the cost's Cartesian
-  gradient through the site Jacobian MuJoCo already gives us
-  (``SceneQuery.site_jacobian``, i.e. ``mj_jacSite``) -- no autodiff needed.
-  This mirrors the legacy MPC's own design (its SDF costs are also a fast
-  analytic *approximation* of true geometry, not full collision, with the
-  real 3D collision check instead gating planning and triggering replans).
+Two cost tiers: tracking/terminal/control/smoothness/joint-limit costs are
+cheap pure functions of the joint-space rollout; clearance and STL-timing
+costs need the end-effector's Cartesian position via FK, computed as smooth
+penalties around anchor points with gradients chained through the site
+Jacobian (exact, not finite-differenced -- MuJoCo's collision engine is
+non-differentiable and too slow for a 20 Hz loop).
 """
 
 from __future__ import annotations
@@ -48,9 +34,8 @@ def _softplus_grad(x: np.ndarray, beta: float = 8.0) -> np.ndarray:
 @dataclass
 class TimingWindow:
     """One STL "not-before start_step / deadline by end_step" constraint on an
-    end-effector-space event target, exactly as flattened by
-    ``executor._timing_windows_for_subtask`` today for the legacy MPC -- the
-    same flattening step feeds this one, only the destination changed."""
+    end-effector-space event target, as flattened by
+    executor._timing_windows_for_subtask."""
 
     predicate: str
     event_target_xyz: np.ndarray
@@ -66,11 +51,7 @@ class ObstacleSphere:
 
 
 # Bodies whose collision extent exceeds this along any axis are treated as
-# structure (table, floor, cabinet carcass), never as an "obstacle sphere" --
-# sphere-fitting something table-sized would repel the arm from the entire
-# tabletop, not just an object sitting on it. This is well above any real
-# LIBERO tabletop object (groceries/bowls/bottles all measure a few cm to
-# ~10cm) and well below furniture-scale structure.
+# structure (table, floor, cabinet), never an obstacle sphere -- sphere-fitting something that large would repel the arm from the whole tabletop.
 _OBSTACLE_MAX_HALF_EXTENT_M = 0.15
 
 
@@ -80,23 +61,13 @@ def build_static_obstacle_spheres(
     exclude_bodies: set[str],
     n_spheres: int = 1,
 ) -> list["ObstacleSphere"]:
-    """Sphere-approximate every body in ``candidate_body_names`` except
-    ``exclude_bodies`` (the current pick/place/open target is always
-    excluded by the caller -- it's the intended destination, not something
-    to steer away from) so the MPC's own clearance cost (see
-    ``JointSpaceMPC._clearance_cost_and_grad``) can actively push the
-    tracked trajectory away from real, un-planned-for clutter while it
-    tracks a reference, rather than blindly re-executing a pre-planned path
-    on the assumption the real controller follows it closely enough that
-    whatever the plan avoided stays avoided. Bodies larger than
-    ``_OBSTACLE_MAX_HALF_EXTENT_M`` (table, floor, cabinet carcass) are
-    skipped -- see that constant's docstring.
+    """Sphere-approximate every body in candidate_body_names except
+    exclude_bodies (the current pick/place/open target), so the MPC's
+    clearance cost can actively push the tracked trajectory away from real
+    clutter instead of assuming the pre-planned path stays clear.
 
-    Static by design: called once per skill invocation, not per step --
-    every candidate body is assumed not to move for the duration of the
-    tracked motion (true for every LIBERO object during a single pick/
-    place/open subtask; a grasped/carried object is handled separately via
-    ``AttachedObjectState``, not this obstacle list).
+    Static by design: called once per skill invocation, not per step. A
+    carried object is handled separately via AttachedObjectState.
     """
     from .attached_object import fit_spheres_from_geoms
 
@@ -301,9 +272,9 @@ class JointSpaceMPC:
         attached=None,
     ) -> MPCStepResult:
         """One receding-horizon tick: optimize a horizon of actions from
-        ``q_current``, return the *first* joint command, then shift the warm
+        q_current, return the *first* joint command, then shift the warm
         start for next tick (the actual "recede" happens because the caller
-        re-invokes ``step`` with the new ``q_current`` on the next control
+        re-invokes step with the new q_current on the next control
         tick -- this class holds no episode-long state besides the warm
         start)."""
         u = np.concatenate([self._prev_actions[1:], self._prev_actions[-1:]], axis=0)

@@ -1,11 +1,4 @@
-"""Environment construction from scene_context + runtime config.
-
-LIBERO-only: the legacy ``sim``/``real``/``vlabench`` backends (and their
-supporting modules -- ``sim_env.py``, ``real_env.py``, ``vlabench_env.py``,
-``robosuite_utils.py``, ``hardware/``, ``perception/``) were removed as part
-of the System 1 cleanup once the project's scope narrowed to LIBERO. See git
-history (pre-cleanup commits) if any of that needs to be resurrected.
-"""
+"""Environment construction from scene_context + runtime config. LIBERO-only."""
 
 from __future__ import annotations
 
@@ -27,18 +20,12 @@ def make_env_from_scene_context(
     platform = scene_context.get("platform", {})
     backend = platform.get("backend", "libero")
     if backend != "libero":
-        raise ValueError(
-            f"Unsupported platform.backend {backend!r}: this build of STeP only "
-            "implements the LIBERO backend. (The 'sim'/'real'/'vlabench' backends "
-            "were removed in the System 1 cleanup -- see git history.)"
-        )
+        raise ValueError(f"Unsupported platform.backend {backend!r}: only 'libero' is supported.")
 
     perception_cfg = platform.get("perception", {}) or {}
     placement_defaults = scene_context.get("placement_defaults", {}) or {}
     exec_proxy = scene_context.get("execution_proxy", {}) or {}
-    # Retreat height is a System-1 placement/execution parameter, not something
-    # System 2 should have to rediscover during replanning. Prefer
-    # placement_defaults, with backward-compatible fallbacks for older scenes.
+    # Prefers placement_defaults, with fallbacks for scenes that predate it.
     retreat_height_above_table = float(
         placement_defaults.get(
             "retreat_height_above_table",

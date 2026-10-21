@@ -125,9 +125,9 @@ def build_global_developer_prompt(scene_context: dict[str, Any] | None = None) -
     """EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md).
 
     Asks the VLM for one global STL formula for the whole task instead of a
-    pre-decomposed ``subtasks`` list. The ordered subtask sequence is derived
-    afterward by ``step/system_two/stl_plan.py:decompose()``, not by the model.
-    Not used by the default `build_developer_prompt` pipeline.
+    pre-decomposed subtasks list. The ordered subtask sequence is derived
+    afterward by step/system_two/stl_plan.py:decompose(), not by the model.
+    Not used by the default build_developer_prompt pipeline.
     """
     entity_lines = []
     if scene_context is not None:
@@ -324,7 +324,20 @@ def build_global_developer_prompt(scene_context: dict[str, Any] | None = None) -
         "-- if a fixture's notes carry neither flag, both open and close still need "
         "their own normal goal exactly as the task requires. This is independent of "
         "rule 11: a fixture can already satisfy Opened/Closed while the object the "
-        "task places into it still needs a normal pick/transport/place.\n\n"
+        "task places into it still needs a normal pick/transport/place.\n"
+        "13. MANDATORY CHECK before repeating an unchanged \"open\" or \"close\" goal "
+        "for the same fixture on a recall. Look up that fixture's own entity notes. "
+        "If they contain a \"[Precomputed: a previous attempt's <skill> subtask ... "
+        "did not succeed ...]\" flag, do NOT just repeat the identical bare goal "
+        "again -- that already failed once for a physical reason, not a planning "
+        "mistake. From the scene image and the canonical entities list, identify "
+        "whichever object is most plausibly responsible (for a drawer: an object "
+        "shown resting inside its open cavity, or sitting right in front of its "
+        "handle) and emit pick(object) -> transport(object, aside) -> place(object, "
+        "aside) -> <same skill>(fixture) instead, exactly like rule 9's sequence "
+        "(goal=\"table\", place_surface=\"top\" for the aside placement). Only skip "
+        "this if no entity plausibly explains the failure, in which case retry the "
+        "goal unchanged at most once more.\n\n"
         f"{scene_text}"
     )
 

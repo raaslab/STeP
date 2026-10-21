@@ -1,9 +1,9 @@
 """Shared fixtures for the motion-pipeline test suite.
 
-Tests that need a real LIBERO/MuJoCo scene are marked ``@pytest.mark.libero``
-and use the session-scoped ``libero_scene`` fixture (constructing the
+Tests that need a real LIBERO/MuJoCo scene are marked @pytest.mark.libero
+and use the session-scoped libero_scene fixture (constructing the
 robosuite/LIBERO env is the expensive part, ~1-2s, so it's built once per test
-session and every test gets a fresh `.clone()`d scratch SceneQuery -- the
+session and every test gets a fresh .clone()d scratch SceneQuery -- the
 shared live env itself is never mutated by any test).
 """
 
@@ -15,11 +15,7 @@ from pathlib import Path
 import pytest
 
 STEP_ROOT = Path(__file__).resolve().parents[1]
-VLM_STL_ROOT = (STEP_ROOT / ".." / "vlm-stl").resolve()
 
-for _candidate in (VLM_STL_ROOT / "LIBERO", VLM_STL_ROOT):
-    if _candidate.exists() and str(_candidate) not in sys.path:
-        sys.path.insert(0, str(_candidate))
 if str(STEP_ROOT) not in sys.path:
     sys.path.insert(0, str(STEP_ROOT))
 
@@ -34,11 +30,11 @@ from step.system_one.motion.panda import (  # noqa: E402
 
 
 def _bddl_path(suite: str, filename: str) -> Path | None:
-    """Resolve a bundled bddl file through the active ``libero`` install
-    (whatever its package layout -- see ``_import_libero_benchmark``)
+    """Resolve a bundled bddl file through the active libero install
+    (whatever its package layout -- see _import_libero_benchmark)
     instead of a hardcoded vlm-stl-relative path, so this also works
     against a normal pip/uv-installed LIBERO (e.g. Cap-X's
-    ``.venv-libero``) that isn't checked out next to this repo at all."""
+    .venv-libero) that isn't checked out next to this repo at all."""
     try:
         _, get_libero_path = _import_libero_benchmark()
         return Path(get_libero_path("bddl_files")) / suite / filename
