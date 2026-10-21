@@ -859,6 +859,13 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         motion_config = self._motion_config(env)
         adapter = LiberoPickAdapter(env, motion_config)
         self._side_insert_cache = None  # planned against the previous grasp
+        self._handle_held_side = None
+        side = self._downstream_side_opening(env, sub, object_set)
+        constraints: dict[str, Any] = {}
+        if side is not None:
+            # Grasp the handle from the side right away, hand pointing toward the
+            # opening; a top-down grasp can't go in under the roof (and dropped the mug).
+            constraints = {"handle_approach_dir": side.insert_dir.tolist()}
         max_steps = int(self.max_subtask_steps) if self.max_subtask_steps is not None else 600
 
         wait_steps_used = self._wait_for_stl_start(
@@ -877,7 +884,7 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         for attempt in range(self.PICK_GRASP_STABILITY_ATTEMPTS):
             result, attempt_steps, attached_state = adapter.run(
                 object_set,
-                constraints={},
+                constraints=constraints,
                 max_steps=max_steps,
                 step_callback=lambda: self._on_skill_step(env),
                 outdir=outdir,
@@ -886,6 +893,17 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
             result.diagnostics["grasp_stability_attempts_used"] = attempt + 1
             if result.success or result.failure_reason not in RETRIABLE_REASONS:
                 break
+        if constraints and not result.success:
+            # No reachable side grasp: fall back to the usual pick; place then
+            # sets the object down in front of the opening and re-grasps it.
+            constraints = {}
+            result, attempt_steps, attached_state = adapter.run(
+                object_set, constraints={}, max_steps=max_steps,
+                step_callback=lambda: self._on_skill_step(env), outdir=outdir,
+            )
+            steps += attempt_steps
+        elif constraints and result.success:
+            self._handle_held_side = side
         # Lives for the executor's lifetime so a later place on the new pipeline
         # knows the grasp-relative transform/collision spheres of what was grabbed.
         self._motion_attached_state = attached_state
@@ -983,6 +1001,26 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         }
         return bool(result.success), steps, status
 
+    def _downstream_side_opening(self, env, sub, object_set):
+        """The side-opening container this pick's object is headed for, if any
+        (the first later transport/place of the same object)."""
+        from .motion.scene_query import SceneQuery
+        from .motion.side_opening import find_side_opening
+
+        subtasks = getattr(self, "_current_subtasks", None) or []
+        if len(object_set) != 1 or not any(s is sub for s in subtasks):
+            return None
+        start = next(i for i, s in enumerate(subtasks) if s is sub)
+        for later in subtasks[start + 1 :]:
+            params = later.get("params", {}) or {}
+            if later.get("skill") not in ("transport", "place"):
+                continue
+            if self.resolver.canonical(params.get("object")) != object_set[0]:
+                continue
+            entity = self._goal_region_entity_name(self._raw_goal_target(params))
+            return find_side_opening(SceneQuery.from_robosuite_sim(env.env.sim), entity)
+        return None
+
     def _side_insert_for_goal(self, env, entity_name: str | None, attached_state, motion_config):
         """(SideOpening, SideInsertPlan) when the goal is entered from the side
         (e.g. a microwave), else None. The plan is made while transporting and
@@ -996,6 +1034,11 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         side = find_side_opening(scene, entity_name)
         if side is None:
             return None
+        if getattr(self, "_handle_held_side", None) is not None:
+            from .skills.place.side_insert import side_insert_targets
+
+            obj_quat = scene.body_pose(attached_state.object_name)[1]
+            return side, side_insert_targets(scene, side, attached_state.object_name, obj_quat)
         cached = getattr(self, "_side_insert_cache", None)
         if cached is not None and cached[0] == (side.container_body, attached_state.object_name):
             return cached[1], cached[2]
@@ -1015,7 +1058,7 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         from .skills.place.libero_place_adapter import LiberoPlaceAdapter
 
         step_callback = lambda: self._on_skill_step(env)
-        diagnostics: dict[str, Any] = {"mode": "side_insert", "staging_object_xyz": plan.staging_object_xyz.tolist()}
+        diagnostics: dict[str, Any] = {"mode": "side_insert"}
 
         def _status(result, steps):
             diagnostics["final"] = result.diagnostics
@@ -1026,8 +1069,19 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                 "diagnostics": {**diagnostics, **result.diagnostics},
             }
 
-        # 1. Set it down on the table in front of the opening.
         place_adapter = LiberoPlaceAdapter(env, motion_config)
+        if plan.staging_object_xyz is None:
+            # Picked by its handle already: slide straight in.
+            inserted, steps = place_adapter.run_side_insert(
+                attached_state, side, plan, max_steps=max_steps, step_callback=step_callback
+            )
+            if inserted.success:
+                self._motion_attached_state = None
+                self._handle_held_side = None
+            return _status(inserted, steps)
+
+        # 1. Set it down on the table in front of the opening.
+        diagnostics["staging_object_xyz"] = plan.staging_object_xyz.tolist()
         staging = [plan.staging_object_xyz[0], plan.staging_object_xyz[1], plan.support_top_z]
         staged, steps = place_adapter.run(
             plan.support_body, attached_state, max_steps=max_steps, step_callback=step_callback,
@@ -1116,6 +1170,9 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                     "detail": "no staging spot from which the object can be re-grasped by its handle and slid in",
                     "rejections": getattr(self, "_side_insert_rejections", []),
                 }
+            if plan.staging_object_xyz is None:
+                # Already held by its handle: place plans the move to the opening itself.
+                return True, 0, {"success": True, "detail": "deferred to the side-insert place", "diagnostics": {}}
             # Carry it to the table spot in front of the opening; place does the rest.
             goal_name, place_surface, goal_radius_m = plan.support_body, "top", None
             goal_point_xyz = [plan.staging_object_xyz[0], plan.staging_object_xyz[1], plan.support_top_z]
@@ -1968,6 +2025,7 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         outdir: str | Path | None,
         capture_initial_video: bool,
     ) -> dict[str, Any]:
+        self._current_subtasks = subtasks
         if self.system2_recall_enabled:
             return self._run_subtasks_on_env_with_system2_recall(
                 env,

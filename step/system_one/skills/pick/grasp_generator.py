@@ -478,6 +478,13 @@ class PrivilegedTopDownGraspGenerator(GraspGenerator):
         return float(np.clip(1.0 - width / self.gripper_max_opening_m, 0.0, 1.0))
 
 
+def _horizontal_alignment(a: np.ndarray, b: np.ndarray) -> float:
+    """Cosine between two directions' horizontal parts (pitch ignored)."""
+    a2, b2 = np.asarray(a, dtype=float)[:2], np.asarray(b, dtype=float)[:2]
+    na, nb = float(np.linalg.norm(a2)), float(np.linalg.norm(b2))
+    return 0.0 if na < 1e-9 or nb < 1e-9 else float(np.dot(a2, b2) / (na * nb))
+
+
 class HandleSideGraspGenerator(GraspGenerator):
     """Horizontal grasp on a handle's outer bar, gripper pointing at the
     object's body (z = approach, x = closing, same frame convention as
@@ -485,9 +492,17 @@ class HandleSideGraspGenerator(GraspGenerator):
     hand stays behind the handle, outside the opening, while the object goes
     all the way in -- a top-down hand can't fit under the roof."""
 
-    def __init__(self, gripper_max_opening_m: float = 0.08, z_offsets_m: tuple[float, ...] = (0.0, 0.01, -0.01)) -> None:
+    def __init__(
+        self,
+        gripper_max_opening_m: float = 0.08,
+        z_offsets_m: tuple[float, ...] = (0.0, 0.01, -0.01),
+        pitches_deg: tuple[float, ...] = (0.0, 20.0, 35.0, 50.0),
+    ) -> None:
         self.gripper_max_opening_m = gripper_max_opening_m
         self.z_offsets_m = z_offsets_m
+        # Tilting the approach down raises the wrist: level, it trails ~20cm
+        # behind the handle at table height and hit a neighboring mug.
+        self.pitches_deg = pitches_deg
 
     def generate(self, scene: SceneQuery, object_names: list[str]) -> list[GraspCandidate]:
         out: list[GraspCandidate] = []
@@ -504,23 +519,29 @@ class HandleSideGraspGenerator(GraspGenerator):
                 continue
             bar_center, bar_half = boxes[outer]
             outward = (bar_center[:2] - body_xy) / radial[outer]
-            approach = np.array([-outward[0], -outward[1], 0.0])
-            closing = np.array([approach[1], -approach[0], 0.0])
-            rot = np.column_stack([closing, np.cross(approach, closing), approach])
-            quat = rotmat_to_quat_wxyz(rot)
+            closing = np.array([-outward[1], outward[0], 0.0])
             width = 2.0 * float(np.dot(np.abs(closing), bar_half))
-            for dz in self.z_offsets_m:
-                position = np.array([bar_center[0], bar_center[1], bar_center[2] + dz])
-                out.append(
-                    GraspCandidate(
-                        object_name=name,
-                        grasp_pose_world=np.concatenate([position, quat]),
-                        approach_direction_world=approach,
-                        gripper_width=width,
-                        generator_score=1.0,
-                        metadata={"generator": "HandleSideGraspGenerator", "strategy": "handle_side", "yaw_rad": None},
+            for pitch in np.radians(self.pitches_deg):
+                approach = np.array([-outward[0] * np.cos(pitch), -outward[1] * np.cos(pitch), -np.sin(pitch)])
+                rot = np.column_stack([closing, np.cross(approach, closing), approach])
+                quat = rotmat_to_quat_wxyz(rot)
+                for dz in self.z_offsets_m:
+                    position = np.array([bar_center[0], bar_center[1], bar_center[2] + dz])
+                    out.append(
+                        GraspCandidate(
+                            object_name=name,
+                            grasp_pose_world=np.concatenate([position, quat]),
+                            approach_direction_world=approach,
+                            gripper_width=width,
+                            generator_score=1.0,
+                            metadata={
+                                "generator": "HandleSideGraspGenerator",
+                                "strategy": "handle_side",
+                                "pitch_deg": float(np.degrees(pitch)),
+                                "yaw_rad": None,
+                            },
+                        )
                     )
-                )
         return out
 
 

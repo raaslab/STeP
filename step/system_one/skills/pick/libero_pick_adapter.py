@@ -22,6 +22,7 @@ from ...motion.config import MotionConfig
 from .grasp_generator import (
     GraspGenerator,
     HandleSideGraspGenerator,
+    _horizontal_alignment,
     ManualDeepCenterGraspGenerator,
     PrivilegedTopDownGraspGenerator,
     _is_forced_manual_object_class,
@@ -252,7 +253,7 @@ class LiberoPickAdapter(_ServoMixin):
             candidates = [
                 c
                 for c in HandleSideGraspGenerator(skill.grasp_generator.gripper_max_opening_m).generate(scene, body_names)
-                if float(np.dot(c.approach_direction_world, handle_dir)) > 0.8
+                if _horizontal_alignment(c.approach_direction_world, handle_dir) > 0.8
             ]
             if candidates:
                 plan_result = skill.execute(scene, body_names, start_q, constraints, candidates=candidates)

@@ -16,16 +16,36 @@ from ...motion.panda import FINGER_JOINT_NAMES, GRIPPER_BODIES, ROBOT_BODIES
 from ...motion.scene_query import SceneQuery, quat_to_rotmat_wxyz
 from ...motion.side_opening import SideOpening, support_top_z_below
 from ..ik_utils import solve_ik_robust, yaw_quat_wxyz
-from ..pick.grasp_generator import HandleSideGraspGenerator
+from ..pick.grasp_generator import HandleSideGraspGenerator, _horizontal_alignment
 
 
 @dataclass
 class SideInsertPlan:
-    staging_object_xyz: np.ndarray
-    support_body: str
-    support_top_z: float
     final_object_xyz: np.ndarray
     insert_distance_m: float
+    # Only set when the object first has to be set down and re-grasped by its handle.
+    staging_object_xyz: np.ndarray | None = None
+    support_body: str | None = None
+    support_top_z: float | None = None
+
+
+def side_insert_targets(scene: SceneQuery, side: SideOpening, object_body: str, obj_quat: np.ndarray) -> SideInsertPlan:
+    """Where the object ends up inside (opening's lateral center, region depth,
+    just above the floor) and how far it slides in from fully outside."""
+    d = np.asarray(side.insert_dir, dtype=float)
+    lateral = np.array([-d[1], d[0], 0.0])
+    upright = scene.clone()
+    upright.set_free_body_qpos(object_body, scene.body_pose(object_body)[0], obj_quat)
+    ext = upright.body_collision_extent_world(object_body)
+    bottom_local_z = float(ext.center_offset[2] - ext.half_extents[2])
+    forward_extent = float(np.dot(ext.center_offset, d) + np.dot(ext.half_extents, np.abs(d)))
+    final_xy = side.region_center[:2].copy()
+    if side.opening_center_xy is not None:
+        final_xy += lateral[:2] * float(np.dot(side.opening_center_xy - side.region_center[:2], lateral[:2]))
+    return SideInsertPlan(
+        final_object_xyz=np.array([final_xy[0], final_xy[1], side.floor_z + 0.01 - bottom_local_z]),
+        insert_distance_m=side.front_offset_m + forward_extent + 0.03,
+    )
 
 
 def _support_body_below(scene: SceneQuery, xy: np.ndarray, top_z: float, exclude: str) -> str | None:
@@ -59,17 +79,12 @@ def plan_side_insert(
     # Staged upright: keep only the yaw of however it sits in the hand now.
     held_R = quat_to_rotmat_wxyz(held_quat)
     obj_quat = yaw_quat_wxyz(float(np.arctan2(held_R[1, 0], held_R[0, 0])))
+    targets = side_insert_targets(scene, side, object_body, obj_quat)
+    final_obj, insert_distance = targets.final_object_xyz, targets.insert_distance_m
     upright = scene.clone()
     upright.set_free_body_qpos(object_body, obj_pos, obj_quat)
     ext = upright.body_collision_extent_world(object_body)
     bottom_local_z = float(ext.center_offset[2] - ext.half_extents[2])
-    forward_extent = float(np.dot(ext.center_offset, d) + np.dot(ext.half_extents, np.abs(d)))
-    insert_distance = side.front_offset_m + forward_extent + 0.03
-    final_xy = side.region_center[:2].copy()
-    if side.opening_center_xy is not None:
-        # Region depth along the insert direction, opening's lateral center.
-        final_xy += lateral[:2] * float(np.dot(side.opening_center_xy - side.region_center[:2], lateral[:2]))
-    final_obj = np.array([final_xy[0], final_xy[1], side.floor_z + 0.01 - bottom_local_z])
     rng = np.random.default_rng(0)
     # The re-grasp starts from home, so seed IK there, not from the carrying pose.
     seed_q = home_q if home_q is not None else scene.get_qpos(joint_names)
@@ -89,7 +104,7 @@ def plan_side_insert(
             checker = CollisionChecker(scratch, joint_names, ee_site, ROBOT_BODIES, GRIPPER_BODIES, collision_config)
             ik = IKSolver(joint_names=joint_names, site_name=ee_site)
             for cand in HandleSideGraspGenerator().generate(scratch, [object_body]):
-                if float(np.dot(cand.approach_direction_world, d)) < 0.8:
+                if _horizontal_alignment(cand.approach_direction_world, d) < 0.8:
                     continue
                 hand_from_obj = cand.grasp_position - staged
                 final_hand = final_obj + hand_from_obj
@@ -126,5 +141,5 @@ def plan_side_insert(
                         break
                     q = sol.q
                 if ok:
-                    return SideInsertPlan(staged, support, top, final_obj, insert_distance)
+                    return SideInsertPlan(final_obj, insert_distance, staged, support, top)
     return None
