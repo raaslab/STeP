@@ -1,6 +1,6 @@
 """Damped-least-squares (Levenberg-Marquardt style) inverse kinematics on a
-scratch MuJoCo model/data, via ``SceneQuery``. No pinocchio/ikpy dependency --
-built directly on the ``mj_jacSite`` Jacobian STeP already has through MuJoCo.
+scratch MuJoCo model/data, via SceneQuery. No pinocchio/ikpy dependency --
+built directly on the mj_jacSite Jacobian STeP already has through MuJoCo.
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ class IKSolver:
         seed_q: np.ndarray | None = None,
     ) -> IKResult:
         """Solve IK against a **scratch** SceneQuery (mutated in place across
-        iterations -- pass ``scene.clone()`` if the caller needs the original
+        iterations -- pass scene.clone() if the caller needs the original
         preserved). Joint limits are enforced by clamping every iterate."""
         cfg = self.config
         lo, hi = scene.joint_qpos_range(self.joint_names)

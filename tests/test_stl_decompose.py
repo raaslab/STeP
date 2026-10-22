@@ -4,7 +4,7 @@ infer_skill_from_predicates), independent of any VLM call.
 
 Per SLICE (Kapoor/Kang/Meira-Goes, NFM 2024, Algorithm 3), goal intervals are
 ABSOLUTE positions on one shared global timeline, not a per-goal-local clock
-reset to 0 -- every helper below takes an explicit cumulative `start` offset
+reset to 0 -- every helper below takes an explicit cumulative start offset
 to build formulas the way the real prompt now asks the VLM to.
 """
 

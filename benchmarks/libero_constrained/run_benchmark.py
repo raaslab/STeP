@@ -3,7 +3,7 @@
 A small number of rollouts take pathologically long -- measured between 26s and
 13 minutes on the same task, driven by how hard the planner finds that particular
 scene. Left alone they dominate the wall clock without adding information, so a
-rollout that exceeds --timeout is killed and recorded as `timeout`. That is a
+rollout that exceeds --timeout is killed and recorded as timeout. That is a
 result, not a gap: a method that cannot produce a trajectory inside the budget has
 not solved the task.
 

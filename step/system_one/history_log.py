@@ -1,7 +1,7 @@
 """Rolling history log for System-2 recall.
 
 The log is deliberately small and JSON-friendly. It stores the most recent
-`window_sec` seconds of records, sampled at `interval_sec`, so System 2 can
+window_sec seconds of records, sampled at interval_sec, so System 2 can
 replan from recent execution evidence instead of a one-off failure summary.
 """
 

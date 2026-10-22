@@ -22,48 +22,14 @@ debugging.
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
 import numpy as np
 
 STEP_ROOT = Path(__file__).resolve().parents[1]
-VLM_STL_ROOT = (STEP_ROOT / ".." / "vlm-stl").resolve()
-for _candidate in (VLM_STL_ROOT / "LIBERO", VLM_STL_ROOT):
-    if _candidate.exists() and str(_candidate) not in sys.path:
-        sys.path.insert(0, str(_candidate))
 if str(STEP_ROOT) not in sys.path:
     sys.path.insert(0, str(STEP_ROOT))
-
-
-def _configure_libero_paths() -> None:
-    """Point LIBERO at this checkout's asset/bddl/init-state directories via
-    a fresh config.yaml -- mirrors ``step/libero_runner.py``'s
-    ``_configure_libero_paths``. Needed because LIBERO otherwise falls back
-    to its own cached ``~/.libero/config.yaml``, which can point at a stale
-    path from before this repo was last moved/renamed."""
-    benchmark_root = VLM_STL_ROOT / "LIBERO" / "libero" / "libero"
-    if not benchmark_root.is_dir():
-        return
-    config_dir = STEP_ROOT / "outputs" / "_libero_config_scratch"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    (config_dir / "config.yaml").write_text(
-        "\n".join(
-            [
-                f"assets: {benchmark_root / 'assets'}",
-                f"bddl_files: {benchmark_root / 'bddl_files'}",
-                f"benchmark_root: {benchmark_root}",
-                f"datasets: {benchmark_root.parent / 'datasets'}",
-                f"init_states: {benchmark_root / 'init_files'}",
-                "",
-            ]
-        )
-    )
-    os.environ["LIBERO_CONFIG_PATH"] = str(config_dir)
-
-
-_configure_libero_paths()
 
 
 def main() -> int:
@@ -89,12 +55,12 @@ def main() -> int:
 
     from step.system_one.motion.collision import CollisionChecker
     from step.system_one.motion.config import MotionConfig
-    from step.system_one.motion.skills.grasp_generator import PrivilegedTopDownGraspGenerator
-    from step.system_one.motion.skills.grasp_viz import save_grasp_candidates_image
+    from step.system_one.skills.pick.grasp_generator import PrivilegedTopDownGraspGenerator
+    from step.system_one.skills.pick.grasp_viz import save_grasp_candidates_image
     from step.system_one.motion.kinematics import IKSolver
     from step.system_one.motion.ompl_planner import MotionPlanner
     from step.system_one.motion.panda import EE_SITE, GRIPPER_BODIES, JOINT_NAMES, ROBOT_BODIES
-    from step.system_one.motion.skills.pick_skill import PickSkill
+    from step.system_one.skills.pick.pick_skill import PickSkill
     from step.system_one.motion.scene_query import SceneQuery
 
     bm = benchmark.get_benchmark_dict()[args.suite]()

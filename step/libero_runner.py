@@ -32,7 +32,6 @@ _DEFAULT_SCHEMA_FOR_MODE = {
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run minimal STeP on a LIBERO task.")
-    p.add_argument("--legacy-vlm-stl-root", default="../vlm-stl")
     p.add_argument("--base-scene-context", default="configs/libero_template.json")
     p.add_argument(
         "--schema",
@@ -166,36 +165,6 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     return p.parse_args()
-
-
-def _add_legacy_root(path: str | Path) -> Path:
-    root = Path(path).expanduser().resolve()
-    for candidate in (root / "LIBERO", root):
-        if candidate.exists() and str(candidate) not in sys.path:
-            sys.path.insert(0, str(candidate))
-    return root
-
-
-def _configure_libero_paths(legacy_root: Path, outdir: Path) -> None:
-    benchmark_root = legacy_root / "LIBERO" / "libero" / "libero"
-    if not benchmark_root.is_dir():
-        return
-
-    config_dir = outdir / "libero_config"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    (config_dir / "config.yaml").write_text(
-        "\n".join(
-            [
-                f"assets: {benchmark_root / 'assets'}",
-                f"bddl_files: {benchmark_root / 'bddl_files'}",
-                f"benchmark_root: {benchmark_root}",
-                f"datasets: {benchmark_root.parent / 'datasets'}",
-                f"init_states: {benchmark_root / 'init_files'}",
-                "",
-            ]
-        )
-    )
-    os.environ.setdefault("LIBERO_CONFIG_PATH", str(config_dir))
 
 
 def _resolve_prompt(args: argparse.Namespace, scene_context: dict[str, Any]) -> str:
@@ -358,15 +327,24 @@ def _capture_live_scene_and_image(env: Any, scene_context: dict[str, Any], outdi
     the scene actually is after a failure (e.g. a dropped can still sitting
     where it fell), not the original init-state layout.
 
-    Mirrors ``LiberoManipulationEnv.snapshot_scene_context``/
-    ``capture_initial_scene_image``, which do the same thing but always
+    Mirrors LiberoManipulationEnv.snapshot_scene_context/
+    capture_initial_scene_image, which do the same thing but always
     build and reset a brand new env -- exactly what must NOT happen here.
     """
-    from step.system_one.libero_scene import infer_objects_from_mujoco, infer_objects_from_obs, update_scene_context_from_objects
+    from step.system_one.libero_scene import (
+        infer_objects_from_mujoco,
+        infer_objects_from_obs,
+        refresh_drawer_blocking_flags,
+        update_scene_context_from_objects,
+    )
 
     obs = getattr(env, "last_raw_obs", None)
     objects = (infer_objects_from_obs(obs) if obs is not None else {}) or infer_objects_from_mujoco(env.env)
     fresh_context = update_scene_context_from_objects(scene_context, objects, source="pipeline_recall_live")
+    try:
+        fresh_context = refresh_drawer_blocking_flags(fresh_context, env.env)
+    except Exception as exc:
+        print(f"[step] warning: refresh_drawer_blocking_flags failed: {exc}")
 
     import matplotlib
     matplotlib.use("Agg", force=True)
@@ -396,7 +374,7 @@ def _annotate_already_satisfied_objects(
     from a prior successful attempt -- it failed a second time for real
     (its post-place pose has no feasible grasp candidate) and burned the
     entire retry on a no-op instead of just finishing the tomato sauce.
-    Mirrors ``libero_scene.py``'s ``_annotate_drawer_clearance_conflicts``:
+    Mirrors libero_scene.py's _annotate_drawer_clearance_conflicts:
     precompute the geometric fact in code and stamp the verdict directly
     onto the entity, rather than trust the LLM to (re-)derive it itself.
     """
@@ -421,12 +399,12 @@ def _annotate_already_satisfied_objects(
     for object_name, goal_region in place_targets:
         if not object_name or not goal_region:
             continue
-        # `goal_region` is not always a named entity string -- rule 6 also
+        # goal_region is not always a named entity string -- rule 6 also
         # allows an explicit point target ({"type": "point", "xy": [...],
         # "z": ..., "radius": ...}, e.g. "the back compartment of the
         # caddy", which has no body of its own to resolve). Confirmed via a
         # real recall on exactly that task: resolve_body_name got the dict
-        # itself as its `name` argument and crashed inside mujoco's own
+        # itself as its name argument and crashed inside mujoco's own
         # mj_name2id (a TypeError, not the KeyError already handled below)
         # rather than just reporting this object's goal as unresolvable.
         if isinstance(goal_region, dict):
@@ -477,14 +455,14 @@ def _annotate_already_satisfied_objects(
 def _annotate_timing_overruns(fresh_context: dict[str, Any], previous_summary: dict[str, Any]) -> list[str]:
     """EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md).
 
-    Stamp a note onto ``fresh_context`` for every subtask that ran past its
+    Stamp a note onto fresh_context for every subtask that ran past its
     own declared STL deadline in the just-failed attempt, so the recalled
     plan can adjust timing with real numbers instead of guessing blind. Reads
-    the ``timing_violation`` fact ``executor.py``'s ``_annotate_timing_violation``
-    writes onto each ``SkillExecutionRecord.info`` -- itself derived from
-    ``sub["stl_deadline"]``, which only `--stl-mode stl_spec` plans carry (see
-    `step/system_two/stl_plan.py:decompose()`), so this is a no-op for
-    `--stl-mode skill_graph`.
+    the timing_violation fact executor.py's _annotate_timing_violation
+    writes onto each SkillExecutionRecord.info -- itself derived from
+    sub["stl_deadline"], which only --stl-mode stl_spec plans carry (see
+    step/system_two/stl_plan.py:decompose()), so this is a no-op for
+    --stl-mode skill_graph.
 
     Deliberately does nothing more than log/annotate: per the explicit design
     discussion in STL_DECOMPOSITION_PLAN.md, a declared time budget that turns
@@ -528,19 +506,136 @@ def _annotate_timing_overruns(fresh_context: dict[str, Any], previous_summary: d
     return annotated
 
 
+def _annotate_skill_failure_hints(fresh_context: dict[str, Any], previous_summary: dict[str, Any]) -> list[str]:
+    """Stamp a note onto fresh_context describing *why* each failed
+    subtask in the just-failed attempt actually failed (its
+    failure_reason/diagnostics.detail), so the recalled plan has a
+    textual signal to reason from instead of just an unchanged scene image.
+
+    Exists because, unlike a pick/place failure (which usually leaves a
+    visible trace -- a dropped object, an arm stuck somewhere), a rejected
+    open attempt that never finds a feasible candidate pull leaves the
+    scene looking *identical* to the very first frame: the drawer never
+    moved, nothing visibly changed. Confirmed directly: without this, a real
+    recall reasoned "no precomputed blockage flag is present, so no object
+    relocation is needed" -- it had no way to know the previous attempt hit
+    final_descent_in_collision at all, let alone connect that to whatever is
+    sitting in front of the handle in the image. Mirrors
+    _annotate_timing_overruns's own pattern (precompute the fact in code,
+    stamp the verdict as text) for the general "why did this fail" case."""
+    records = previous_summary.get("records") or []
+    failed = [r for r in records if isinstance(r, dict) and (r.get("info") or {}).get("success") is False]
+    if not failed:
+        return []
+
+    entities = fresh_context.setdefault("entities", [])
+    by_name = {e.get("name"): e for e in entities if isinstance(e, dict) and e.get("name")}
+
+    annotated: list[str] = []
+    for record in failed:
+        info = record.get("info") or {}
+        skill = record.get("skill")
+        obj = (record.get("params") or {}).get("object")
+        reason = info.get("failure_reason")
+        detail = (info.get("diagnostics") or {}).get("detail")
+        pieces = [f"a previous attempt's {skill} subtask" + (f" for {obj}" if obj else "") + " did not succeed"]
+        if reason:
+            pieces.append(f"failure_reason={reason}")
+        if detail:
+            pieces.append(f"detail: {detail}")
+        flag = (
+            " [Precomputed: " + "; ".join(pieces) + " -- if this looks like the arm could not reach or "
+            "move past something, check the scene image for an object sitting near the target and "
+            "consider relocating it before retrying.]"
+        )
+        entity = by_name.get(obj) if obj else None
+        if entity is not None:
+            entity["notes"] = entity.get("notes", "") + flag
+        else:
+            entities.append({"name": obj or f"{skill}_failure", "role": "note", "notes": flag.strip()})
+        annotated.append(obj or str(skill))
+    return annotated
+
+
+def _formula_is_trivially_true(formula: Any) -> bool:
+    """A "true" leaf, or an "and" node whose children are all trivially
+    true -- the model sometimes wraps a bare "true" in an "and" instead of
+    emitting it directly, and both mean the same thing: nothing left to do."""
+    if not isinstance(formula, dict):
+        return False
+    if formula.get("type") == "true":
+        return True
+    if formula.get("type") == "and":
+        children = formula.get("children")
+        return isinstance(children, list) and len(children) > 0 and all(
+            _formula_is_trivially_true(c) for c in children
+        )
+    return False
+
+
+def _plan_has_nothing_to_do(plan: dict[str, Any]) -> bool:
+    """True when System 2 declares the task already satisfied: a stl_spec
+    formula that reduces to "true" (possibly wrapped in "and"), or an
+    explicitly empty skill_graph subtasks list."""
+    system2_plan = plan.get("system2_plan")
+    if not isinstance(system2_plan, dict):
+        return False
+    if _formula_is_trivially_true(system2_plan.get("formula")):
+        return True
+    subtasks = system2_plan.get("subtasks")
+    return isinstance(subtasks, list) and len(subtasks) == 0
+
+
+def _release_and_return_home(env, n_steps: int = 60, step_callback=None) -> int:
+    """Open the gripper in place, then drive the arm back to its reset
+    configuration -- so a run never ends mid-reach or holding an object."""
+    import numpy as np
+
+    from .system_one.motion.panda import EE_SITE, JOINT_NAMES
+    from .system_one.motion.servo import _ServoMixin
+
+    class _HomeServo(_ServoMixin):
+        def __init__(self, env):
+            self.env = env
+            self.joint_names = JOINT_NAMES
+            self.ee_site = EE_SITE
+
+    servo = _HomeServo(env)
+    # Release where the arm is before moving, so the object drops at the
+    # hover pose instead of being dragged toward home by half-open fingers.
+    steps = 0
+    zero = np.zeros(3, dtype=np.float32)
+    for _ in range(int(env.close_steps) * 2):
+        servo._step_env(zero, zero, env.open_gripper_cmd)
+        steps += 1
+        if step_callback is not None:
+            step_callback()
+    return steps + servo.servo_to_home(n_steps=n_steps, step_callback=step_callback)
+
+
 def _decompose_or_annotate_errors(plan: dict[str, Any], errors_path: Path) -> dict[str, Any]:
     """EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md): turns a single-global-
     formula ("stl_spec") plan into the standard subtasks shape.
 
     On failure, writes the specific validation/decomposition error to
-    `errors_path` and returns the plan UNCHANGED, so the caller's normal
-    `validate_stl_plan(...)` call still rejects it (missing/invalid
-    `subtasks`) through the existing `validation_errors.txt` path -- this
+    errors_path and returns the plan UNCHANGED, so the caller's normal
+    validate_stl_plan(...) call still rejects it (missing/invalid
+    subtasks) through the existing validation_errors.txt path -- this
     function only adds a more specific error message alongside that, it
     doesn't replace the existing validation control flow.
     """
     from .system_two.stl_plan import decompose_and_validate
 
+    system2_plan = plan.get("system2_plan")
+    if (
+        isinstance(system2_plan, dict)
+        and isinstance(system2_plan.get("formula"), dict)
+        and not system2_plan.get("subtasks")
+        and system2_plan.get("type") != "stl_spec"
+    ):
+        # The model sometimes labels a global-formula plan "skill_graph";
+        # go by the content, or the decomposer rejects a valid plan.
+        plan = {**plan, "system2_plan": {**system2_plan, "type": "stl_spec"}}
     decomposed_plan, result = decompose_and_validate(plan)
     if decomposed_plan is None:
         errors_path.write_text("\n".join(result.errors))
@@ -583,9 +678,7 @@ def _load_or_create_plan(
 def main() -> int:
     args = parse_args()
     benchmark_task = _apply_benchmark_task(args)
-    legacy_root = _add_legacy_root(args.legacy_vlm_stl_root)
     outdir = Path(args.outdir)
-    _configure_libero_paths(legacy_root, outdir)
 
     scene_context, scene_path, prompt, prompt_path = _prepare_libero_scene(args, outdir)
     print(f"[step] scene context: {scene_path}")
@@ -664,6 +757,9 @@ def main() -> int:
                     timing_overruns = _annotate_timing_overruns(fresh_context, summary)
                     if timing_overruns:
                         print(f"[step] attempt {attempt}/{max_attempts}: previous attempt exceeded its declared timing for: {timing_overruns}")
+                    failure_hints = _annotate_skill_failure_hints(fresh_context, summary)
+                    if failure_hints:
+                        print(f"[step] attempt {attempt}/{max_attempts}: previous attempt failed for: {failure_hints}")
                     schema_path = args.schema or _DEFAULT_SCHEMA_FOR_MODE[args.stl_mode]
                     schema = load_json(schema_path)
                     from .system_two.planner import DirectSTLPlanner
@@ -672,6 +768,23 @@ def main() -> int:
                     plan, raw_text = planner.plan(instruction=prompt, image_path=image_path)
                     save_json(plan, outdir / f"recall_attempt_{attempt:02d}_plan.json")
                     (outdir / f"recall_attempt_{attempt:02d}_raw_model_output.txt").write_text(raw_text)
+                    if _plan_has_nothing_to_do(plan):
+                        # A bare "true" formula (or an explicitly empty
+                        # subtasks list) means System 2 considers the task
+                        # already satisfied -- decomposing/validating it as a
+                        # normal plan would always fail (there's nothing to
+                        # infer a skill from), so that's not a real failure.
+                        print(f"[step] attempt {attempt}/{max_attempts}: recall says nothing left to do; releasing and returning home")
+                        home_steps = _release_and_return_home(
+                            env, step_callback=lambda: executor._capture_video_frame(env)
+                        )
+                        summary = {
+                            "success": True,
+                            "attempt": attempt,
+                            "detail": "recall determined the task is already satisfied; released and returned home",
+                            "home_steps": home_steps,
+                        }
+                        break
                     if args.stl_mode == "stl_spec":
                         plan = _decompose_or_annotate_errors(
                             plan, outdir / f"recall_attempt_{attempt:02d}_decomposition_errors.txt"
@@ -707,6 +820,14 @@ def main() -> int:
                 break
             if not is_last_attempt:
                 print(f"[step] attempt {attempt}/{max_attempts} failed (success={summary.get('success')!r}); recalling and retrying without resetting the env")
+        if not summary.get("success"):
+            print("[step] run ended without success; releasing and returning home")
+            try:
+                summary["release_home_steps"] = _release_and_return_home(
+                    env, step_callback=lambda: executor._capture_video_frame(env)
+                )
+            except Exception as exc:
+                summary["release_home_error"] = f"{type(exc).__name__}: {exc}"
     finally:
         # No-op (returns None) for tasks with no <bddl>.constraints.json sidecar,
         # e.g. plain LIBERO/LIBERO-Pro suites -- only LIBERO-Constrained's suites

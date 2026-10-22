@@ -7,7 +7,7 @@ from step.system_one.motion.config import MotionConfig, PlannerConfig
 from step.system_one.motion.kinematics import IKSolver
 from step.system_one.motion.ompl_planner import MotionPlanner
 from step.system_one.motion.scene_query import quat_to_rotmat_wxyz
-from step.system_one.motion.skills.turn_knob_skill import (
+from step.system_one.skills.turn_knob.turn_knob_skill import (
     TurnKnobSkill,
     _arbitrary_perpendicular,
     _axis_angle_to_rotmat,

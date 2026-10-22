@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 
 from conftest import requires_libero
-from step.system_one.motion.config import ContactGraspNetConfig
-from step.system_one.motion.skills.contact_graspnet_generator import (
+from step.system_one.skills.pick.contact_graspnet_generator import (
+    ContactGraspNetConfig,
     ContactGraspNetGenerator,
     _load_real_estimator,
     _mujoco_to_opencv_cam_mat,

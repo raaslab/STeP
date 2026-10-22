@@ -1,33 +1,11 @@
 """3D collision checking on a scratch MuJoCo model/data (never the live sim).
 
-Three complementary checks:
-
-1. ``SceneQuery.compute_contacts()`` (``mj_collision``) -- authoritative for
-   *actual penetration* of the robot's own real geometry, and, crucially,
-   already respects the model's own self-collision exclusions (adjacent-link
-   ``<exclude>``/``contype``/``conaffinity`` pairs baked into robosuite's
-   Panda MJCF), so it's the right tool for self-collision and robot-vs-
-   environment contact.
-2. ``mujoco.mj_geomDistance`` -- an explicit pairwise signed-distance query,
-   independent of any geom's compiled contact margin, used for the robot's
-   configurable-margin clearance vs. the environment. This never mutates
-   ``model.geom_margin`` (which would leak across every ``SceneQuery`` sharing
-   that MjModel), so it's the only side-effect-free way to get a non-zero
-   margin.
-3. **Sphere-approximated attached-object collision** -- once an object is
-   grasped, checking its *exact* geometry (LIBERO objects are often
-   convex-decomposed into 20+ small geoms, see ``attached_object.py``) against
-   every relevant environment geom on every planning query is both expensive
-   and unnecessary. Mirroring Cap-X's ``curobo_api.attach_objects_to_robot``
-   (which sphere-fits the grasped object's mesh onto a robot link via
-   ``SphereFitType``), the attached object is instead approximated as a small
-   set of spheres (``AttachedObjectState.collision_spheres_object_frame``,
-   computed once at grasp time by ``attached_object.fit_spheres_to_extent``)
-   and checked with a simple analytic sphere-vs-AABB distance against every
-   other body in the scene. This is what actually makes it feasible to plan a
-   collision-free placement trajectory that reasons about the carried
-   object's geometry (e.g. avoiding a container's rim) instead of just moving
-   the gripper as a point.
+Three checks: mj_collision for real penetration (respects the model's own
+self-collision exclusions); mj_geomDistance for margin-based clearance
+without mutating the shared model.geom_margin; and sphere-approximated
+attached-object collision once an object is grasped, since checking its real
+(often many-geom) mesh against every environment geom per query is too slow
+(see attached_object.py).
 """
 
 from __future__ import annotations
@@ -50,13 +28,9 @@ from .types import AttachedObjectState, CollisionResult, Contact
 
 
 class CollisionPhase(str, Enum):
-    FREE_SPACE = "free_space"  # every real obstacle (incl. a carried/attached object's true
-    # target) must be avoided; no intentional contact is permitted yet.
+    FREE_SPACE = "free_space"  # every real obstacle must be avoided, no intentional contact yet
     TERMINAL_APPROACH = "terminal_approach"  # pick: gripper<->target-object contact permitted
-    # (final grasp descent -- the object being grasped is expected to touch the gripper).
-    PLACE_APPROACH = "place_approach"  # place: attached-object<->goal-container contact
-    # permitted (final insertion descent -- the carried object is expected to touch the
-    # container it's being placed into, e.g. resting on a basket's floor).
+    PLACE_APPROACH = "place_approach"  # place: attached-object<->goal-container contact permitted
 
 
 def compose_world_pose(
@@ -78,9 +52,9 @@ def compose_world_pose(
 def required_hand_pose_for_object_pose(
     object_pos: np.ndarray, object_quat_wxyz: np.ndarray, transform_hand_from_object: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Inverse of ``compose_world_pose``: given the *desired* world pose of a
+    """Inverse of compose_world_pose: given the *desired* world pose of a
     rigidly-held object and the fixed hand-from-object grasp transform, solve
-    for the hand pose that achieves it. Used by ``PlaceSkill`` to turn a
+    for the hand pose that achieves it. Used by PlaceSkill to turn a
     candidate object placement into an IK target for the arm."""
     R_obj = quat_to_rotmat_wxyz(object_quat_wxyz)
     T_obj = np.eye(4)
@@ -129,30 +103,13 @@ class CollisionChecker:
         self.gripper_geom_ids: set[int] = set()
         for b in gripper_body_names:
             self.gripper_geom_ids.update(scene.body_geom_ids(b, include_children=False))
-        # A grasp only ever needs the fingerPADS on the object -- this is the
-        # same definition robosuite's own _check_grasp uses (left_fingerpad/
-        # right_fingerpad geom groups). Everything else on the gripper (the
-        # palm/hand body, the non-pad finger segments) getting "permitted" to
-        # touch the target during TERMINAL_APPROACH -- what an earlier
-        # version of _permitted() did, treating every gripper_body_names geom
-        # as equally acceptable -- masks a real physical impossibility: if
-        # the intended grasp height requires the palm to descend below the
-        # object's top surface (e.g. the object is taller than the fingers
-        # are long), the palm hitting the object's top was never flagged as
-        # a collision, so a "validated" descent could still be one the real
-        # gripper physically can't complete. Derived from the existing
-        # `*_pad_collision` geom-naming convention rather than a new
-        # constructor parameter, so this applies without touching any of
-        # this class's call sites.
+        # Only the fingerPADS, matching robosuite's _check_grasp convention --
+        # permitting the whole gripper would mask the palm descending into the object.
         self.fingerpad_geom_ids: set[int] = {
             g for g in self.gripper_geom_ids if scene.geom_name(g).endswith("_pad_collision")
         }
-        # Broader than fingerpad_geom_ids: every geom belonging to a finger
-        # (both the pad and the rigid segment above it), but never the palm.
-        # Used only for the small compliance tolerance in
-        # ``_finger_overlap_within_tolerance`` below -- real fingers (and
-        # MuJoCo's own soft contact) have a little give; a rigid wrist/palm
-        # assembly doesn't, so the palm never gets any tolerance.
+        # Every finger geom (pad + rigid segment above it), never the palm --
+        # used only for the small compliance tolerance below; real fingers have give, a rigid palm doesn't.
         self.finger_geom_ids: set[int] = {g for g in self.gripper_geom_ids if "finger" in scene.geom_name(g)}
         # The hand/palm shell: every gripper geom that is not part of a finger.
         # Kept separate because contact here means something different -- a
@@ -163,17 +120,8 @@ class CollisionChecker:
         }
         self.robot_geom_ids |= self.gripper_geom_ids
         self.robot_body_ids: set[int] = {scene.body_id(b) for b in set(robot_body_names) | set(gripper_body_names)}
-        # Every other body with real geometry -- candidate obstacles for the
-        # attached-object sphere check. Cached once: the *set* of bodies in
-        # the scene doesn't change across planning queries, only their poses
-        # (which are re-read fresh on every call). Body 0 is always MuJoCo's
-        # "world" body -- every other body is its descendant, so
-        # body_extent_world("world") would aggregate the *entire scene* into
-        # one giant AABB via body_geom_ids' include_children walk. World-
-        # owned geoms (e.g. a bare ground plane) are excluded rather than
-        # handled specially: a plane has no finite extent to bound anyway,
-        # and every real obstacle worth avoiding here (table, containers,
-        # other objects) is its own proper body.
+        # Candidate obstacles for the attached-object sphere check, cached
+        # once since the body set is static (only poses change per query).
         self._obstacle_body_names: list[str] = [
             mujoco.mj_id2name(scene.model, mujoco.mjtObj.mjOBJ_BODY, b)
             for b in range(1, scene.model.nbody)
@@ -187,23 +135,10 @@ class CollisionChecker:
         phase: CollisionPhase,
         target_object_geom_ids: set[int],
     ) -> bool:
-        """Whether (g1, g2) is an *intentional* contact, not a violation (real
-        robot geoms only -- see ``_attached_sphere_violations`` for the
-        sphere-approximated attached-object side).
-
-        Only fingerpad<->target contact is ever permitted, not just any
-        gripper-body geom -- see ``fingerpad_geom_ids``'s definition above
-        for why the palm/hand and the non-pad finger segments must stay
-        strictly excluded.
-
-        Matches by actual geom-id membership in the gripper/target geom sets
-        -- not by name substrings against the object's *body* name, which
-        doesn't work: LIBERO object geoms are named like
-        ``alphabet_soup_1_g7``, which is not a substring match against the
-        body name ``alphabet_soup_1_main`` (a real bug caught by
-        ``tests/test_pick_skill_or.py::test_pick_single_object_succeeds``,
-        which failed with every grasp candidate rejected as
-        "in collision" for touching the very object it was grasping).
+        """Whether (g1, g2) is an intentional fingerpad<->target contact, not
+        a violation. Matches by geom-id membership, not name substrings --
+        LIBERO object geoms (e.g. alphabet_soup_1_g7) don't substring-match
+        their own body name (alphabet_soup_1_main).
         """
         fingerpad_touch = g1 in self.fingerpad_geom_ids or g2 in self.fingerpad_geom_ids
         if not fingerpad_touch:
@@ -221,17 +156,11 @@ class CollisionChecker:
         target_object_geom_ids: set[int],
         dist: float,
     ) -> bool:
-        """A small, configurable amount of interpenetration between a FINGER
-        geom (pad or the rigid segment above it -- never the palm, see
-        ``finger_geom_ids``) and the grasp target is tolerated during
-        TERMINAL_APPROACH, mirroring real gripper compliance: a rigid
-        open-loop check requires the fully-open gripper to already be clear
-        of the object before ever closing, but a real (or MuJoCo's own
-        soft-contact) gripper can close through a few mm of an object
-        slightly wider than its rated opening. See
-        ``CollisionConfig.finger_overlap_tolerance_m``'s docstring for the
-        concrete case this fixes.
-        """
+        """Tolerates a small, configurable interpenetration between a FINGER
+        geom (pad or rigid segment, never the palm) and the grasp target
+        during TERMINAL_APPROACH, mirroring real gripper compliance -- a
+        rigid check would reject any object slightly wider than the
+        gripper's rated opening."""
         if phase != CollisionPhase.TERMINAL_APPROACH or self.config.finger_overlap_tolerance_m <= 0.0:
             return False
         finger_touch = g1 in self.finger_geom_ids or g2 in self.finger_geom_ids
@@ -273,7 +202,7 @@ class CollisionChecker:
         self, scratch: SceneQuery, attached: AttachedObjectState
     ) -> list[tuple[np.ndarray, float]]:
         """The carried object's fitted spheres placed in the world at whatever
-        configuration ``scratch`` currently holds -- i.e. carried rigidly by the
+        configuration scratch currently holds -- i.e. carried rigidly by the
         hand, not left at the object's stale live pose."""
         hand_pos, hand_quat = scratch.site_pose(self.ee_site)
         obj_pos, obj_quat = compose_world_pose(
@@ -294,18 +223,12 @@ class CollisionChecker:
         margin: float,
     ) -> tuple[list[Contact], float]:
         """Sphere-approximated collision of the carried object against every
-        other body in the scene (see module docstring). Returns
-        (violations, min_clearance).
+        other body in the scene. Returns (violations, min_clearance).
 
-        Checked **per-geom**, not against each body's merged bounding box: a
-        body assembled from several geoms (e.g. a basket's floor + walls) has
-        empty space *between* them -- its hollow interior -- that a single
-        merged AABB would flatten into solid, since the box spans from the
-        floor geom's bottom to the wall geoms' top across the whole
-        footprint. That made every hover pose above an open container read
-        as "in collision" even directly over the empty opening, not touching
-        any actual wall/floor geom (the root cause of placement failing to
-        find *any* feasible hover pose above a basket)."""
+        Checked per-geom, not per merged body AABB: a body assembled from
+        several geoms (e.g. a basket's floor + walls) has empty space between
+        them that a merged box would flatten into solid, falsely flagging a
+        hover pose over an open container as colliding."""
         world_spheres = self._attached_world_spheres(scratch, attached)
 
         permitted_body = goal_container_body if phase == CollisionPhase.PLACE_APPROACH else None
@@ -315,24 +238,8 @@ class CollisionChecker:
         for body_name in self._obstacle_body_names:
             if body_name == attached.object_name or body_name == permitted_body:
                 continue
-            # include_children=False: `_obstacle_body_names` already lists
-            # every body individually (parents and their descendants both
-            # get their own entry), so an inclusive per-body query here
-            # would recheck a descendant's own geoms a second time under
-            # each of its ancestors too. That's only redundant work for an
-            # ordinary body -- but for one whose ancestor is *not* excluded
-            # while the descendant itself *is* (a real, confirmed case: a
-            # fixture's world-parented root can be an empty pass-through
-            # frame with a permitted_body match only on its real,
-            # geometry-owning child -- see
-            # articulation.discover_cabinet_support_bodies's own docstring),
-            # the ancestor's inclusive query silently re-admits the exact
-            # geoms the child-level exclusion above was supposed to permit.
-            # Confirmed via a real rollout: every "place on top of the
-            # cabinet" candidate directly on its own measured top surface
-            # kept reading as colliding with that same surface, because the
-            # empty root body (never excluded, since only its child matched
-            # `permitted_body`) still enumerated the child's real geoms.
+            # include_children=False: bodies are already listed individually;
+            # an inclusive query would re-admit a child's excluded geoms via its ancestor frame.
             for gid in scratch.body_collision_geom_ids(body_name, include_children=False):
                 aabb_center, half_extents = scratch.geom_world_aabb(gid)
                 for sphere_center, radius in world_spheres:
@@ -358,33 +265,16 @@ class CollisionChecker:
     ) -> CollisionResult:
         """Validity check at one configuration.
 
-        ``permitted_contact_geom_ids`` are geoms the *gripper* is allowed to
-        press against outright -- not merely touch with its pads. Opening a
-        drawer is the case that needs it: the handle is the thing the hand
-        is deliberately going for, and a hook-style pull works by bearing on
-        it rather than by a clean pinch, so contact there is the intent, not
-        a failure. Kept to an explicit geom set (the handle assembly) rather
-        than the whole target body, so this cannot silently excuse planning
-        the hand through a drawer's front panel or side walls.
+        permitted_contact_geom_ids lets the *gripper* press directly on
+        specific geoms (e.g. a drawer handle during a hook-style pull),
+        without excusing contact elsewhere on the same body.
 
-        ``finger_joint_names``/``finger_qpos`` evaluate the pose with the
-        gripper held at a specific opening instead of whatever the live
-        scene happened to be at (see ``check_gripper_closure``'s docstring:
-        only the arm joints are otherwise set, so the fingers stay wherever
-        the clone inherited them -- in practice fully open). A caller that
-        intends to *approach* with partly-closed fingers has to be checked
-        that way or the check answers a question about a hand shape it will
-        never actually be in: measured on the middle drawer, the open
-        gripper's ~8cm span cannot fit the 4.0cm gap above its handle at
-        all, while a narrowed one has room to spare.
+        finger_joint_names/finger_qpos evaluate the gripper at a
+        specific opening instead of its default (fully open) qpos.
 
-        ``check_margin=False`` (the default, used by the OMPL state-validity
-        checker where speed matters -- this runs on the order of 1e3-1e4 times
-        per plan) only enforces *actual* penetration for the robot's real
-        geometry. The attached-object sphere check always applies its
-        configurable margin regardless of ``check_margin`` -- it's cheap
-        enough (a handful of sphere-vs-AABB distance calls) not to need the
-        same fast/slow split as the exact-geometry robot check.
+        check_margin=False (the default; used ~1e3-1e4 times per OMPL
+        plan) only enforces actual penetration. The attached-object sphere
+        check always applies its margin regardless, since it's cheap.
         """
         scratch = self.base_scene.clone()
         scratch.set_qpos(self.joint_names, q)
@@ -394,24 +284,14 @@ class CollisionChecker:
         target_object_geom_ids: set[int] = set()
         if target_object_body:
             target_object_geom_ids = set(scratch.body_geom_ids(target_object_body))
-        # The attached object's *real* geoms are still sitting wherever they
-        # physically are in the cloned live scene -- not moved to follow this
-        # hypothetical candidate `q` (that's what the sphere approximation is
-        # for, using the correct FK-derived pose for `q`). So they must be
-        # excluded from the exact-geometry check below, or a candidate `q`
-        # far from the object's *current* pose could spuriously read as
-        # colliding (or a `q` that happens to land near the stale position
-        # could spuriously read as fine) against a position that has nothing
-        # to do with where the object would actually be at that `q`.
+        # The attached object's real geoms still sit at their live (pre-grasp)
+        # pose in the clone, not this candidate q, so they're excluded below.
         attached_real_geom_ids: set[int] = (
             set(scratch.body_geom_ids(attached.object_name)) if attached is not None else set()
         )
 
-        # 1. Hard penetration check via mj_collision (respects model self-exclusions).
-        # Restricted to contacts involving the robot/gripper -- objects resting on the
-        # floor/table/each other are pre-existing scene state, not something the arm's
-        # motion is responsible for avoiding (the attached object is handled separately,
-        # by sphere approximation, below).
+        # 1. Hard penetration via mj_collision, restricted to contacts involving
+        # the robot/gripper -- other object-vs-object contact is pre-existing scene state.
         violations: list[Contact] = []
         min_clearance = math.inf
         for g1_name, g2_name, dist in scratch.compute_contacts():
@@ -453,19 +333,8 @@ class CollisionChecker:
                     ):
                         violations.append(Contact(scratch.geom_name(g1), scratch.geom_name(g2), d))
 
-        # 1b. STL keep-out zones (LIBERO-Constrained G(Safe(obj))).
-        #
-        # Checked on the end-effector site and on the carried object's fitted
-        # spheres -- the same two signals the benchmark scores (safe_ee /
-        # safe_object). The arm's links are deliberately NOT checked: the
-        # metric does not score them, and a 6cm cylinder that the elbow must
-        # also respect rejects far more of the configuration space than the
-        # constraint actually asks for.
-        #
-        # This runs inside the OMPL state-validity path, so RRTConnect plans
-        # around the zone, and inside the live MPC's own check() call, so
-        # tracking is held to it too. Cost is one FK-derived site read plus a
-        # 2D norm per zone -- negligible next to the contact pass above.
+        # 1b. STL keep-out zones (G(Safe(obj))): checked on the end-effector
+        # site only (matches the benchmark's safe_ee signal), in both planning and live tracking.
         zones = getattr(self.config, "keepout_zones", None) or []
         if zones:
             ee_xy = scratch.site_pose(self.ee_site)[0][:2]
@@ -482,13 +351,8 @@ class CollisionChecker:
                     # which is what separates "a cost the optimizer trades off"
                     # from "a specification the planner must satisfy".
                     violations.append(Contact(self.ee_site, f"keepout:{zone.name}", d))
-                # The carried object is deliberately NOT checked. The benchmark
-                # scores the end effector against the zone, so enforcing the
-                # object as well holds the planner to a stricter rule than the
-                # one being measured -- and to one it cannot apply accurately,
-                # since it only knows the object's nominal grasp transform while
-                # the object actually hangs about a centimetre off it. Enforcing
-                # the mismatch made runs worse without reducing violations.
+                # The carried object is deliberately not checked here: its
+                # true pose vs. nominal grasp transform differ enough that enforcing it made runs worse.
 
         # 2. Sphere-approximated attached-object collision.
         if attached is not None:
@@ -503,6 +367,52 @@ class CollisionChecker:
             contacts=violations,
             min_clearance=min_clearance,
         )
+
+    def attached_exact_contacts(
+        self,
+        q: np.ndarray,
+        attached: AttachedObjectState,
+        goal_container_body: str | None = None,
+        drop_m: float = 0.0,
+        clearance_m: float = 0.0,
+    ) -> list[tuple[str, str, float]]:
+        """Penetrating contacts of the carried object's real collision geoms
+        (not its spheres) at configuration q, optionally lowered drop_m below
+        the hand. For static goal-pose checks where packing is tight: the
+        spheres make a moka pot ~25% wider than it is, enough to rule out
+        two pots side by side on a burner. Gripper and goal-surface contact are
+        ignored. clearance_m also tests the object shifted that far each way
+        horizontally -- contacts only register on penetration, so touching
+        distance would otherwise pass with no slack for set-down drift."""
+        scratch = self.base_scene.clone()
+        scratch.set_qpos(self.joint_names, q)
+        scratch.forward()
+        hand_pos, hand_quat = scratch.site_pose(self.ee_site)
+        obj_pos, obj_quat = compose_world_pose(hand_pos, hand_quat, attached.grasp_transform_hand_from_object)
+        obj_geoms = set(scratch.body_collision_geom_ids(attached.object_name))
+        ignored = set(self.robot_geom_ids)
+        if goal_container_body is not None:
+            ignored |= set(scratch.body_collision_geom_ids(goal_container_body))
+        base = obj_pos - np.array([0.0, 0.0, drop_m])
+        shifts = [np.zeros(3)]
+        if clearance_m > 0.0:
+            shifts += [clearance_m * np.array(v, dtype=float) for v in ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0))]
+        out = []
+        for shift in shifts:
+            scratch.set_free_body_qpos(attached.object_name, base + shift, obj_quat)
+            mujoco.mj_collision(scratch.model, scratch.data)
+            for i in range(scratch.data.ncon):
+                c = scratch.data.contact[i]
+                i1, i2, dist = int(c.geom1), int(c.geom2), float(c.dist)
+                if (i1 in obj_geoms) == (i2 in obj_geoms):
+                    continue
+                other = i2 if i1 in obj_geoms else i1
+                if other in ignored or dist >= 0.0:
+                    continue
+                out.append((scratch.geom_name(i1), scratch.geom_name(i2), dist))
+            if out:
+                break
+        return out
 
     def check_edge(
         self,
@@ -549,25 +459,13 @@ class CollisionChecker:
         finger_closed_qpos: np.ndarray,
         target_object_body: str | None = None,
     ) -> CollisionResult:
-        """Simulate fully closing the gripper at a candidate arm
-        configuration and check for real, non-permitted contact.
+        """Simulate fully closing the gripper at a candidate arm config and
+        check for real, non-permitted contact.
 
-        Neither ``IKSolver``, ``MotionPlanner``, nor ``JointSpaceMPC`` ever
-        include the finger joints in their planned state space -- ``check()``/
-        ``check_edge()`` only ever set ``self.joint_names`` (the 7 arm
-        joints) on the scratch clone, so the fingers sit at whatever qpos the
-        clone happened to inherit (the live gripper's actual position at
-        snapshot time -- roughly open, since closing only ever happens as a
-        final, separate, non-collision-aware action). A candidate grasp
-        configuration can therefore pass every existing check -- its *open*-
-        finger geometry clears the target fine -- and still be physically
-        unreachable: closing the fingers from there can catch the *rigid*
-        finger segment (which reaches further than the pad, see
-        ``scene_query.finger_reach_below_tcp_m``) on geometry the open
-        fingers swept past cleanly. This validates that specific, previously
-        unchecked transition, using the exact same permitted-contact rules
-        ``check()`` already applies (fingerpad<->target contact and small
-        finger-overlap tolerance still allowed; anything else counts).
+        check()/check_edge() never plan the finger joints, so a
+        candidate can pass with open-finger geometry clear yet still catch
+        the rigid segment above the pad once closed -- this validates that
+        specific transition.
         """
         scratch = self.base_scene.clone()
         scratch.set_qpos(self.joint_names, arm_q)

@@ -22,12 +22,7 @@ from .history_log import STLHistoryLog
 
 class RecallControllerMixin:
     def _sync_scene_context_from_env(self, env: BaseManipulationEnv) -> None:
-        """Pull the latest relocalized scene context from the environment.
-
-        This used to live in the deleted legacy reflection mixin, but System-2
-        recall also depends on it. Keep it here so recall remains independent
-        of the old reflection code path.
-        """
+        """Pull the latest relocalized scene context from the environment."""
         new_ctx = getattr(env, "scene_context", None)
         if isinstance(new_ctx, dict):
             self.scene_context = new_ctx
@@ -37,8 +32,8 @@ class RecallControllerMixin:
         """Return a task-agnostic snapshot of all currently localized objects.
 
         The recall/history payload needs the whole scene, not only the active
-        object. Prefer the relocalized ``live_scene_state`` stored in the scene
-        context, and fill any missing objects from ``env.scene_objects`` when
+        object. Prefer the relocalized live_scene_state stored in the scene
+        context, and fill any missing objects from env.scene_objects when
         available. This works for simulation ground truth and real perception
         without hard-coding object names or task types.
         """
@@ -80,12 +75,8 @@ class RecallControllerMixin:
         return self._jsonable(status)
 
     def _constraints_for_reflection(self, env: BaseManipulationEnv) -> dict[str, Any]:
-        """Compatibility payload of controller/perception constraints for recall.
-
-        The name is kept for existing call sites, but this is now used by the
-        System-2 recall path as generic execution context rather than by the
-        removed legacy reflection module.
-        """
+        """Controller/perception constraints payload, used as generic execution
+        context for the System-2 recall path."""
         platform = self.scene_context.get("platform", {}) if isinstance(getattr(self, "scene_context", None), dict) else {}
         perception = platform.get("perception", {}) if isinstance(platform, dict) else {}
         return self._jsonable(
@@ -97,9 +88,8 @@ class RecallControllerMixin:
                 "top_grasp_hover_z": getattr(env, "top_grasp_hover_z", None),
                 "descend_radius": getattr(env, "descend_radius", None),
                 "goal_radius": getattr(env, "goal_radius", None),
-                # These legacy fields may be absent or disabled in SDF-only
-                # mode, but keeping them in the payload preserves debug/context
-                # compatibility without adding them back into the MPC cost.
+                # May be absent in SDF-only mode; kept in the payload for
+                # debug context without feeding them back into the MPC cost.
                 "keepout_xy": getattr(env, "keepout_xy", None),
                 "keepout_radius": getattr(env, "keepout_radius", None),
             }
@@ -166,12 +156,7 @@ class RecallControllerMixin:
         return self._subtask_description_from_fields(subtask)
 
     def _subtask_prompt_view(self, subtask: dict[str, Any]) -> dict[str, Any]:
-        """Compact, JSON-safe view of a compiled subtask for System-2 recall.
-
-        This used to live in the removed legacy reflection mixin. Recall still
-        needs the same representation when building prompts, so keep the shared
-        helper in the recall mixin rather than depending on legacy reflection.
-        """
+        """Compact, JSON-safe view of a compiled subtask for System-2 recall prompts."""
         if not isinstance(subtask, dict):
             return {}
         return self._jsonable(
@@ -210,7 +195,7 @@ class RecallControllerMixin:
         return self._jsonable(
             {
                 "ee": status.get("eef_pos"),
-                # ``cube_pos`` is the legacy backend key for the currently active
+                # cube_pos is the legacy backend key for the currently active
                 # manipulated object. Keep the payload key object-agnostic.
                 "active_object": status.get("cube_pos"),
                 "goal_xy": status.get("goal_anchor_xy"),
@@ -370,17 +355,15 @@ class RecallControllerMixin:
             if not signal.get("failed"):
                 continue
             name = str(signal.get("predicate", ""))
-            # Do not trigger on normal task-predicate negativity during early
-            # approach; trigger on safety/failure predicates unless explicitly
-            # configured otherwise.
+            # Skips normal task-predicate negativity during early approach;
+            # only safety/failure predicates trigger here.
             if any(k in name for k in self.recall_failure_predicate_keywords):
                 return f"predicate_threshold:{name}={float(signal.get('robustness')):.4f}"
         if skill == "transport" and record.get("grasped") is False:
             return "object_not_grasped"
         if skill == "place" and record.get("grasped") is False:
-            # Releasing the object is expected during place. Do not recall just
-            # because the gripper opened in release_hold or retreat; otherwise
-            # System 2 can interrupt the retreat and the video ends over the stack.
+            # Releasing is expected during place; recalling on gripper-open
+            # here would let System 2 interrupt the retreat mid-motion.
             try:
                 stage = int((record.get("subtask") or {}).get("stage", -1))
             except Exception:
@@ -693,7 +676,7 @@ class RecallControllerMixin:
     ) -> tuple[int, dict[str, Any]]:
         """Run a short post-verification hold/retreat segment for video and settling.
 
-        The normal non-recall executor already has ``post_success_steps``. The
+        The normal non-recall executor already has post_success_steps. The
         recall executor previously ended immediately after the final System-2
         verifier returned an empty plan, which made the video stop right at the
         final placement/verification frame. This tail keeps executing the safe
@@ -747,12 +730,9 @@ class RecallControllerMixin:
         outdir: str | Path | None,
         capture_initial_video: bool,
     ) -> dict[str, Any]:
-        """Run subtasks with event-driven System-2 recall.
-
-        This path intentionally bypasses the old reflection-repair prompt. On
-        success or STL failure threshold, System 2 receives the rolling history
-        log and returns a fresh task_spec for the remaining work.
-        """
+        """Run subtasks with event-driven System-2 recall: on success or STL
+        failure threshold, System 2 gets the rolling history log and returns a
+        fresh task_spec for the remaining work."""
         if self._is_real_simple_env(env):
             print(
                 "[recall] real simple executor uses blocking primitives; "
@@ -783,11 +763,8 @@ class RecallControllerMixin:
             final_recall_verified = False
             while idx < len(active_subtasks) or (not final_recall_verified and not aborted):
                 if idx >= len(active_subtasks):
-                    # End-of-rollout verification. This is intentionally a
-                    # full System-2 recall, not the legacy final-reflection
-                    # repair prompt. If the refreshed scene shows any object-level
-                    # or relation-level regression, System 2 should return a
-                    # fresh remaining task_spec anchored to the original plan.
+                    # Full System-2 recall so any object- or relation-level
+                    # regression in the refreshed scene gets a fresh remaining task_spec.
                     self._update_history_log(env, None, force=True, trigger="final_verification")
                     new_subtasks, should_abort, final_result = self._maybe_recall_system2(
                         env,
@@ -920,9 +897,8 @@ class RecallControllerMixin:
                                 recalled = True
                                 break
                             if new_subtasks is not None:
-                                # System 2 returns the full remaining task_spec
-                                # from the current state, so replace the active
-                                # rollout rather than splicing a repair patch.
+                                # System 2 returns the full remaining task_spec,
+                                # so replace the active rollout rather than splicing a repair patch.
                                 active_subtasks = list(new_subtasks)
                                 idx = 0
                                 recalled = True
