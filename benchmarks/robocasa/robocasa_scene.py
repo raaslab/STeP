@@ -203,6 +203,13 @@ def build_scene_context(env, *, task_name, layout_id, style_id, seed=None):
                         # grasp straight down either.
                         "enabled": True,
                         "camera_names": ["robot0_agentview_center", "robot0_eye_in_hand"],
+                        # Seed the retry viewpoints. They default to OS entropy,
+                        # so each run saw different synthetic camera poses, hence
+                        # a different point cloud and a different candidate set
+                        # from the very same scene -- 3, 1, 2 and 32 candidates
+                        # across four runs of one seeded episode, which makes two
+                        # runs incomparable and any A/B meaningless.
+                        "viewpoint_seed": 0,
                     },
                 },
             },

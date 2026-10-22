@@ -76,6 +76,14 @@ class BaseManipulationEnv:
         action_low: np.ndarray | None = None,
         action_high: np.ndarray | None = None,
         table_z: float = 0.8,
+        # Where a task object's reported pose sits on the object itself.
+        # LIBERO reports the mesh BASE (table level), so reaching mid-height
+        # means lifting the grasp target by half the object's height. RoboCasa
+        # reports the CENTROID -- measured on its eggplant, the body origin sits
+        # 0.003 m from the midpoint of the mesh and 0.086 m above its bottom --
+        # so applying that same lift raises the target from the middle of the
+        # object to above its top, and the gripper closes on air.
+        object_pose_is_base: bool = True,
         # MPC tuning (sane defaults shared by sim + real)
         mpc_action_scale_m: float = 0.032,
         mpc_horizon: int = 16,
@@ -173,6 +181,7 @@ class BaseManipulationEnv:
 
         # Table / goal geometry.
         self.table_z = float(table_z)
+        self.object_pose_is_base = bool(object_pose_is_base)
         self.carry_z = self.table_z + float(carry_height_above_table)
         self.retreat_z = self.table_z + float(retreat_height_above_table)
         self.keepout_xy = np.asarray(keepout_xy, dtype=np.float32)
@@ -761,11 +770,15 @@ class BaseManipulationEnv:
             return self.grasp_offset_override.astype(np.float32)
         if self._is_rim_object():
             return self.mode.grasp_rim_offset
-        if self.active_object_height is not None:
+        if self.active_object_height is not None and self.object_pose_is_base:
             # cube_pos is the object's base pose (table level), not its
             # centroid, so a zero offset drives the gripper down into tall
             # objects (cans, bottles, boxes) before it ever closes. Grasp at
             # roughly mid-height instead, using the known object height.
+            #
+            # Only where the platform reports the base. On one that reports the
+            # centroid the pose already IS mid-height, and lifting again puts
+            # the fingers at the top of the object -- see object_pose_is_base.
             half_height = float(np.clip(self.active_object_height * 0.5, 0.0, 0.15))
             return np.array([0.0, 0.0, half_height], dtype=np.float32)
         return np.zeros(3, dtype=np.float32)

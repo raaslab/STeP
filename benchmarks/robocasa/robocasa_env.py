@@ -49,6 +49,14 @@ class RoboCasaManipulationEnv(BaseManipulationEnv):
         super().__init__(
             workspace_bounds=platform.get("workspace_bounds"),
             table_z=self._surface_z(),
+            # RoboCasa reports an object's pose at its CENTROID, not at the
+            # mesh base the way LIBERO does. Measured on this task's eggplant:
+            # the body origin sits 0.003 m from the midpoint of the object's
+            # own geoms and 0.086 m above their bottom. Left at LIBERO's
+            # default, the env lifts the grasp target by half the object height
+            # on top of a pose that is already mid-height, so the fingers close
+            # above the object -- 2.8 cm above it in the rollout that showed it.
+            object_pose_is_base=False,
             **kwargs,
         )
 
