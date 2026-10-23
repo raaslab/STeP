@@ -28,15 +28,16 @@ class _StubEnv:
 
 class _StubExecutorSelf:
     """Minimal stand-in for self -- _wait_for_stl_start's internal
-    step_callback calls self._capture_video_frame(env), which a bare None
-    can't satisfy."""
+    step_callback calls back into the executor, which a bare None can't
+    satisfy."""
 
     def _capture_video_frame(self, env, force=False):
         pass
 
     def _on_skill_step(self, env):
-        # The real executor records a frame and ticks its STL monitor here. The
-        # wait mechanism only cares that the callback is safe to call per step.
+        # What the wait's step_callback actually calls now. The real executor
+        # records a video frame and samples the constraint margins here; the
+        # wait mechanism only needs the call to be safe to make per step.
         pass
 
 
