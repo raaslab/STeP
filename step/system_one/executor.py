@@ -2087,6 +2087,8 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                 sub = active_subtasks[idx]
                 self._set_video_subtask_overlay(sub)
                 skill = sub["skill"]
+                if hasattr(env, "perception_keyframe"):
+                    env.perception_keyframe(reason=f"subtask:{skill}")
                 # Only trust an object reference that resolves to a known entity; canonical()
                 # echoes unmatched input, which would otherwise overwrite a prior pick's object.
                 object_name = self.resolver.canonical(sub.get("params", {}).get("object"))

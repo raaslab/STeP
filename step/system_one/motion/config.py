@@ -50,6 +50,12 @@ class CollisionConfig:
     # Tolerated finger (not palm) interpenetration with the grasp target
     # during TERMINAL_APPROACH, mirroring real gripper compliance. 0.0 disables it.
     finger_overlap_tolerance_m: float = 0.006
+    # During TERMINAL_APPROACH, let the fingers (never the palm or arm) touch
+    # the grasp target. For perceived targets: a top-surface reconstruction can't
+    # show overhangs, so a bowl's flared wall is solid underneath and blocks
+    # the outer finger of every rim grasp (MoveIt's allowed-collision matrix
+    # and cuRobo excuse the target the same way).
+    permit_gripper_target_contact: bool = False
     # STL G(Safe(obj)) keep-out zones, enforced at plan/control time. Empty by default (no constraints).
     keepout_zones: list["KeepoutZone"] = field(default_factory=list)
 

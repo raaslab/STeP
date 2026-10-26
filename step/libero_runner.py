@@ -51,6 +51,17 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--suite", default=None)
     p.add_argument(
+        "--perception",
+        default="privileged",
+        choices=["privileged", "vision"],
+        help=(
+            "How System 1 and System 2 learn object names, poses and geometry. "
+            "'privileged' (default) reads them from the simulator. 'vision' "
+            "rebuilds the scene from the agentview + wrist RGB-D cameras and "
+            "proprioception only (SAM3 + VLM naming, see step/perception/)."
+        ),
+    )
+    p.add_argument(
         "--perturbation",
         default=None,
         choices=list(LIBERO_PRO_PERTURBATIONS) + ["random"],
@@ -235,6 +246,11 @@ def _prepare_libero_scene(args: argparse.Namespace, outdir: Path) -> tuple[dict[
         libero["init_state_id"] = int(args.init_state_id)
     if args.bddl_file is not None:
         libero["bddl_file"] = args.bddl_file
+    perception = platform.setdefault("perception", {})
+    perception["mode"] = args.perception
+    if args.perception == "vision":
+        perception["instruction"] = _resolve_prompt(args, scene_context)
+        perception["debug_dir"] = str(outdir / "perception")
 
     try:
         from step.system_one.libero_env import LiberoManipulationEnv
@@ -247,6 +263,14 @@ def _prepare_libero_scene(args: argparse.Namespace, outdir: Path) -> tuple[dict[
     # geometry() needs the obstacle's discovered xy to place the SDF circle, and
     # that only exists once the scene has been snapshotted. The real execution
     # env then materializes it during construction.
+    if args.avoid_region and args.perception == "vision" and not getattr(args, "zone_center_xy", None):
+        perceived = {e.get("name") for e in scene_context.get("entities", [])}
+        if args.avoid_region not in perceived:
+            raise SystemExit(
+                f"--avoid-region {args.avoid_region!r} names a simulator body, which vision mode cannot see "
+                f"by that name. Perceived entities: {sorted(n for n in perceived if n)}. Pass one of those, "
+                "or a virtual zone via --zone-center-xy / --benchmark-task."
+            )
     if args.avoid_region:
         avoid: dict[str, Any] = {
             "region": args.avoid_region,
@@ -314,9 +338,15 @@ def _capture_live_scene_and_image(env: Any, scene_context: dict[str, Any], outdi
         update_scene_context_from_objects,
     )
 
-    obs = getattr(env, "last_raw_obs", None)
-    objects = (infer_objects_from_obs(obs) if obs is not None else {}) or infer_objects_from_mujoco(env.env)
-    fresh_context = update_scene_context_from_objects(scene_context, objects, source="pipeline_recall_live")
+    if getattr(env, "perception", None) is not None:
+        from step.system_one.libero_env import perceived_scene_context
+
+        env.perception_keyframe(reason="recall")
+        fresh_context = perceived_scene_context(scene_context, env)
+    else:
+        obs = getattr(env, "last_raw_obs", None)
+        objects = (infer_objects_from_obs(obs) if obs is not None else {}) or infer_objects_from_mujoco(env.env)
+        fresh_context = update_scene_context_from_objects(scene_context, objects, source="pipeline_recall_live")
     try:
         fresh_context = refresh_drawer_blocking_flags(fresh_context, env.env)
     except Exception as exc:
@@ -806,7 +836,12 @@ def main() -> int:
         "benchmark_task": getattr(args, "benchmark_task", None),
         "max_pipeline_retries": int(args.max_pipeline_retries),
         "enforce_keepout": not bool(getattr(args, "no_enforce_keepout", False)),
+        "perception": args.perception,
     }
+    if args.perception == "vision":
+        from step.perception import audit
+
+        summary["privileged_access_audit"] = audit.report()
     save_json(summary, outdir / "execution_summary.json")
     print(f"[step] execution summary: {outdir / 'execution_summary.json'}")
     if args.save_video:
