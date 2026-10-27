@@ -1,0 +1,6656 @@
+{
+ "libero_spatial/1": {
+  "suite": "libero_spatial",
+  "task_id": 1,
+  "obstacle": "milk_1",
+  "obstacle_type": "milk",
+  "obstacle_footprint_m": [
+   0.052,
+   0.053
+  ],
+  "pick": "akita_black_bowl_1",
+  "goal": "plate_1",
+  "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_1_milk.bddl",
+  "levels": {
+   "L1": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_1_L1.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1948,
+       0.4254
+      ],
+      "pick_xy": [
+       -0.1948,
+       0.3152
+      ],
+      "goal_xy": [
+       0.0698,
+       0.1882
+      ],
+      "route_m": 0.294,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 90.0
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1653,
+       0.4233
+      ],
+      "pick_xy": [
+       -0.1653,
+       0.3132
+      ],
+      "goal_xy": [
+       0.0567,
+       0.1976
+      ],
+      "route_m": 0.25,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 90.0
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1769,
+       0.4185
+      ],
+      "pick_xy": [
+       -0.1769,
+       0.3084
+      ],
+      "goal_xy": [
+       0.0462,
+       0.2038
+      ],
+      "route_m": 0.246,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 90.0
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       -0.186,
+       0.4424
+      ],
+      "pick_xy": [
+       -0.186,
+       0.3323
+      ],
+      "goal_xy": [
+       0.055,
+       0.1947
+      ],
+      "route_m": 0.278,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 90.0
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0787,
+       0.4428
+      ],
+      "pick_xy": [
+       -0.1704,
+       0.3335
+      ],
+      "goal_xy": [
+       0.0468,
+       0.1925
+      ],
+      "route_m": 0.259,
+      "edge_gap_to_pick_m": 0.032,
+      "angle_deg": 50.0
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1841,
+       0.4249
+      ],
+      "pick_xy": [
+       -0.1841,
+       0.3147
+      ],
+      "goal_xy": [
+       0.0555,
+       0.1892
+      ],
+      "route_m": 0.27,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 90.0
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1651,
+       0.4185
+      ],
+      "pick_xy": [
+       -0.1651,
+       0.3084
+      ],
+      "goal_xy": [
+       0.057,
+       0.2018
+      ],
+      "route_m": 0.246,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 90.0
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1855,
+       0.4428
+      ],
+      "pick_xy": [
+       -0.1855,
+       0.3327
+      ],
+      "goal_xy": [
+       0.0657,
+       0.1896
+      ],
+      "route_m": 0.289,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 90.0
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1873,
+       0.434
+      ],
+      "pick_xy": [
+       -0.1873,
+       0.3239
+      ],
+      "goal_xy": [
+       0.0726,
+       0.2042
+      ],
+      "route_m": 0.286,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 90.0
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1831,
+       0.4303
+      ],
+      "pick_xy": [
+       -0.1831,
+       0.3201
+      ],
+      "goal_xy": [
+       0.0481,
+       0.2005
+      ],
+      "route_m": 0.26,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 90.0
+     }
+    ]
+   },
+   "L2": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_1_L2.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0625,
+       0.2517
+      ],
+      "pick_xy": [
+       -0.1948,
+       0.3152
+      ],
+      "goal_xy": [
+       0.0698,
+       0.1882
+      ],
+      "route_m": 0.294,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.107,
+      "detour_side_gap_m": 0.082
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0849,
+       0.1965
+      ],
+      "pick_xy": [
+       -0.1653,
+       0.3132
+      ],
+      "goal_xy": [
+       0.0567,
+       0.1976
+      ],
+      "route_m": 0.25,
+      "route_frac": 0.5,
+      "lateral_m": -0.066,
+      "route_overlap_m": 0.042,
+      "detour_side_gap_m": 0.053
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0931,
+       0.197
+      ],
+      "pick_xy": [
+       -0.1769,
+       0.3084
+      ],
+      "goal_xy": [
+       0.0462,
+       0.2038
+      ],
+      "route_m": 0.246,
+      "route_frac": 0.5,
+      "lateral_m": -0.065,
+      "route_overlap_m": 0.041,
+      "detour_side_gap_m": 0.067
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0715,
+       0.2669
+      ],
+      "pick_xy": [
+       -0.186,
+       0.3323
+      ],
+      "goal_xy": [
+       0.055,
+       0.1947
+      ],
+      "route_m": 0.278,
+      "route_frac": 0.475,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.109,
+      "detour_side_gap_m": 0.086
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0787,
+       0.2251
+      ],
+      "pick_xy": [
+       -0.1704,
+       0.3335
+      ],
+      "goal_xy": [
+       0.0468,
+       0.1925
+      ],
+      "route_m": 0.259,
+      "route_frac": 0.525,
+      "lateral_m": -0.041,
+      "route_overlap_m": 0.07,
+      "detour_side_gap_m": 0.075
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0703,
+       0.2551
+      ],
+      "pick_xy": [
+       -0.1841,
+       0.3147
+      ],
+      "goal_xy": [
+       0.0555,
+       0.1892
+      ],
+      "route_m": 0.27,
+      "route_frac": 0.475,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.108,
+      "detour_side_gap_m": 0.106
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0824,
+       0.196
+      ],
+      "pick_xy": [
+       -0.1651,
+       0.3084
+      ],
+      "goal_xy": [
+       0.057,
+       0.2018
+      ],
+      "route_m": 0.246,
+      "route_frac": 0.5,
+      "lateral_m": -0.066,
+      "route_overlap_m": 0.041,
+      "detour_side_gap_m": 0.063
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0599,
+       0.2611
+      ],
+      "pick_xy": [
+       -0.1855,
+       0.3327
+      ],
+      "goal_xy": [
+       0.0657,
+       0.1896
+      ],
+      "route_m": 0.289,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.109,
+      "detour_side_gap_m": 0.087
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0574,
+       0.264
+      ],
+      "pick_xy": [
+       -0.1873,
+       0.3239
+      ],
+      "goal_xy": [
+       0.0726,
+       0.2042
+      ],
+      "route_m": 0.286,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.106,
+      "detour_side_gap_m": 0.107
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0861,
+       0.2102
+      ],
+      "pick_xy": [
+       -0.1831,
+       0.3201
+      ],
+      "goal_xy": [
+       0.0481,
+       0.2005
+      ],
+      "route_m": 0.26,
+      "route_frac": 0.525,
+      "lateral_m": -0.053,
+      "route_overlap_m": 0.055,
+      "detour_side_gap_m": 0.064
+     }
+    ]
+   }
+  },
+  "language": "Pick the akita black bowl next to the ramekin and place it on the plate"
+ },
+ "libero_spatial/2": {
+  "suite": "libero_spatial",
+  "task_id": 2,
+  "obstacle": "wine_bottle_1",
+  "obstacle_type": "wine_bottle",
+  "obstacle_footprint_m": [
+   0.043,
+   0.044
+  ],
+  "pick": "akita_black_bowl_1",
+  "goal": "plate_1",
+  "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_2_wine_bottle.bddl",
+  "levels": {
+   "L1": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_2_L1.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       0.0125,
+       -0.0893
+      ],
+      "pick_xy": [
+       -0.075,
+       0.015
+      ],
+      "goal_xy": [
+       0.0716,
+       0.2004
+      ],
+      "route_m": 0.236,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 310.0
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1625,
+       0.1011
+      ],
+      "pick_xy": [
+       -0.075,
+       -0.0032
+      ],
+      "goal_xy": [
+       0.0677,
+       0.1869
+      ],
+      "route_m": 0.238,
+      "edge_gap_to_pick_m": 0.032,
+      "angle_deg": 130.0
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       0.0292,
+       -0.0795
+      ],
+      "pick_xy": [
+       -0.075,
+       0.0079
+      ],
+      "goal_xy": [
+       0.0548,
+       0.2037
+      ],
+      "route_m": 0.235,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 320.0
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       0.0292,
+       -0.0789
+      ],
+      "pick_xy": [
+       -0.075,
+       0.0085
+      ],
+      "goal_xy": [
+       0.0539,
+       0.2005
+      ],
+      "route_m": 0.231,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 320.0
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       0.0292,
+       -0.0923
+      ],
+      "pick_xy": [
+       -0.075,
+       -0.0049
+      ],
+      "goal_xy": [
+       0.0856,
+       0.1945
+      ],
+      "route_m": 0.256,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 320.0
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1625,
+       0.0935
+      ],
+      "pick_xy": [
+       -0.075,
+       -0.0107
+      ],
+      "goal_xy": [
+       0.0647,
+       0.2002
+      ],
+      "route_m": 0.253,
+      "edge_gap_to_pick_m": 0.032,
+      "angle_deg": 130.0
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       0.0292,
+       -0.0906
+      ],
+      "pick_xy": [
+       -0.075,
+       -0.0032
+      ],
+      "goal_xy": [
+       0.0506,
+       0.1886
+      ],
+      "route_m": 0.229,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 320.0
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1625,
+       0.0969
+      ],
+      "pick_xy": [
+       -0.075,
+       -0.0073
+      ],
+      "goal_xy": [
+       0.0604,
+       0.1888
+      ],
+      "route_m": 0.238,
+      "edge_gap_to_pick_m": 0.032,
+      "angle_deg": 130.0
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       0.0125,
+       -0.09
+      ],
+      "pick_xy": [
+       -0.075,
+       0.0142
+      ],
+      "goal_xy": [
+       0.061,
+       0.192
+      ],
+      "route_m": 0.224,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 310.0
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       0.0292,
+       -0.0825
+      ],
+      "pick_xy": [
+       -0.075,
+       0.0049
+      ],
+      "goal_xy": [
+       0.0656,
+       0.1996
+      ],
+      "route_m": 0.24,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 320.0
+     }
+    ]
+   },
+   "L2": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_2_L2.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0497,
+       0.1305
+      ],
+      "pick_xy": [
+       -0.075,
+       0.015
+      ],
+      "goal_xy": [
+       0.0716,
+       0.2004
+      ],
+      "route_m": 0.236,
+      "route_frac": 0.45,
+      "lateral_m": 0.052,
+      "route_overlap_m": 0.054,
+      "detour_side_gap_m": 0.012
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0695,
+       0.1116
+      ],
+      "pick_xy": [
+       -0.075,
+       -0.0032
+      ],
+      "goal_xy": [
+       0.0677,
+       0.1869
+      ],
+      "route_m": 0.238,
+      "route_frac": 0.4,
+      "lateral_m": 0.064,
+      "route_overlap_m": 0.041,
+      "detour_side_gap_m": 0.002
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0738,
+       0.148
+      ],
+      "pick_xy": [
+       -0.075,
+       0.0079
+      ],
+      "goal_xy": [
+       0.0548,
+       0.2037
+      ],
+      "route_m": 0.235,
+      "route_frac": 0.5,
+      "lateral_m": 0.076,
+      "route_overlap_m": 0.028,
+      "detour_side_gap_m": 0.001
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0668,
+       0.1353
+      ],
+      "pick_xy": [
+       -0.075,
+       0.0085
+      ],
+      "goal_xy": [
+       0.0539,
+       0.2005
+      ],
+      "route_m": 0.231,
+      "route_frac": 0.475,
+      "lateral_m": 0.064,
+      "route_overlap_m": 0.041,
+      "detour_side_gap_m": 0.001
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       -0.037,
+       0.1043
+      ],
+      "pick_xy": [
+       -0.075,
+       -0.0049
+      ],
+      "goal_xy": [
+       0.0856,
+       0.1945
+      ],
+      "route_m": 0.256,
+      "route_frac": 0.425,
+      "lateral_m": 0.039,
+      "route_overlap_m": 0.067,
+      "detour_side_gap_m": 0.034
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0584,
+       0.1528
+      ],
+      "pick_xy": [
+       -0.075,
+       -0.0107
+      ],
+      "goal_xy": [
+       0.0647,
+       0.2002
+      ],
+      "route_m": 0.253,
+      "route_frac": 0.575,
+      "lateral_m": 0.076,
+      "route_overlap_m": 0.028,
+      "detour_side_gap_m": 0.002
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0717,
+       0.118
+      ],
+      "pick_xy": [
+       -0.075,
+       -0.0032
+      ],
+      "goal_xy": [
+       0.0506,
+       0.1886
+      ],
+      "route_m": 0.229,
+      "route_frac": 0.45,
+      "lateral_m": 0.064,
+      "route_overlap_m": 0.04,
+      "detour_side_gap_m": 0.012
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0596,
+       0.1051
+      ],
+      "pick_xy": [
+       -0.075,
+       -0.0073
+      ],
+      "goal_xy": [
+       0.0604,
+       0.1888
+      ],
+      "route_m": 0.238,
+      "route_frac": 0.425,
+      "lateral_m": 0.051,
+      "route_overlap_m": 0.053,
+      "detour_side_gap_m": 0.0
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0617,
+       0.1379
+      ],
+      "pick_xy": [
+       -0.075,
+       0.0142
+      ],
+      "goal_xy": [
+       0.061,
+       0.192
+      ],
+      "route_m": 0.224,
+      "route_frac": 0.475,
+      "lateral_m": 0.065,
+      "route_overlap_m": 0.041,
+      "detour_side_gap_m": 0.011
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0569,
+       0.1177
+      ],
+      "pick_xy": [
+       -0.075,
+       0.0049
+      ],
+      "goal_xy": [
+       0.0656,
+       0.1996
+      ],
+      "route_m": 0.24,
+      "route_frac": 0.425,
+      "lateral_m": 0.051,
+      "route_overlap_m": 0.054,
+      "detour_side_gap_m": 0.001
+     }
+    ]
+   }
+  },
+  "language": "Pick the akita black bowl from table center and place it on the plate"
+ },
+ "libero_spatial/5": {
+  "suite": "libero_spatial",
+  "task_id": 5,
+  "obstacle": "ketchup_1",
+  "obstacle_type": "ketchup",
+  "obstacle_footprint_m": [
+   0.037,
+   0.056
+  ],
+  "pick": "akita_black_bowl_1",
+  "goal": "plate_1",
+  "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_5_ketchup.bddl",
+  "levels": {
+   "L1": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_5_L1.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2114,
+       0.3139
+      ],
+      "pick_xy": [
+       -0.2114,
+       0.2022
+      ],
+      "goal_xy": [
+       0.0735,
+       0.1855
+      ],
+      "route_m": 0.285,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 90.0
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2276,
+       0.3013
+      ],
+      "pick_xy": [
+       -0.2276,
+       0.1896
+      ],
+      "goal_xy": [
+       0.0606,
+       0.1924
+      ],
+      "route_m": 0.288,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 90.0
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2221,
+       0.3085
+      ],
+      "pick_xy": [
+       -0.2221,
+       0.1968
+      ],
+      "goal_xy": [
+       0.0499,
+       0.2018
+      ],
+      "route_m": 0.272,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 90.0
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2113,
+       0.3005
+      ],
+      "pick_xy": [
+       -0.2113,
+       0.1887
+      ],
+      "goal_xy": [
+       0.0455,
+       0.2008
+      ],
+      "route_m": 0.257,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 90.0
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2116,
+       0.3015
+      ],
+      "pick_xy": [
+       -0.2116,
+       0.1898
+      ],
+      "goal_xy": [
+       0.0554,
+       0.1902
+      ],
+      "route_m": 0.267,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 90.0
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       -0.222,
+       0.3205
+      ],
+      "pick_xy": [
+       -0.222,
+       0.2088
+      ],
+      "goal_xy": [
+       0.0518,
+       0.2082
+      ],
+      "route_m": 0.274,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 90.0
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2097,
+       0.3253
+      ],
+      "pick_xy": [
+       -0.2097,
+       0.2136
+      ],
+      "goal_xy": [
+       0.049,
+       0.1881
+      ],
+      "route_m": 0.26,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 90.0
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2033,
+       0.3232
+      ],
+      "pick_xy": [
+       -0.2033,
+       0.2115
+      ],
+      "goal_xy": [
+       0.066,
+       0.2086
+      ],
+      "route_m": 0.269,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 90.0
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2214,
+       0.3106
+      ],
+      "pick_xy": [
+       -0.2214,
+       0.1989
+      ],
+      "goal_xy": [
+       0.0468,
+       0.1879
+      ],
+      "route_m": 0.268,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 90.0
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2074,
+       0.3176
+      ],
+      "pick_xy": [
+       -0.2074,
+       0.2058
+      ],
+      "goal_xy": [
+       0.0712,
+       0.185
+      ],
+      "route_m": 0.279,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 90.0
+     }
+    ]
+   },
+   "L2": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_5_L2.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       -0.069,
+       0.1938
+      ],
+      "pick_xy": [
+       -0.2114,
+       0.2022
+      ],
+      "goal_xy": [
+       0.0735,
+       0.1855
+      ],
+      "route_m": 0.285,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.086,
+      "detour_side_gap_m": 0.048
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0835,
+       0.191
+      ],
+      "pick_xy": [
+       -0.2276,
+       0.1896
+      ],
+      "goal_xy": [
+       0.0606,
+       0.1924
+      ],
+      "route_m": 0.288,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.082,
+      "detour_side_gap_m": 0.046
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0861,
+       0.1993
+      ],
+      "pick_xy": [
+       -0.2221,
+       0.1968
+      ],
+      "goal_xy": [
+       0.0499,
+       0.2018
+      ],
+      "route_m": 0.272,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.083,
+      "detour_side_gap_m": 0.038
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0829,
+       0.1948
+      ],
+      "pick_xy": [
+       -0.2113,
+       0.1887
+      ],
+      "goal_xy": [
+       0.0455,
+       0.2008
+      ],
+      "route_m": 0.257,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.085,
+      "detour_side_gap_m": 0.033
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0781,
+       0.19
+      ],
+      "pick_xy": [
+       -0.2116,
+       0.1898
+      ],
+      "goal_xy": [
+       0.0554,
+       0.1902
+      ],
+      "route_m": 0.267,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.082,
+      "detour_side_gap_m": 0.035
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0851,
+       0.2085
+      ],
+      "pick_xy": [
+       -0.222,
+       0.2088
+      ],
+      "goal_xy": [
+       0.0518,
+       0.2082
+      ],
+      "route_m": 0.274,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.082,
+      "detour_side_gap_m": 0.038
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0804,
+       0.2008
+      ],
+      "pick_xy": [
+       -0.2097,
+       0.2136
+      ],
+      "goal_xy": [
+       0.049,
+       0.1881
+      ],
+      "route_m": 0.26,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.088,
+      "detour_side_gap_m": 0.037
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0687,
+       0.21
+      ],
+      "pick_xy": [
+       -0.2033,
+       0.2115
+      ],
+      "goal_xy": [
+       0.066,
+       0.2086
+      ],
+      "route_m": 0.269,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.083,
+      "detour_side_gap_m": 0.036
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0873,
+       0.1934
+      ],
+      "pick_xy": [
+       -0.2214,
+       0.1989
+      ],
+      "goal_xy": [
+       0.0468,
+       0.1879
+      ],
+      "route_m": 0.268,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.085,
+      "detour_side_gap_m": 0.038
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0681,
+       0.1954
+      ],
+      "pick_xy": [
+       -0.2074,
+       0.2058
+      ],
+      "goal_xy": [
+       0.0712,
+       0.185
+      ],
+      "route_m": 0.279,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.087,
+      "detour_side_gap_m": 0.046
+     }
+    ]
+   }
+  },
+  "language": "Pick the akita black bowl on the ramekin and place it on the plate"
+ },
+ "libero_spatial/6": {
+  "suite": "libero_spatial",
+  "task_id": 6,
+  "obstacle": "orange_juice_1",
+  "obstacle_type": "orange_juice",
+  "obstacle_footprint_m": [
+   0.052,
+   0.053
+  ],
+  "pick": "akita_black_bowl_1",
+  "goal": "plate_1",
+  "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_6_orange_juice.bddl",
+  "levels": {
+   "L1": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_6_L1.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       0.0276,
+       -0.0705
+      ],
+      "pick_xy": [
+       0.1373,
+       -0.0705
+      ],
+      "goal_xy": [
+       0.0689,
+       0.1944
+      ],
+      "route_m": 0.274,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       0.0118,
+       -0.0783
+      ],
+      "pick_xy": [
+       0.1215,
+       -0.0783
+      ],
+      "goal_xy": [
+       0.0473,
+       0.2103
+      ],
+      "route_m": 0.298,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       0.0177,
+       -0.0564
+      ],
+      "pick_xy": [
+       0.1274,
+       -0.0564
+      ],
+      "goal_xy": [
+       0.0747,
+       0.2139
+      ],
+      "route_m": 0.275,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       0.0124,
+       -0.0564
+      ],
+      "pick_xy": [
+       0.1222,
+       -0.0564
+      ],
+      "goal_xy": [
+       0.0487,
+       0.2119
+      ],
+      "route_m": 0.278,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       0.0061,
+       -0.0603
+      ],
+      "pick_xy": [
+       0.1158,
+       -0.0603
+      ],
+      "goal_xy": [
+       0.0527,
+       0.1923
+      ],
+      "route_m": 0.26,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       0.0178,
+       -0.0826
+      ],
+      "pick_xy": [
+       0.1275,
+       -0.0826
+      ],
+      "goal_xy": [
+       0.0689,
+       0.197
+      ],
+      "route_m": 0.286,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       0.0218,
+       -0.07
+      ],
+      "pick_xy": [
+       0.1316,
+       -0.07
+      ],
+      "goal_xy": [
+       0.0626,
+       0.1944
+      ],
+      "route_m": 0.273,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       0.0214,
+       -0.0698
+      ],
+      "pick_xy": [
+       0.1312,
+       -0.0698
+      ],
+      "goal_xy": [
+       0.0723,
+       0.1953
+      ],
+      "route_m": 0.272,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       0.0336,
+       -0.069
+      ],
+      "pick_xy": [
+       0.1433,
+       -0.069
+      ],
+      "goal_xy": [
+       0.0471,
+       0.2068
+      ],
+      "route_m": 0.292,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       0.0104,
+       -0.0737
+      ],
+      "pick_xy": [
+       0.1201,
+       -0.0737
+      ],
+      "goal_xy": [
+       0.0457,
+       0.1903
+      ],
+      "route_m": 0.274,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     }
+    ]
+   },
+   "L2": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_6_L2.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       0.1669,
+       0.0502
+      ],
+      "pick_xy": [
+       0.1373,
+       -0.0705
+      ],
+      "goal_xy": [
+       0.0689,
+       0.1944
+      ],
+      "route_m": 0.274,
+      "route_frac": 0.4,
+      "lateral_m": -0.059,
+      "route_overlap_m": 0.039,
+      "detour_side_gap_m": 0.082
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       0.1733,
+       0.0504
+      ],
+      "pick_xy": [
+       0.1215,
+       -0.0783
+      ],
+      "goal_xy": [
+       0.0473,
+       0.2103
+      ],
+      "route_m": 0.298,
+      "route_frac": 0.375,
+      "lateral_m": -0.082,
+      "route_overlap_m": 0.015,
+      "detour_side_gap_m": 0.083
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       0.1601,
+       0.0692
+      ],
+      "pick_xy": [
+       0.1274,
+       -0.0564
+      ],
+      "goal_xy": [
+       0.0747,
+       0.2139
+      ],
+      "route_m": 0.275,
+      "route_frac": 0.425,
+      "lateral_m": -0.056,
+      "route_overlap_m": 0.037,
+      "detour_side_gap_m": 0.082
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       0.15,
+       0.0666
+      ],
+      "pick_xy": [
+       0.1222,
+       -0.0564
+      ],
+      "goal_xy": [
+       0.0487,
+       0.2119
+      ],
+      "route_m": 0.278,
+      "route_frac": 0.4,
+      "lateral_m": -0.059,
+      "route_overlap_m": 0.039,
+      "detour_side_gap_m": 0.082
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       0.1602,
+       0.0514
+      ],
+      "pick_xy": [
+       0.1158,
+       -0.0603
+      ],
+      "goal_xy": [
+       0.0527,
+       0.1923
+      ],
+      "route_m": 0.26,
+      "route_frac": 0.375,
+      "lateral_m": -0.07,
+      "route_overlap_m": 0.027,
+      "detour_side_gap_m": 0.081
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       0.1664,
+       0.0642
+      ],
+      "pick_xy": [
+       0.1275,
+       -0.0826
+      ],
+      "goal_xy": [
+       0.0689,
+       0.197
+      ],
+      "route_m": 0.286,
+      "route_frac": 0.475,
+      "lateral_m": -0.068,
+      "route_overlap_m": 0.026,
+      "detour_side_gap_m": 0.081
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       0.1723,
+       0.0536
+      ],
+      "pick_xy": [
+       0.1316,
+       -0.07
+      ],
+      "goal_xy": [
+       0.0626,
+       0.1944
+      ],
+      "route_m": 0.273,
+      "route_frac": 0.4,
+      "lateral_m": -0.071,
+      "route_overlap_m": 0.027,
+      "detour_side_gap_m": 0.081
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       0.1592,
+       0.0686
+      ],
+      "pick_xy": [
+       0.1312,
+       -0.0698
+      ],
+      "goal_xy": [
+       0.0723,
+       0.1953
+      ],
+      "route_m": 0.272,
+      "route_frac": 0.475,
+      "lateral_m": -0.057,
+      "route_overlap_m": 0.038,
+      "detour_side_gap_m": 0.084
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       0.1492,
+       0.0646
+      ],
+      "pick_xy": [
+       0.1433,
+       -0.069
+      ],
+      "goal_xy": [
+       0.0471,
+       0.2068
+      ],
+      "route_m": 0.292,
+      "route_frac": 0.425,
+      "lateral_m": -0.05,
+      "route_overlap_m": 0.052,
+      "detour_side_gap_m": 0.082
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       0.1574,
+       0.0579
+      ],
+      "pick_xy": [
+       0.1201,
+       -0.0737
+      ],
+      "goal_xy": [
+       0.0457,
+       0.1903
+      ],
+      "route_m": 0.274,
+      "route_frac": 0.425,
+      "lateral_m": -0.072,
+      "route_overlap_m": 0.027,
+      "detour_side_gap_m": 0.081
+     }
+    ]
+   }
+  },
+  "language": "Pick the akita black bowl next to the cookies box and place it on the plate"
+ },
+ "libero_spatial/7": {
+  "suite": "libero_spatial",
+  "task_id": 7,
+  "obstacle": "milk_1",
+  "obstacle_type": "milk",
+  "obstacle_footprint_m": [
+   0.052,
+   0.053
+  ],
+  "pick": "akita_black_bowl_1",
+  "goal": "plate_1",
+  "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_7_milk.bddl",
+  "levels": {
+   "L1": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_7_L1.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       -0.3143,
+       0.0119
+      ],
+      "pick_xy": [
+       -0.2621,
+       -0.1314
+      ],
+      "goal_xy": [
+       0.0601,
+       0.205
+      ],
+      "route_m": 0.466,
+      "edge_gap_to_pick_m": 0.063,
+      "angle_deg": 110.0
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       -0.3384,
+       0.0153
+      ],
+      "pick_xy": [
+       -0.2588,
+       -0.1226
+      ],
+      "goal_xy": [
+       0.0644,
+       0.2113
+      ],
+      "route_m": 0.465,
+      "edge_gap_to_pick_m": 0.058,
+      "angle_deg": 120.0
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2059,
+       -0.2796
+      ],
+      "pick_xy": [
+       -0.2512,
+       -0.155
+      ],
+      "goal_xy": [
+       0.0579,
+       0.1937
+      ],
+      "route_m": 0.466,
+      "edge_gap_to_pick_m": 0.044,
+      "angle_deg": 290.0
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       -0.3152,
+       -0.0002
+      ],
+      "pick_xy": [
+       -0.2664,
+       -0.1341
+      ],
+      "goal_xy": [
+       0.057,
+       0.2005
+      ],
+      "route_m": 0.465,
+      "edge_gap_to_pick_m": 0.054,
+      "angle_deg": 110.0
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       -0.3072,
+       0.0102
+      ],
+      "pick_xy": [
+       -0.255,
+       -0.1332
+      ],
+      "goal_xy": [
+       0.0576,
+       0.1937
+      ],
+      "route_m": 0.452,
+      "edge_gap_to_pick_m": 0.063,
+      "angle_deg": 110.0
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       -0.3152,
+       0.003
+      ],
+      "pick_xy": [
+       -0.263,
+       -0.1403
+      ],
+      "goal_xy": [
+       0.0467,
+       0.194
+      ],
+      "route_m": 0.456,
+      "edge_gap_to_pick_m": 0.063,
+      "angle_deg": 110.0
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       -0.3134,
+       0.0068
+      ],
+      "pick_xy": [
+       -0.2612,
+       -0.1366
+      ],
+      "goal_xy": [
+       0.0678,
+       0.1857
+      ],
+      "route_m": 0.46,
+      "edge_gap_to_pick_m": 0.063,
+      "angle_deg": 110.0
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       -0.316,
+       0.0004
+      ],
+      "pick_xy": [
+       -0.2639,
+       -0.143
+      ],
+      "goal_xy": [
+       0.0452,
+       0.1899
+      ],
+      "route_m": 0.454,
+      "edge_gap_to_pick_m": 0.063,
+      "angle_deg": 110.0
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2146,
+       -0.2863
+      ],
+      "pick_xy": [
+       -0.2394,
+       -0.1457
+      ],
+      "goal_xy": [
+       0.0667,
+       0.1952
+      ],
+      "route_m": 0.458,
+      "edge_gap_to_pick_m": 0.06,
+      "angle_deg": 280.0
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       -0.3411,
+       0.0006
+      ],
+      "pick_xy": [
+       -0.2615,
+       -0.1373
+      ],
+      "goal_xy": [
+       0.0584,
+       0.1867
+      ],
+      "route_m": 0.455,
+      "edge_gap_to_pick_m": 0.058,
+      "angle_deg": 120.0
+     }
+    ]
+   },
+   "L2": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_7_L2.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       -0.101,
+       0.0368
+      ],
+      "pick_xy": [
+       -0.2621,
+       -0.1314
+      ],
+      "goal_xy": [
+       0.0601,
+       0.205
+      ],
+      "route_m": 0.466,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.113,
+      "detour_side_gap_m": 0.034
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0972,
+       0.0443
+      ],
+      "pick_xy": [
+       -0.2588,
+       -0.1226
+      ],
+      "goal_xy": [
+       0.0644,
+       0.2113
+      ],
+      "route_m": 0.465,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.113,
+      "detour_side_gap_m": 0.04
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0967,
+       0.0193
+      ],
+      "pick_xy": [
+       -0.2512,
+       -0.155
+      ],
+      "goal_xy": [
+       0.0579,
+       0.1937
+      ],
+      "route_m": 0.466,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.113,
+      "detour_side_gap_m": 0.033
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1047,
+       0.0332
+      ],
+      "pick_xy": [
+       -0.2664,
+       -0.1341
+      ],
+      "goal_xy": [
+       0.057,
+       0.2005
+      ],
+      "route_m": 0.465,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.113,
+      "detour_side_gap_m": 0.044
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0987,
+       0.0303
+      ],
+      "pick_xy": [
+       -0.255,
+       -0.1332
+      ],
+      "goal_xy": [
+       0.0576,
+       0.1937
+      ],
+      "route_m": 0.452,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.113,
+      "detour_side_gap_m": 0.046
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1081,
+       0.0268
+      ],
+      "pick_xy": [
+       -0.263,
+       -0.1403
+      ],
+      "goal_xy": [
+       0.0467,
+       0.194
+      ],
+      "route_m": 0.456,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.113,
+      "detour_side_gap_m": 0.035
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0967,
+       0.0245
+      ],
+      "pick_xy": [
+       -0.2612,
+       -0.1366
+      ],
+      "goal_xy": [
+       0.0678,
+       0.1857
+      ],
+      "route_m": 0.46,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.113,
+      "detour_side_gap_m": 0.045
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1093,
+       0.0234
+      ],
+      "pick_xy": [
+       -0.2639,
+       -0.143
+      ],
+      "goal_xy": [
+       0.0452,
+       0.1899
+      ],
+      "route_m": 0.454,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.113,
+      "detour_side_gap_m": 0.051
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0864,
+       0.0248
+      ],
+      "pick_xy": [
+       -0.2394,
+       -0.1457
+      ],
+      "goal_xy": [
+       0.0667,
+       0.1952
+      ],
+      "route_m": 0.458,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.113,
+      "detour_side_gap_m": 0.04
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1015,
+       0.0247
+      ],
+      "pick_xy": [
+       -0.2615,
+       -0.1373
+      ],
+      "goal_xy": [
+       0.0584,
+       0.1867
+      ],
+      "route_m": 0.455,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.113,
+      "detour_side_gap_m": 0.026
+     }
+    ]
+   }
+  },
+  "language": "Pick the akita black bowl on the stove and place it on the plate"
+ },
+ "libero_object/3": {
+  "suite": "libero_object",
+  "task_id": 3,
+  "obstacle": "wine_bottle_1",
+  "obstacle_type": "wine_bottle",
+  "obstacle_footprint_m": [
+   0.043,
+   0.044
+  ],
+  "pick": "bbq_sauce_1",
+  "goal": "basket_1_contain_region",
+  "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_object_3_wine_bottle.bddl",
+  "levels": {
+   "L1": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_object_3_L1.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0227,
+       -0.0901
+      ],
+      "pick_xy": [
+       0.0431,
+       -0.0901
+      ],
+      "goal_xy": [
+       -0.0043,
+       0.2544
+      ],
+      "route_m": 0.348,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0176,
+       -0.1056
+      ],
+      "pick_xy": [
+       0.0482,
+       -0.1056
+      ],
+      "goal_xy": [
+       0.0052,
+       0.248
+      ],
+      "route_m": 0.356,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       -0.025,
+       -0.0995
+      ],
+      "pick_xy": [
+       0.0408,
+       -0.0995
+      ],
+      "goal_xy": [
+       -0.0019,
+       0.2487
+      ],
+      "route_m": 0.351,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0125,
+       -0.102
+      ],
+      "pick_xy": [
+       0.0533,
+       -0.102
+      ],
+      "goal_xy": [
+       0.0101,
+       0.2493
+      ],
+      "route_m": 0.354,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0085,
+       -0.0937
+      ],
+      "pick_xy": [
+       0.0573,
+       -0.0937
+      ],
+      "goal_xy": [
+       0.015,
+       0.2462
+      ],
+      "route_m": 0.343,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0211,
+       -0.0952
+      ],
+      "pick_xy": [
+       0.0447,
+       -0.0952
+      ],
+      "goal_xy": [
+       0.0,
+       0.2697
+      ],
+      "route_m": 0.368,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0236,
+       -0.1039
+      ],
+      "pick_xy": [
+       0.0422,
+       -0.1039
+      ],
+      "goal_xy": [
+       -0.0143,
+       0.2724
+      ],
+      "route_m": 0.381,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0252,
+       -0.1041
+      ],
+      "pick_xy": [
+       0.0407,
+       -0.1041
+      ],
+      "goal_xy": [
+       0.0026,
+       0.2614
+      ],
+      "route_m": 0.368,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       0.1079,
+       -0.0995
+      ],
+      "pick_xy": [
+       0.0421,
+       -0.0995
+      ],
+      "goal_xy": [
+       -0.0035,
+       0.2528
+      ],
+      "route_m": 0.355,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       0.1254,
+       -0.1067
+      ],
+      "pick_xy": [
+       0.0596,
+       -0.1067
+      ],
+      "goal_xy": [
+       0.012,
+       0.2658
+      ],
+      "route_m": 0.375,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     }
+    ]
+   },
+   "L2": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_object_3_L2.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       0.0194,
+       0.0822
+      ],
+      "pick_xy": [
+       0.0431,
+       -0.0901
+      ],
+      "goal_xy": [
+       -0.0043,
+       0.2544
+      ],
+      "route_m": 0.348,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.042,
+      "detour_side_gap_m": 0.047
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       0.0267,
+       0.0712
+      ],
+      "pick_xy": [
+       0.0482,
+       -0.1056
+      ],
+      "goal_xy": [
+       0.0052,
+       0.248
+      ],
+      "route_m": 0.356,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.041,
+      "detour_side_gap_m": 0.054
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       0.0195,
+       0.0746
+      ],
+      "pick_xy": [
+       0.0408,
+       -0.0995
+      ],
+      "goal_xy": [
+       -0.0019,
+       0.2487
+      ],
+      "route_m": 0.351,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.041,
+      "detour_side_gap_m": 0.047
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       0.0317,
+       0.0737
+      ],
+      "pick_xy": [
+       0.0533,
+       -0.102
+      ],
+      "goal_xy": [
+       0.0101,
+       0.2493
+      ],
+      "route_m": 0.354,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.041,
+      "detour_side_gap_m": 0.059
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       0.0361,
+       0.0762
+      ],
+      "pick_xy": [
+       0.0573,
+       -0.0937
+      ],
+      "goal_xy": [
+       0.015,
+       0.2462
+      ],
+      "route_m": 0.343,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.041,
+      "detour_side_gap_m": 0.064
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       0.0224,
+       0.0872
+      ],
+      "pick_xy": [
+       0.0447,
+       -0.0952
+      ],
+      "goal_xy": [
+       0.0,
+       0.2697
+      ],
+      "route_m": 0.368,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.041,
+      "detour_side_gap_m": 0.05
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       0.014,
+       0.0842
+      ],
+      "pick_xy": [
+       0.0422,
+       -0.1039
+      ],
+      "goal_xy": [
+       -0.0143,
+       0.2724
+      ],
+      "route_m": 0.381,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.042,
+      "detour_side_gap_m": 0.041
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       0.0216,
+       0.0787
+      ],
+      "pick_xy": [
+       0.0407,
+       -0.1041
+      ],
+      "goal_xy": [
+       0.0026,
+       0.2614
+      ],
+      "route_m": 0.368,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.04,
+      "detour_side_gap_m": 0.049
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       0.0193,
+       0.0766
+      ],
+      "pick_xy": [
+       0.0421,
+       -0.0995
+      ],
+      "goal_xy": [
+       -0.0035,
+       0.2528
+      ],
+      "route_m": 0.355,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.041,
+      "detour_side_gap_m": 0.047
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       0.0358,
+       0.0795
+      ],
+      "pick_xy": [
+       0.0596,
+       -0.1067
+      ],
+      "goal_xy": [
+       0.012,
+       0.2658
+      ],
+      "route_m": 0.375,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.041,
+      "detour_side_gap_m": 0.063
+     }
+    ]
+   }
+  },
+  "language": "Pick the bbq sauce and place it in the basket"
+ },
+ "libero_object/6": {
+  "suite": "libero_object",
+  "task_id": 6,
+  "obstacle": "wine_bottle_1",
+  "obstacle_type": "wine_bottle",
+  "obstacle_footprint_m": [
+   0.043,
+   0.044
+  ],
+  "pick": "butter_1",
+  "goal": "basket_1_contain_region",
+  "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_object_6_wine_bottle.bddl",
+  "levels": {
+   "L1": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_object_6_L1.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0302,
+       -0.2444
+      ],
+      "pick_xy": [
+       -0.1196,
+       -0.2444
+      ],
+      "goal_xy": [
+       0.0118,
+       0.2642
+      ],
+      "route_m": 0.525,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0292,
+       -0.2417
+      ],
+      "pick_xy": [
+       -0.1186,
+       -0.2417
+      ],
+      "goal_xy": [
+       0.0057,
+       0.2685
+      ],
+      "route_m": 0.525,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0331,
+       -0.236
+      ],
+      "pick_xy": [
+       -0.1225,
+       -0.236
+      ],
+      "goal_xy": [
+       -0.0076,
+       0.2706
+      ],
+      "route_m": 0.519,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0317,
+       -0.2402
+      ],
+      "pick_xy": [
+       -0.1211,
+       -0.2402
+      ],
+      "goal_xy": [
+       0.0043,
+       0.2468
+      ],
+      "route_m": 0.503,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0344,
+       -0.2395
+      ],
+      "pick_xy": [
+       -0.1238,
+       -0.2395
+      ],
+      "goal_xy": [
+       0.0026,
+       0.2538
+      ],
+      "route_m": 0.509,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0318,
+       -0.244
+      ],
+      "pick_xy": [
+       -0.1212,
+       -0.244
+      ],
+      "goal_xy": [
+       0.0062,
+       0.2656
+      ],
+      "route_m": 0.525,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0276,
+       -0.2406
+      ],
+      "pick_xy": [
+       -0.117,
+       -0.2406
+      ],
+      "goal_xy": [
+       -0.0029,
+       0.2619
+      ],
+      "route_m": 0.515,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0297,
+       -0.236
+      ],
+      "pick_xy": [
+       -0.119,
+       -0.236
+      ],
+      "goal_xy": [
+       0.0055,
+       0.2458
+      ],
+      "route_m": 0.498,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0296,
+       -0.2365
+      ],
+      "pick_xy": [
+       -0.119,
+       -0.2365
+      ],
+      "goal_xy": [
+       0.0149,
+       0.2464
+      ],
+      "route_m": 0.501,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0342,
+       -0.2448
+      ],
+      "pick_xy": [
+       -0.1235,
+       -0.2448
+      ],
+      "goal_xy": [
+       -0.0123,
+       0.2644
+      ],
+      "route_m": 0.521,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     }
+    ]
+   },
+   "L2": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_object_6_L2.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0539,
+       0.0099
+      ],
+      "pick_xy": [
+       -0.1196,
+       -0.2444
+      ],
+      "goal_xy": [
+       0.0118,
+       0.2642
+      ],
+      "route_m": 0.525,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.068,
+      "detour_side_gap_m": 0.026
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0565,
+       0.0134
+      ],
+      "pick_xy": [
+       -0.1186,
+       -0.2417
+      ],
+      "goal_xy": [
+       0.0057,
+       0.2685
+      ],
+      "route_m": 0.525,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.068,
+      "detour_side_gap_m": 0.03
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0651,
+       0.0173
+      ],
+      "pick_xy": [
+       -0.1225,
+       -0.236
+      ],
+      "goal_xy": [
+       -0.0076,
+       0.2706
+      ],
+      "route_m": 0.519,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.067,
+      "detour_side_gap_m": 0.035
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0584,
+       0.0033
+      ],
+      "pick_xy": [
+       -0.1211,
+       -0.2402
+      ],
+      "goal_xy": [
+       0.0043,
+       0.2468
+      ],
+      "route_m": 0.503,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.068,
+      "detour_side_gap_m": 0.019
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0606,
+       0.0072
+      ],
+      "pick_xy": [
+       -0.1238,
+       -0.2395
+      ],
+      "goal_xy": [
+       0.0026,
+       0.2538
+      ],
+      "route_m": 0.509,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.068,
+      "detour_side_gap_m": 0.023
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0575,
+       0.0108
+      ],
+      "pick_xy": [
+       -0.1212,
+       -0.244
+      ],
+      "goal_xy": [
+       0.0062,
+       0.2656
+      ],
+      "route_m": 0.525,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.068,
+      "detour_side_gap_m": 0.027
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       -0.06,
+       0.0106
+      ],
+      "pick_xy": [
+       -0.117,
+       -0.2406
+      ],
+      "goal_xy": [
+       -0.0029,
+       0.2619
+      ],
+      "route_m": 0.515,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.067,
+      "detour_side_gap_m": 0.028
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0568,
+       0.0049
+      ],
+      "pick_xy": [
+       -0.119,
+       -0.236
+      ],
+      "goal_xy": [
+       0.0055,
+       0.2458
+      ],
+      "route_m": 0.498,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.068,
+      "detour_side_gap_m": 0.021
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       -0.052,
+       0.005
+      ],
+      "pick_xy": [
+       -0.119,
+       -0.2365
+      ],
+      "goal_xy": [
+       0.0149,
+       0.2464
+      ],
+      "route_m": 0.501,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.068,
+      "detour_side_gap_m": 0.02
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0679,
+       0.0098
+      ],
+      "pick_xy": [
+       -0.1235,
+       -0.2448
+      ],
+      "goal_xy": [
+       -0.0123,
+       0.2644
+      ],
+      "route_m": 0.521,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.067,
+      "detour_side_gap_m": 0.028
+     }
+    ]
+   }
+  },
+  "language": "Pick the butter and place it in the basket"
+ },
+ "libero_object/8": {
+  "suite": "libero_object",
+  "task_id": 8,
+  "obstacle": "wine_bottle_1",
+  "obstacle_type": "wine_bottle",
+  "obstacle_footprint_m": [
+   0.043,
+   0.044
+  ],
+  "pick": "chocolate_pudding_1",
+  "goal": "basket_1_contain_region",
+  "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_object_8_wine_bottle.bddl",
+  "levels": {
+   "L1": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_object_8_L1.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2114,
+       -0.24
+      ],
+      "pick_xy": [
+       -0.12,
+       -0.24
+      ],
+      "goal_xy": [
+       0.012,
+       0.2511
+      ],
+      "route_m": 0.509,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2114,
+       -0.24
+      ],
+      "pick_xy": [
+       -0.12,
+       -0.24
+      ],
+      "goal_xy": [
+       -0.0065,
+       0.2582
+      ],
+      "route_m": 0.511,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2114,
+       -0.24
+      ],
+      "pick_xy": [
+       -0.12,
+       -0.24
+      ],
+      "goal_xy": [
+       -0.0023,
+       0.2532
+      ],
+      "route_m": 0.507,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2114,
+       -0.24
+      ],
+      "pick_xy": [
+       -0.12,
+       -0.24
+      ],
+      "goal_xy": [
+       0.0035,
+       0.2729
+      ],
+      "route_m": 0.528,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2114,
+       -0.24
+      ],
+      "pick_xy": [
+       -0.12,
+       -0.24
+      ],
+      "goal_xy": [
+       0.0113,
+       0.262
+      ],
+      "route_m": 0.519,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2114,
+       -0.24
+      ],
+      "pick_xy": [
+       -0.12,
+       -0.24
+      ],
+      "goal_xy": [
+       0.0064,
+       0.2486
+      ],
+      "route_m": 0.505,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2114,
+       -0.24
+      ],
+      "pick_xy": [
+       -0.12,
+       -0.24
+      ],
+      "goal_xy": [
+       0.0035,
+       0.2658
+      ],
+      "route_m": 0.521,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2114,
+       -0.24
+      ],
+      "pick_xy": [
+       -0.12,
+       -0.24
+      ],
+      "goal_xy": [
+       0.0087,
+       0.2608
+      ],
+      "route_m": 0.517,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2114,
+       -0.24
+      ],
+      "pick_xy": [
+       -0.12,
+       -0.24
+      ],
+      "goal_xy": [
+       -0.0076,
+       0.2689
+      ],
+      "route_m": 0.521,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2114,
+       -0.24
+      ],
+      "pick_xy": [
+       -0.12,
+       -0.24
+      ],
+      "goal_xy": [
+       0.0034,
+       0.2546
+      ],
+      "route_m": 0.51,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     }
+    ]
+   },
+   "L2": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_object_8_L2.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       -0.054,
+       0.0055
+      ],
+      "pick_xy": [
+       -0.12,
+       -0.24
+      ],
+      "goal_xy": [
+       0.012,
+       0.2511
+      ],
+      "route_m": 0.509,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.071,
+      "detour_side_gap_m": 0.022
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0633,
+       0.0091
+      ],
+      "pick_xy": [
+       -0.12,
+       -0.24
+      ],
+      "goal_xy": [
+       -0.0065,
+       0.2582
+      ],
+      "route_m": 0.511,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.07,
+      "detour_side_gap_m": 0.028
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0611,
+       0.0066
+      ],
+      "pick_xy": [
+       -0.12,
+       -0.24
+      ],
+      "goal_xy": [
+       -0.0023,
+       0.2532
+      ],
+      "route_m": 0.507,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.07,
+      "detour_side_gap_m": 0.025
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0582,
+       0.0164
+      ],
+      "pick_xy": [
+       -0.12,
+       -0.24
+      ],
+      "goal_xy": [
+       0.0035,
+       0.2729
+      ],
+      "route_m": 0.528,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.07,
+      "detour_side_gap_m": 0.035
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0543,
+       0.011
+      ],
+      "pick_xy": [
+       -0.12,
+       -0.24
+      ],
+      "goal_xy": [
+       0.0113,
+       0.262
+      ],
+      "route_m": 0.519,
+      "route_frac": 0.5,
+      "lateral_m": -0.0,
+      "route_overlap_m": 0.071,
+      "detour_side_gap_m": 0.028
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0568,
+       0.0043
+      ],
+      "pick_xy": [
+       -0.12,
+       -0.24
+      ],
+      "goal_xy": [
+       0.0064,
+       0.2486
+      ],
+      "route_m": 0.505,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.071,
+      "detour_side_gap_m": 0.021
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0582,
+       0.0129
+      ],
+      "pick_xy": [
+       -0.12,
+       -0.24
+      ],
+      "goal_xy": [
+       0.0035,
+       0.2658
+      ],
+      "route_m": 0.521,
+      "route_frac": 0.5,
+      "lateral_m": -0.0,
+      "route_overlap_m": 0.07,
+      "detour_side_gap_m": 0.031
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0556,
+       0.0104
+      ],
+      "pick_xy": [
+       -0.12,
+       -0.24
+      ],
+      "goal_xy": [
+       0.0087,
+       0.2608
+      ],
+      "route_m": 0.517,
+      "route_frac": 0.5,
+      "lateral_m": -0.0,
+      "route_overlap_m": 0.071,
+      "detour_side_gap_m": 0.027
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0638,
+       0.0144
+      ],
+      "pick_xy": [
+       -0.12,
+       -0.24
+      ],
+      "goal_xy": [
+       -0.0076,
+       0.2689
+      ],
+      "route_m": 0.521,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.07,
+      "detour_side_gap_m": 0.034
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0583,
+       0.0073
+      ],
+      "pick_xy": [
+       -0.12,
+       -0.24
+      ],
+      "goal_xy": [
+       0.0034,
+       0.2546
+      ],
+      "route_m": 0.51,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.071,
+      "detour_side_gap_m": 0.025
+     }
+    ]
+   }
+  },
+  "language": "Pick the chocolate pudding and place it in the basket"
+ },
+ "libero_object/9": {
+  "suite": "libero_object",
+  "task_id": 9,
+  "obstacle": "wine_bottle_1",
+  "obstacle_type": "wine_bottle",
+  "obstacle_footprint_m": [
+   0.043,
+   0.044
+  ],
+  "pick": "orange_juice_1",
+  "goal": "basket_1_contain_region",
+  "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_object_9_wine_bottle.bddl",
+  "levels": {
+   "L1": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_object_9_L1.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0275,
+       -0.1
+      ],
+      "pick_xy": [
+       0.05,
+       -0.1
+      ],
+      "goal_xy": [
+       -0.0041,
+       0.2507
+      ],
+      "route_m": 0.355,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0275,
+       -0.1
+      ],
+      "pick_xy": [
+       0.05,
+       -0.1
+      ],
+      "goal_xy": [
+       -0.013,
+       0.2544
+      ],
+      "route_m": 0.36,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0275,
+       -0.1
+      ],
+      "pick_xy": [
+       0.05,
+       -0.1
+      ],
+      "goal_xy": [
+       0.0026,
+       0.2471
+      ],
+      "route_m": 0.35,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0275,
+       -0.1
+      ],
+      "pick_xy": [
+       0.05,
+       -0.1
+      ],
+      "goal_xy": [
+       0.0063,
+       0.2456
+      ],
+      "route_m": 0.348,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0275,
+       -0.1
+      ],
+      "pick_xy": [
+       0.05,
+       -0.1
+      ],
+      "goal_xy": [
+       0.0041,
+       0.269
+      ],
+      "route_m": 0.372,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0275,
+       -0.1
+      ],
+      "pick_xy": [
+       0.05,
+       -0.1
+      ],
+      "goal_xy": [
+       0.0019,
+       0.2679
+      ],
+      "route_m": 0.371,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0275,
+       -0.1
+      ],
+      "pick_xy": [
+       0.05,
+       -0.1
+      ],
+      "goal_xy": [
+       -0.0106,
+       0.2664
+      ],
+      "route_m": 0.371,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0275,
+       -0.1
+      ],
+      "pick_xy": [
+       0.05,
+       -0.1
+      ],
+      "goal_xy": [
+       0.0131,
+       0.2469
+      ],
+      "route_m": 0.349,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0275,
+       -0.1
+      ],
+      "pick_xy": [
+       0.05,
+       -0.1
+      ],
+      "goal_xy": [
+       0.0016,
+       0.2641
+      ],
+      "route_m": 0.367,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0275,
+       -0.1
+      ],
+      "pick_xy": [
+       0.05,
+       -0.1
+      ],
+      "goal_xy": [
+       0.0095,
+       0.2652
+      ],
+      "route_m": 0.367,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     }
+    ]
+   },
+   "L2": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_object_9_L2.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       0.023,
+       0.0753
+      ],
+      "pick_xy": [
+       0.05,
+       -0.1
+      ],
+      "goal_xy": [
+       -0.0041,
+       0.2507
+      ],
+      "route_m": 0.355,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.054,
+      "detour_side_gap_m": 0.029
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       0.0185,
+       0.0772
+      ],
+      "pick_xy": [
+       0.05,
+       -0.1
+      ],
+      "goal_xy": [
+       -0.013,
+       0.2544
+      ],
+      "route_m": 0.36,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.055,
+      "detour_side_gap_m": 0.024
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       0.0263,
+       0.0735
+      ],
+      "pick_xy": [
+       0.05,
+       -0.1
+      ],
+      "goal_xy": [
+       0.0026,
+       0.2471
+      ],
+      "route_m": 0.35,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.054,
+      "detour_side_gap_m": 0.032
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       0.0281,
+       0.0728
+      ],
+      "pick_xy": [
+       0.05,
+       -0.1
+      ],
+      "goal_xy": [
+       0.0063,
+       0.2456
+      ],
+      "route_m": 0.348,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.053,
+      "detour_side_gap_m": 0.034
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       0.0271,
+       0.0845
+      ],
+      "pick_xy": [
+       0.05,
+       -0.1
+      ],
+      "goal_xy": [
+       0.0041,
+       0.269
+      ],
+      "route_m": 0.372,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.053,
+      "detour_side_gap_m": 0.033
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       0.026,
+       0.0839
+      ],
+      "pick_xy": [
+       0.05,
+       -0.1
+      ],
+      "goal_xy": [
+       0.0019,
+       0.2679
+      ],
+      "route_m": 0.371,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.053,
+      "detour_side_gap_m": 0.032
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       0.0197,
+       0.0832
+      ],
+      "pick_xy": [
+       0.05,
+       -0.1
+      ],
+      "goal_xy": [
+       -0.0106,
+       0.2664
+      ],
+      "route_m": 0.371,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.055,
+      "detour_side_gap_m": 0.025
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       0.0316,
+       0.0735
+      ],
+      "pick_xy": [
+       0.05,
+       -0.1
+      ],
+      "goal_xy": [
+       0.0131,
+       0.2469
+      ],
+      "route_m": 0.349,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.052,
+      "detour_side_gap_m": 0.038
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       0.0258,
+       0.0821
+      ],
+      "pick_xy": [
+       0.05,
+       -0.1
+      ],
+      "goal_xy": [
+       0.0016,
+       0.2641
+      ],
+      "route_m": 0.367,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.054,
+      "detour_side_gap_m": 0.032
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       0.0298,
+       0.0826
+      ],
+      "pick_xy": [
+       0.05,
+       -0.1
+      ],
+      "goal_xy": [
+       0.0095,
+       0.2652
+      ],
+      "route_m": 0.367,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.053,
+      "detour_side_gap_m": 0.036
+     }
+    ]
+   }
+  },
+  "language": "Pick the orange juice and place it in the basket"
+ },
+ "libero_goal/1": {
+  "suite": "libero_goal",
+  "task_id": 1,
+  "obstacle": "milk_1",
+  "obstacle_type": "milk",
+  "obstacle_footprint_m": [
+   0.052,
+   0.053
+  ],
+  "pick": "akita_black_bowl_1",
+  "goal": "flat_stove_1_cook_region",
+  "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_goal_1_milk.bddl",
+  "levels": {
+   "L1": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_goal_1_L1.npz",
+    "kept": 5,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       0.0378,
+       0.1092
+      ],
+      "pick_xy": [
+       -0.0944,
+       -0.0018
+      ],
+      "goal_xy": [
+       -0.4057,
+       0.2058
+      ],
+      "route_m": 0.374,
+      "edge_gap_to_pick_m": 0.061,
+      "angle_deg": 40.0
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       0.0354,
+       0.123
+      ],
+      "pick_xy": [
+       -0.0756,
+       -0.0093
+      ],
+      "goal_xy": [
+       -0.4014,
+       0.2141
+      ],
+      "route_m": 0.395,
+      "edge_gap_to_pick_m": 0.061,
+      "angle_deg": 50.0
+     },
+     {
+      "start": 2,
+      "kept": false,
+      "why": "no position meets the placement rules"
+     },
+     {
+      "start": 3,
+      "kept": false,
+      "why": "no position meets the placement rules"
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       0.0459,
+       0.0918
+      ],
+      "pick_xy": [
+       -0.1005,
+       0.0072
+      ],
+      "goal_xy": [
+       -0.4062,
+       0.214
+      ],
+      "route_m": 0.369,
+      "edge_gap_to_pick_m": 0.066,
+      "angle_deg": 30.0
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       0.0423,
+       0.0981
+      ],
+      "pick_xy": [
+       -0.0823,
+       -0.0064
+      ],
+      "goal_xy": [
+       -0.4067,
+       0.2049
+      ],
+      "route_m": 0.387,
+      "edge_gap_to_pick_m": 0.051,
+      "angle_deg": 40.0
+     },
+     {
+      "start": 6,
+      "kept": false,
+      "why": "no position meets the placement rules"
+     },
+     {
+      "start": 7,
+      "kept": false,
+      "why": "no position meets the placement rules"
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       0.0235,
+       0.1048
+      ],
+      "pick_xy": [
+       -0.0934,
+       0.0067
+      ],
+      "goal_xy": [
+       -0.406,
+       0.2067
+      ],
+      "route_m": 0.371,
+      "edge_gap_to_pick_m": 0.041,
+      "angle_deg": 40.0
+     },
+     {
+      "start": 9,
+      "kept": false,
+      "why": "no position meets the placement rules"
+     }
+    ]
+   },
+   "L2": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_goal_1_L2.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2276,
+       0.053
+      ],
+      "pick_xy": [
+       -0.0944,
+       -0.0018
+      ],
+      "goal_xy": [
+       -0.4096,
+       0.2053
+      ],
+      "route_m": 0.377,
+      "route_frac": 0.375,
+      "lateral_m": 0.027,
+      "route_overlap_m": 0.083,
+      "detour_side_gap_m": 0.048
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1893,
+       0.048
+      ],
+      "pick_xy": [
+       -0.0756,
+       -0.0093
+      ],
+      "goal_xy": [
+       -0.4025,
+       0.2022
+      ],
+      "route_m": 0.389,
+      "route_frac": 0.325,
+      "lateral_m": 0.014,
+      "route_overlap_m": 0.097,
+      "detour_side_gap_m": 0.009
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2207,
+       0.064
+      ],
+      "pick_xy": [
+       -0.0974,
+       -0.0093
+      ],
+      "goal_xy": [
+       -0.4044,
+       0.2159
+      ],
+      "route_m": 0.381,
+      "route_frac": 0.375,
+      "lateral_m": 0.014,
+      "route_overlap_m": 0.098,
+      "detour_side_gap_m": 0.041
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2169,
+       0.055
+      ],
+      "pick_xy": [
+       -0.1028,
+       -0.0102
+      ],
+      "goal_xy": [
+       -0.4059,
+       0.2079
+      ],
+      "route_m": 0.373,
+      "route_frac": 0.35,
+      "lateral_m": 0.014,
+      "route_overlap_m": 0.098,
+      "detour_side_gap_m": 0.036
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2211,
+       0.056
+      ],
+      "pick_xy": [
+       -0.1005,
+       0.0072
+      ],
+      "goal_xy": [
+       -0.4009,
+       0.2116
+      ],
+      "route_m": 0.363,
+      "route_frac": 0.35,
+      "lateral_m": 0.027,
+      "route_overlap_m": 0.084,
+      "detour_side_gap_m": 0.046
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       -0.222,
+       0.0479
+      ],
+      "pick_xy": [
+       -0.0823,
+       -0.0064
+      ],
+      "goal_xy": [
+       -0.417,
+       0.2
+      ],
+      "route_m": 0.393,
+      "route_frac": 0.375,
+      "lateral_m": 0.027,
+      "route_overlap_m": 0.083,
+      "detour_side_gap_m": 0.048
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2225,
+       0.0653
+      ],
+      "pick_xy": [
+       -0.0937,
+       -0.009
+      ],
+      "goal_xy": [
+       -0.416,
+       0.2191
+      ],
+      "route_m": 0.395,
+      "route_frac": 0.375,
+      "lateral_m": 0.014,
+      "route_overlap_m": 0.098,
+      "detour_side_gap_m": 0.041
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2169,
+       0.0449
+      ],
+      "pick_xy": [
+       -0.1005,
+       0.0042
+      ],
+      "goal_xy": [
+       -0.4143,
+       0.2004
+      ],
+      "route_m": 0.37,
+      "route_frac": 0.325,
+      "lateral_m": 0.027,
+      "route_overlap_m": 0.083,
+      "detour_side_gap_m": 0.06
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2048,
+       0.0639
+      ],
+      "pick_xy": [
+       -0.0934,
+       0.0067
+      ],
+      "goal_xy": [
+       -0.4128,
+       0.2178
+      ],
+      "route_m": 0.383,
+      "route_frac": 0.325,
+      "lateral_m": 0.014,
+      "route_overlap_m": 0.097,
+      "detour_side_gap_m": 0.012
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2141,
+       0.0451
+      ],
+      "pick_xy": [
+       -0.0823,
+       -0.0031
+      ],
+      "goal_xy": [
+       -0.4187,
+       0.2009
+      ],
+      "route_m": 0.393,
+      "route_frac": 0.35,
+      "lateral_m": 0.027,
+      "route_overlap_m": 0.083,
+      "detour_side_gap_m": 0.055
+     }
+    ]
+   }
+  },
+  "language": "Put the bowl on the stove"
+ },
+ "libero_10/2": {
+  "suite": "libero_10",
+  "task_id": 2,
+  "obstacle": "wine_bottle_1",
+  "obstacle_type": "wine_bottle",
+  "obstacle_footprint_m": [
+   0.043,
+   0.044
+  ],
+  "pick": "moka_pot_1",
+  "goal": "flat_stove_1_cook_region",
+  "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_2_wine_bottle.bddl",
+  "levels": {
+   "L1": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_2_L1.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       0.1223,
+       -0.0073
+      ],
+      "pick_xy": [
+       0.0303,
+       -0.0073
+      ],
+      "goal_xy": [
+       -0.1986,
+       0.1988
+      ],
+      "route_m": 0.308,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       0.1523,
+       0.0185
+      ],
+      "pick_xy": [
+       0.0603,
+       0.0185
+      ],
+      "goal_xy": [
+       -0.2081,
+       0.2015
+      ],
+      "route_m": 0.325,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       0.139,
+       0.0004
+      ],
+      "pick_xy": [
+       0.047,
+       0.0004
+      ],
+      "goal_xy": [
+       -0.2096,
+       0.196
+      ],
+      "route_m": 0.323,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       0.144,
+       -0.0068
+      ],
+      "pick_xy": [
+       0.052,
+       -0.0068
+      ],
+      "goal_xy": [
+       -0.1929,
+       0.1902
+      ],
+      "route_m": 0.314,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       0.122,
+       0.0179
+      ],
+      "pick_xy": [
+       0.03,
+       0.0179
+      ],
+      "goal_xy": [
+       -0.1964,
+       0.1991
+      ],
+      "route_m": 0.29,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       0.1657,
+       0.0168
+      ],
+      "pick_xy": [
+       0.0737,
+       0.0168
+      ],
+      "goal_xy": [
+       -0.2076,
+       0.2003
+      ],
+      "route_m": 0.336,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       0.1418,
+       -0.0247
+      ],
+      "pick_xy": [
+       0.0498,
+       -0.0247
+      ],
+      "goal_xy": [
+       -0.1976,
+       0.1903
+      ],
+      "route_m": 0.328,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       0.1618,
+       -0.0067
+      ],
+      "pick_xy": [
+       0.0698,
+       -0.0067
+      ],
+      "goal_xy": [
+       -0.204,
+       0.1952
+      ],
+      "route_m": 0.34,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       0.1406,
+       -0.0079
+      ],
+      "pick_xy": [
+       0.0486,
+       -0.0079
+      ],
+      "goal_xy": [
+       -0.2021,
+       0.2091
+      ],
+      "route_m": 0.332,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       0.1554,
+       0.0145
+      ],
+      "pick_xy": [
+       0.0634,
+       0.0145
+      ],
+      "goal_xy": [
+       -0.1908,
+       0.1971
+      ],
+      "route_m": 0.313,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     }
+    ]
+   },
+   "L2": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_2_L2.npz",
+    "kept": 3,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0825,
+       0.0561
+      ],
+      "pick_xy": [
+       0.0303,
+       -0.0073
+      ],
+      "goal_xy": [
+       -0.2052,
+       0.2033
+      ],
+      "route_m": 0.316,
+      "route_frac": 0.4,
+      "lateral_m": 0.028,
+      "route_overlap_m": 0.085,
+      "detour_side_gap_m": 0.082
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0381,
+       0.0555
+      ],
+      "pick_xy": [
+       0.0603,
+       0.0185
+      ],
+      "goal_xy": [
+       -0.1911,
+       0.2027
+      ],
+      "route_m": 0.312,
+      "route_frac": 0.325,
+      "lateral_m": 0.028,
+      "route_overlap_m": 0.086,
+      "detour_side_gap_m": 0.074
+     },
+     {
+      "start": 2,
+      "kept": false,
+      "why": "no position meets the placement rules"
+     },
+     {
+      "start": 3,
+      "kept": false,
+      "why": "no position meets the placement rules"
+     },
+     {
+      "start": 4,
+      "kept": false,
+      "why": "no position meets the placement rules"
+     },
+     {
+      "start": 5,
+      "kept": false,
+      "why": "no position meets the placement rules"
+     },
+     {
+      "start": 6,
+      "kept": false,
+      "why": "no position meets the placement rules"
+     },
+     {
+      "start": 7,
+      "kept": false,
+      "why": "no position meets the placement rules"
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0492,
+       0.0568
+      ],
+      "pick_xy": [
+       0.0486,
+       -0.0079
+      ],
+      "goal_xy": [
+       -0.2047,
+       0.2075
+      ],
+      "route_m": 0.332,
+      "route_frac": 0.35,
+      "lateral_m": 0.014,
+      "route_overlap_m": 0.099,
+      "detour_side_gap_m": 0.076
+     },
+     {
+      "start": 9,
+      "kept": false,
+      "why": "no position meets the placement rules"
+     }
+    ]
+   }
+  },
+  "language": "turn on the stove and put the moka pot on it"
+ },
+ "libero_10/4": {
+  "suite": "libero_10",
+  "task_id": 4,
+  "obstacle": "ketchup_1",
+  "obstacle_type": "ketchup",
+  "obstacle_footprint_m": [
+   0.037,
+   0.056
+  ],
+  "pick": "porcelain_mug_1",
+  "goal": "plate_1",
+  "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_4_ketchup.bddl",
+  "levels": {
+   "L1": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_4_L1.npz",
+    "kept": 8,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       0.0038,
+       -0.0471
+      ],
+      "pick_xy": [
+       -0.0875,
+       -0.1559
+      ],
+      "goal_xy": [
+       -0.0045,
+       -0.3232
+      ],
+      "route_m": 0.187,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 50.0
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0215,
+       -0.064
+      ],
+      "pick_xy": [
+       -0.1128,
+       -0.1728
+      ],
+      "goal_xy": [
+       -0.0124,
+       -0.2798
+      ],
+      "route_m": 0.147,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 50.0
+     },
+     {
+      "start": 2,
+      "kept": false,
+      "why": "scene not still (red_coffee_mug_1 pushed 0.0 mm, obstacle tilt 88.8 deg, drift 0.0 mm)"
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0054,
+       -0.0625
+      ],
+      "pick_xy": [
+       -0.0967,
+       -0.1713
+      ],
+      "goal_xy": [
+       0.0194,
+       -0.2905
+      ],
+      "route_m": 0.166,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 50.0
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0097,
+       -0.0426
+      ],
+      "pick_xy": [
+       -0.101,
+       -0.1514
+      ],
+      "goal_xy": [
+       -0.0217,
+       -0.3131
+      ],
+      "route_m": 0.18,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 50.0
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       0.0026,
+       -0.048
+      ],
+      "pick_xy": [
+       -0.0887,
+       -0.1568
+      ],
+      "goal_xy": [
+       0.0135,
+       -0.2811
+      ],
+      "route_m": 0.161,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 50.0
+     },
+     {
+      "start": 6,
+      "kept": false,
+      "why": "scene not still (red_coffee_mug_1 pushed 0.0 mm, obstacle tilt 88.8 deg, drift 0.0 mm)"
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       0.018,
+       -0.1384
+      ],
+      "pick_xy": [
+       -0.0785,
+       -0.1384
+      ],
+      "goal_xy": [
+       -0.0222,
+       -0.3075
+      ],
+      "route_m": 0.178,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2014,
+       -0.2376
+      ],
+      "pick_xy": [
+       -0.1101,
+       -0.1288
+      ],
+      "goal_xy": [
+       -0.0043,
+       -0.2898
+      ],
+      "route_m": 0.193,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 230.0
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       0.0081,
+       -0.0427
+      ],
+      "pick_xy": [
+       -0.0832,
+       -0.1515
+      ],
+      "goal_xy": [
+       -0.0077,
+       -0.2956
+      ],
+      "route_m": 0.163,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 50.0
+     }
+    ]
+   },
+   "L2": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_4_L2.npz",
+    "kept": 9,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       0.0129,
+       -0.1947
+      ],
+      "pick_xy": [
+       -0.0875,
+       -0.1559
+      ],
+      "goal_xy": [
+       -0.0045,
+       -0.3232
+      ],
+      "route_m": 0.187,
+      "route_frac": 0.425,
+      "lateral_m": 0.073,
+      "route_overlap_m": 0.027,
+      "detour_side_gap_m": 0.157
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1322,
+       -0.2916
+      ],
+      "pick_xy": [
+       -0.1128,
+       -0.1728
+      ],
+      "goal_xy": [
+       -0.0124,
+       -0.2798
+      ],
+      "route_m": 0.147,
+      "route_frac": 0.5,
+      "lateral_m": -0.095,
+      "route_overlap_m": 0.015,
+      "detour_side_gap_m": 0.259
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0188,
+       -0.1575
+      ],
+      "pick_xy": [
+       -0.115,
+       -0.1569
+      ],
+      "goal_xy": [
+       0.0111,
+       -0.2861
+      ],
+      "route_m": 0.181,
+      "route_frac": 0.375,
+      "lateral_m": 0.068,
+      "route_overlap_m": 0.042,
+      "detour_side_gap_m": 0.108
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       0.0086,
+       -0.1617
+      ],
+      "pick_xy": [
+       -0.0967,
+       -0.1713
+      ],
+      "goal_xy": [
+       0.0194,
+       -0.2905
+      ],
+      "route_m": 0.166,
+      "route_frac": 0.4,
+      "lateral_m": 0.082,
+      "route_overlap_m": 0.029,
+      "detour_side_gap_m": 0.145
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0042,
+       -0.1842
+      ],
+      "pick_xy": [
+       -0.101,
+       -0.1514
+      ],
+      "goal_xy": [
+       -0.0217,
+       -0.3131
+      ],
+      "route_m": 0.18,
+      "route_frac": 0.4,
+      "lateral_m": 0.072,
+      "route_overlap_m": 0.027,
+      "detour_side_gap_m": 0.132
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       0.0117,
+       -0.1523
+      ],
+      "pick_xy": [
+       -0.0887,
+       -0.1568
+      ],
+      "goal_xy": [
+       0.0135,
+       -0.2811
+      ],
+      "route_m": 0.161,
+      "route_frac": 0.375,
+      "lateral_m": 0.08,
+      "route_overlap_m": 0.028,
+      "detour_side_gap_m": 0.118
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0042,
+       -0.1797
+      ],
+      "pick_xy": [
+       -0.1097,
+       -0.1583
+      ],
+      "goal_xy": [
+       0.0172,
+       -0.3101
+      ],
+      "route_m": 0.198,
+      "route_frac": 0.425,
+      "lateral_m": 0.067,
+      "route_overlap_m": 0.042,
+      "detour_side_gap_m": 0.132
+     },
+     {
+      "start": 7,
+      "kept": false,
+      "why": "no position meets the placement rules"
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0112,
+       -0.1618
+      ],
+      "pick_xy": [
+       -0.1101,
+       -0.1288
+      ],
+      "goal_xy": [
+       -0.0043,
+       -0.2898
+      ],
+      "route_m": 0.193,
+      "route_frac": 0.425,
+      "lateral_m": 0.064,
+      "route_overlap_m": 0.041,
+      "detour_side_gap_m": 0.114
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       0.0212,
+       -0.1657
+      ],
+      "pick_xy": [
+       -0.0832,
+       -0.1515
+      ],
+      "goal_xy": [
+       -0.0077,
+       -0.2956
+      ],
+      "route_m": 0.163,
+      "route_frac": 0.375,
+      "lateral_m": 0.086,
+      "route_overlap_m": 0.015,
+      "detour_side_gap_m": 0.156
+     }
+    ]
+   }
+  },
+  "language": "put the white mug on the left plate and put the yellow and white mug on the right plate"
+ },
+ "libero_10/5": {
+  "suite": "libero_10",
+  "task_id": 5,
+  "obstacle": "milk_1",
+  "obstacle_type": "milk",
+  "obstacle_footprint_m": [
+   0.053,
+   0.053
+  ],
+  "pick": "black_book_1",
+  "goal": "desk_caddy_1_back_contain_region",
+  "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_5_milk.bddl",
+  "levels": {
+   "L1": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_5_L1.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       -0.3274,
+       0.1844
+      ],
+      "pick_xy": [
+       -0.2101,
+       0.1637
+      ],
+      "goal_xy": [
+       -0.4037,
+       -0.1427
+      ],
+      "route_m": 0.362,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 170.0
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       -0.304,
+       0.164
+      ],
+      "pick_xy": [
+       -0.1858,
+       0.1432
+      ],
+      "goal_xy": [
+       -0.3995,
+       -0.1481
+      ],
+      "route_m": 0.361,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 170.0
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       -0.3085,
+       0.2135
+      ],
+      "pick_xy": [
+       -0.1931,
+       0.1468
+      ],
+      "goal_xy": [
+       -0.3968,
+       -0.1442
+      ],
+      "route_m": 0.355,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 150.0
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       -0.3297,
+       0.2262
+      ],
+      "pick_xy": [
+       -0.2219,
+       0.1357
+      ],
+      "goal_xy": [
+       -0.4098,
+       -0.1428
+      ],
+      "route_m": 0.336,
+      "edge_gap_to_pick_m": 0.032,
+      "angle_deg": 140.0
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       -0.3198,
+       0.191
+      ],
+      "pick_xy": [
+       -0.1986,
+       0.1468
+      ],
+      "goal_xy": [
+       -0.3964,
+       -0.1409
+      ],
+      "route_m": 0.349,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 160.0
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       -0.325,
+       0.2314
+      ],
+      "pick_xy": [
+       -0.2181,
+       0.1417
+      ],
+      "goal_xy": [
+       -0.3997,
+       -0.1474
+      ],
+      "route_m": 0.341,
+      "edge_gap_to_pick_m": 0.032,
+      "angle_deg": 140.0
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       -0.3418,
+       0.2222
+      ],
+      "pick_xy": [
+       -0.2182,
+       0.1509
+      ],
+      "goal_xy": [
+       -0.3904,
+       -0.1404
+      ],
+      "route_m": 0.338,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 150.0
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       -0.3194,
+       0.196
+      ],
+      "pick_xy": [
+       -0.1945,
+       0.1506
+      ],
+      "goal_xy": [
+       -0.3963,
+       -0.1361
+      ],
+      "route_m": 0.351,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 160.0
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       -0.3036,
+       0.236
+      ],
+      "pick_xy": [
+       -0.2188,
+       0.1349
+      ],
+      "goal_xy": [
+       -0.3991,
+       -0.1409
+      ],
+      "route_m": 0.329,
+      "edge_gap_to_pick_m": 0.031,
+      "angle_deg": 130.0
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       -0.3005,
+       0.2371
+      ],
+      "pick_xy": [
+       -0.2169,
+       0.1374
+      ],
+      "goal_xy": [
+       -0.4097,
+       -0.1463
+      ],
+      "route_m": 0.343,
+      "edge_gap_to_pick_m": 0.033,
+      "angle_deg": 130.0
+     }
+    ]
+   },
+   "L2": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_5_L2.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2596,
+       0.0578
+      ],
+      "pick_xy": [
+       -0.2101,
+       0.1637
+      ],
+      "goal_xy": [
+       -0.3959,
+       -0.1417
+      ],
+      "route_m": 0.357,
+      "route_frac": 0.325,
+      "lateral_m": 0.013,
+      "route_overlap_m": 0.092,
+      "detour_side_gap_m": 0.117
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2744,
+       0.0308
+      ],
+      "pick_xy": [
+       -0.1858,
+       0.1432
+      ],
+      "goal_xy": [
+       -0.4074,
+       -0.1379
+      ],
+      "route_m": 0.358,
+      "route_frac": 0.4,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.106,
+      "detour_side_gap_m": 0.166
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2652,
+       0.0449
+      ],
+      "pick_xy": [
+       -0.1931,
+       0.1468
+      ],
+      "goal_xy": [
+       -0.3991,
+       -0.1443
+      ],
+      "route_m": 0.357,
+      "route_frac": 0.35,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.105,
+      "detour_side_gap_m": 0.127
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2643,
+       0.0486
+      ],
+      "pick_xy": [
+       -0.2219,
+       0.1357
+      ],
+      "goal_xy": [
+       -0.3975,
+       -0.1323
+      ],
+      "route_m": 0.32,
+      "route_frac": 0.3,
+      "lateral_m": 0.012,
+      "route_overlap_m": 0.089,
+      "detour_side_gap_m": 0.134
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2634,
+       0.0535
+      ],
+      "pick_xy": [
+       -0.1986,
+       0.1468
+      ],
+      "goal_xy": [
+       -0.3979,
+       -0.1404
+      ],
+      "route_m": 0.35,
+      "route_frac": 0.325,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.105,
+      "detour_side_gap_m": 0.112
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       -0.267,
+       0.044
+      ],
+      "pick_xy": [
+       -0.2181,
+       0.1417
+      ],
+      "goal_xy": [
+       -0.4,
+       -0.1384
+      ],
+      "route_m": 0.334,
+      "route_frac": 0.325,
+      "lateral_m": 0.012,
+      "route_overlap_m": 0.088,
+      "detour_side_gap_m": 0.134
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2597,
+       0.0545
+      ],
+      "pick_xy": [
+       -0.2182,
+       0.1509
+      ],
+      "goal_xy": [
+       -0.3927,
+       -0.1494
+      ],
+      "route_m": 0.347,
+      "route_frac": 0.3,
+      "lateral_m": 0.013,
+      "route_overlap_m": 0.09,
+      "detour_side_gap_m": 0.115
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2664,
+       0.048
+      ],
+      "pick_xy": [
+       -0.1945,
+       0.1506
+      ],
+      "goal_xy": [
+       -0.4,
+       -0.1425
+      ],
+      "route_m": 0.358,
+      "route_frac": 0.35,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.093,
+      "detour_side_gap_m": 0.152
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2742,
+       0.031
+      ],
+      "pick_xy": [
+       -0.2188,
+       0.1349
+      ],
+      "goal_xy": [
+       -0.4072,
+       -0.1415
+      ],
+      "route_m": 0.334,
+      "route_frac": 0.35,
+      "lateral_m": 0.013,
+      "route_overlap_m": 0.091,
+      "detour_side_gap_m": 0.159
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       -0.2598,
+       0.0476
+      ],
+      "pick_xy": [
+       -0.2169,
+       0.1374
+      ],
+      "goal_xy": [
+       -0.3951,
+       -0.1395
+      ],
+      "route_m": 0.329,
+      "route_frac": 0.3,
+      "lateral_m": 0.013,
+      "route_overlap_m": 0.09,
+      "detour_side_gap_m": 0.129
+     }
+    ]
+   }
+  },
+  "language": "pick up the book and place it in the back compartment of the caddy"
+ },
+ "libero_10/6": {
+  "suite": "libero_10",
+  "task_id": 6,
+  "obstacle": "orange_juice_1",
+  "obstacle_type": "orange_juice",
+  "obstacle_footprint_m": [
+   0.052,
+   0.053
+  ],
+  "pick": "porcelain_mug_1",
+  "goal": "plate_1",
+  "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_6_orange_juice.bddl",
+  "levels": {
+   "L1": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_6_L1.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0003,
+       -0.248
+      ],
+      "pick_xy": [
+       -0.0941,
+       -0.1362
+      ],
+      "goal_xy": [
+       0.149,
+       0.0057
+      ],
+      "route_m": 0.282,
+      "edge_gap_to_pick_m": 0.033,
+      "angle_deg": 310.0
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       0.0037,
+       -0.2589
+      ],
+      "pick_xy": [
+       -0.0901,
+       -0.1472
+      ],
+      "goal_xy": [
+       0.1728,
+       0.0108
+      ],
+      "route_m": 0.307,
+      "edge_gap_to_pick_m": 0.033,
+      "angle_deg": 310.0
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0242,
+       -0.2763
+      ],
+      "pick_xy": [
+       -0.118,
+       -0.1646
+      ],
+      "goal_xy": [
+       0.1699,
+       0.0154
+      ],
+      "route_m": 0.34,
+      "edge_gap_to_pick_m": 0.033,
+      "angle_deg": 310.0
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0071,
+       -0.2507
+      ],
+      "pick_xy": [
+       -0.1008,
+       -0.1389
+      ],
+      "goal_xy": [
+       0.1588,
+       -0.0025
+      ],
+      "route_m": 0.293,
+      "edge_gap_to_pick_m": 0.033,
+      "angle_deg": 310.0
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0224,
+       -0.2428
+      ],
+      "pick_xy": [
+       -0.1161,
+       -0.131
+      ],
+      "goal_xy": [
+       0.1333,
+       -0.0062
+      ],
+      "route_m": 0.279,
+      "edge_gap_to_pick_m": 0.033,
+      "angle_deg": 310.0
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0168,
+       -0.2718
+      ],
+      "pick_xy": [
+       -0.1106,
+       -0.1601
+      ],
+      "goal_xy": [
+       0.1576,
+       -0.0043
+      ],
+      "route_m": 0.31,
+      "edge_gap_to_pick_m": 0.033,
+      "angle_deg": 310.0
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       0.0043,
+       -0.2495
+      ],
+      "pick_xy": [
+       -0.0894,
+       -0.1377
+      ],
+      "goal_xy": [
+       0.1466,
+       -0.0025
+      ],
+      "route_m": 0.272,
+      "edge_gap_to_pick_m": 0.033,
+      "angle_deg": 310.0
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       0.0062,
+       -0.2784
+      ],
+      "pick_xy": [
+       -0.0875,
+       -0.1667
+      ],
+      "goal_xy": [
+       0.1491,
+       0.0199
+      ],
+      "route_m": 0.301,
+      "edge_gap_to_pick_m": 0.033,
+      "angle_deg": 310.0
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       0.0065,
+       -0.2537
+      ],
+      "pick_xy": [
+       -0.0873,
+       -0.1419
+      ],
+      "goal_xy": [
+       0.1748,
+       0.0162
+      ],
+      "route_m": 0.306,
+      "edge_gap_to_pick_m": 0.033,
+      "angle_deg": 310.0
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0213,
+       -0.2755
+      ],
+      "pick_xy": [
+       -0.1151,
+       -0.1638
+      ],
+      "goal_xy": [
+       0.1264,
+       -0.0035
+      ],
+      "route_m": 0.29,
+      "edge_gap_to_pick_m": 0.033,
+      "angle_deg": 310.0
+     }
+    ]
+   },
+   "L2": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_6_L2.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       0.0214,
+       -0.0688
+      ],
+      "pick_xy": [
+       -0.0941,
+       -0.1362
+      ],
+      "goal_xy": [
+       0.149,
+       0.0057
+      ],
+      "route_m": 0.282,
+      "route_frac": 0.475,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.114,
+      "detour_side_gap_m": 0.189
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       0.0414,
+       -0.0682
+      ],
+      "pick_xy": [
+       -0.0901,
+       -0.1472
+      ],
+      "goal_xy": [
+       0.1728,
+       0.0108
+      ],
+      "route_m": 0.307,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.114,
+      "detour_side_gap_m": 0.172
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       0.026,
+       -0.0746
+      ],
+      "pick_xy": [
+       -0.118,
+       -0.1646
+      ],
+      "goal_xy": [
+       0.1699,
+       0.0154
+      ],
+      "route_m": 0.34,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.115,
+      "detour_side_gap_m": 0.191
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       0.029,
+       -0.0707
+      ],
+      "pick_xy": [
+       -0.1008,
+       -0.1389
+      ],
+      "goal_xy": [
+       0.1588,
+       -0.0025
+      ],
+      "route_m": 0.293,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.113,
+      "detour_side_gap_m": 0.168
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       0.0023,
+       -0.0717
+      ],
+      "pick_xy": [
+       -0.1161,
+       -0.131
+      ],
+      "goal_xy": [
+       0.1333,
+       -0.0062
+      ],
+      "route_m": 0.279,
+      "route_frac": 0.475,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.113,
+      "detour_side_gap_m": 0.149
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       0.0235,
+       -0.0822
+      ],
+      "pick_xy": [
+       -0.1106,
+       -0.1601
+      ],
+      "goal_xy": [
+       0.1576,
+       -0.0043
+      ],
+      "route_m": 0.31,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.114,
+      "detour_side_gap_m": 0.173
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       0.0168,
+       -0.0769
+      ],
+      "pick_xy": [
+       -0.0894,
+       -0.1377
+      ],
+      "goal_xy": [
+       0.1466,
+       -0.0025
+      ],
+      "route_m": 0.272,
+      "route_frac": 0.45,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.114,
+      "detour_side_gap_m": 0.177
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       0.019,
+       -0.0827
+      ],
+      "pick_xy": [
+       -0.0875,
+       -0.1667
+      ],
+      "goal_xy": [
+       0.1491,
+       0.0199
+      ],
+      "route_m": 0.301,
+      "route_frac": 0.45,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.116,
+      "detour_side_gap_m": 0.178
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       0.0438,
+       -0.0629
+      ],
+      "pick_xy": [
+       -0.0873,
+       -0.1419
+      ],
+      "goal_xy": [
+       0.1748,
+       0.0162
+      ],
+      "route_m": 0.306,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.115,
+      "detour_side_gap_m": 0.177
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0004,
+       -0.0876
+      ],
+      "pick_xy": [
+       -0.1151,
+       -0.1638
+      ],
+      "goal_xy": [
+       0.1264,
+       -0.0035
+      ],
+      "route_m": 0.29,
+      "route_frac": 0.475,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.115,
+      "detour_side_gap_m": 0.178
+     }
+    ]
+   }
+  },
+  "language": "put the white mug on the plate and put the chocolate pudding to the right of the plate"
+ },
+ "libero_10/7": {
+  "suite": "libero_10",
+  "task_id": 7,
+  "obstacle": "wine_bottle_1",
+  "obstacle_type": "wine_bottle",
+  "obstacle_footprint_m": [
+   0.043,
+   0.044
+  ],
+  "pick": "alphabet_soup_1",
+  "goal": "basket_1_contain_region",
+  "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_7_wine_bottle.bddl",
+  "levels": {
+   "L1": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_7_L1.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0412,
+       -0.1001
+      ],
+      "pick_xy": [
+       0.0416,
+       -0.1001
+      ],
+      "goal_xy": [
+       -0.0002,
+       0.2665
+      ],
+      "route_m": 0.369,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0114,
+       -0.0898
+      ],
+      "pick_xy": [
+       0.0713,
+       -0.0898
+      ],
+      "goal_xy": [
+       -0.0054,
+       0.2545
+      ],
+      "route_m": 0.353,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0156,
+       -0.0782
+      ],
+      "pick_xy": [
+       0.0672,
+       -0.0782
+      ],
+      "goal_xy": [
+       -0.0012,
+       0.2664
+      ],
+      "route_m": 0.351,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0138,
+       -0.095
+      ],
+      "pick_xy": [
+       0.069,
+       -0.095
+      ],
+      "goal_xy": [
+       -0.0032,
+       0.2646
+      ],
+      "route_m": 0.367,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0129,
+       -0.1192
+      ],
+      "pick_xy": [
+       0.0699,
+       -0.1192
+      ],
+      "goal_xy": [
+       0.0006,
+       0.2647
+      ],
+      "route_m": 0.39,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0073,
+       -0.0801
+      ],
+      "pick_xy": [
+       0.0754,
+       -0.0801
+      ],
+      "goal_xy": [
+       0.0014,
+       0.2505
+      ],
+      "route_m": 0.339,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0063,
+       -0.0969
+      ],
+      "pick_xy": [
+       0.0765,
+       -0.0969
+      ],
+      "goal_xy": [
+       -0.0085,
+       0.2593
+      ],
+      "route_m": 0.366,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0504,
+       -0.0862
+      ],
+      "pick_xy": [
+       0.0324,
+       -0.0862
+      ],
+      "goal_xy": [
+       -0.0025,
+       0.2663
+      ],
+      "route_m": 0.354,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0109,
+       -0.1221
+      ],
+      "pick_xy": [
+       0.0718,
+       -0.1221
+      ],
+      "goal_xy": [
+       0.0054,
+       0.2531
+      ],
+      "route_m": 0.381,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       -0.0265,
+       -0.1084
+      ],
+      "pick_xy": [
+       0.0562,
+       -0.1084
+      ],
+      "goal_xy": [
+       -0.0051,
+       0.2664
+      ],
+      "route_m": 0.38,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 180.0
+     }
+    ]
+   },
+   "L2": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_7_L2.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       0.0207,
+       0.0832
+      ],
+      "pick_xy": [
+       0.0416,
+       -0.1001
+      ],
+      "goal_xy": [
+       -0.0002,
+       0.2665
+      ],
+      "route_m": 0.369,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.058,
+      "detour_side_gap_m": 0.143
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       0.033,
+       0.0823
+      ],
+      "pick_xy": [
+       0.0713,
+       -0.0898
+      ],
+      "goal_xy": [
+       -0.0054,
+       0.2545
+      ],
+      "route_m": 0.353,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.063,
+      "detour_side_gap_m": 0.184
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       0.033,
+       0.0941
+      ],
+      "pick_xy": [
+       0.0672,
+       -0.0782
+      ],
+      "goal_xy": [
+       -0.0012,
+       0.2664
+      ],
+      "route_m": 0.351,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.062,
+      "detour_side_gap_m": 0.16
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       0.0329,
+       0.0848
+      ],
+      "pick_xy": [
+       0.069,
+       -0.095
+      ],
+      "goal_xy": [
+       -0.0032,
+       0.2646
+      ],
+      "route_m": 0.367,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.062,
+      "detour_side_gap_m": 0.189
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       0.0352,
+       0.0727
+      ],
+      "pick_xy": [
+       0.0699,
+       -0.1192
+      ],
+      "goal_xy": [
+       0.0006,
+       0.2647
+      ],
+      "route_m": 0.39,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.061,
+      "detour_side_gap_m": 0.175
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       0.0384,
+       0.0852
+      ],
+      "pick_xy": [
+       0.0754,
+       -0.0801
+      ],
+      "goal_xy": [
+       0.0014,
+       0.2505
+      ],
+      "route_m": 0.339,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.063,
+      "detour_side_gap_m": 0.147
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       0.034,
+       0.0812
+      ],
+      "pick_xy": [
+       0.0765,
+       -0.0969
+      ],
+      "goal_xy": [
+       -0.0085,
+       0.2593
+      ],
+      "route_m": 0.366,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.064,
+      "detour_side_gap_m": 0.179
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       0.0149,
+       0.09
+      ],
+      "pick_xy": [
+       0.0324,
+       -0.0862
+      ],
+      "goal_xy": [
+       -0.0025,
+       0.2663
+      ],
+      "route_m": 0.354,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.058,
+      "detour_side_gap_m": 0.131
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       0.0386,
+       0.0655
+      ],
+      "pick_xy": [
+       0.0718,
+       -0.1221
+      ],
+      "goal_xy": [
+       0.0054,
+       0.2531
+      ],
+      "route_m": 0.381,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.061,
+      "detour_side_gap_m": 0.163
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       0.0256,
+       0.079
+      ],
+      "pick_xy": [
+       0.0562,
+       -0.1084
+      ],
+      "goal_xy": [
+       -0.0051,
+       0.2664
+      ],
+      "route_m": 0.38,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.061,
+      "detour_side_gap_m": 0.153
+     }
+    ]
+   }
+  },
+  "language": "put both the alphabet soup and the cream cheese box in the basket"
+ },
+ "libero_10/8": {
+  "suite": "libero_10",
+  "task_id": 8,
+  "obstacle": "ketchup_1",
+  "obstacle_type": "ketchup",
+  "obstacle_footprint_m": [
+   0.037,
+   0.056
+  ],
+  "pick": "moka_pot_1",
+  "goal": "flat_stove_1_cook_region",
+  "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_8_ketchup.bddl",
+  "levels": {
+   "L1": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_8_L1.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       0.0348,
+       0.2577
+      ],
+      "pick_xy": [
+       -0.0543,
+       0.2577
+      ],
+      "goal_xy": [
+       -0.1969,
+       -0.2049
+      ],
+      "route_m": 0.484,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       0.0507,
+       0.2525
+      ],
+      "pick_xy": [
+       -0.0383,
+       0.2525
+      ],
+      "goal_xy": [
+       -0.205,
+       -0.1985
+      ],
+      "route_m": 0.481,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       0.0601,
+       0.2337
+      ],
+      "pick_xy": [
+       -0.029,
+       0.2337
+      ],
+      "goal_xy": [
+       -0.207,
+       -0.1926
+      ],
+      "route_m": 0.462,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       0.0631,
+       0.2357
+      ],
+      "pick_xy": [
+       -0.026,
+       0.2357
+      ],
+      "goal_xy": [
+       -0.2024,
+       -0.2064
+      ],
+      "route_m": 0.476,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       0.0542,
+       0.2431
+      ],
+      "pick_xy": [
+       -0.0349,
+       0.2431
+      ],
+      "goal_xy": [
+       -0.1919,
+       -0.2083
+      ],
+      "route_m": 0.478,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       0.0249,
+       0.2699
+      ],
+      "pick_xy": [
+       -0.0642,
+       0.2699
+      ],
+      "goal_xy": [
+       -0.2074,
+       -0.2089
+      ],
+      "route_m": 0.5,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       0.0494,
+       0.2294
+      ],
+      "pick_xy": [
+       -0.0397,
+       0.2294
+      ],
+      "goal_xy": [
+       -0.1991,
+       -0.2009
+      ],
+      "route_m": 0.459,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       0.0158,
+       0.2258
+      ],
+      "pick_xy": [
+       -0.0733,
+       0.2258
+      ],
+      "goal_xy": [
+       -0.2018,
+       -0.2067
+      ],
+      "route_m": 0.451,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       0.0539,
+       0.2664
+      ],
+      "pick_xy": [
+       -0.0352,
+       0.2664
+      ],
+      "goal_xy": [
+       -0.2086,
+       -0.2041
+      ],
+      "route_m": 0.501,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       0.0509,
+       0.2454
+      ],
+      "pick_xy": [
+       -0.0382,
+       0.2454
+      ],
+      "goal_xy": [
+       -0.1907,
+       -0.2097
+      ],
+      "route_m": 0.48,
+      "edge_gap_to_pick_m": 0.03,
+      "angle_deg": 0.0
+     }
+    ]
+   },
+   "L2": {
+    "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_8_L2.npz",
+    "kept": 10,
+    "tried": 10,
+    "starts": [
+     {
+      "start": 0,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1276,
+       0.0272
+      ],
+      "pick_xy": [
+       -0.0543,
+       0.2577
+      ],
+      "goal_xy": [
+       -0.2009,
+       -0.2033
+      ],
+      "route_m": 0.484,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.087,
+      "detour_side_gap_m": 0.151
+     },
+     {
+      "start": 1,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1201,
+       0.0244
+      ],
+      "pick_xy": [
+       -0.0383,
+       0.2525
+      ],
+      "goal_xy": [
+       -0.2019,
+       -0.2036
+      ],
+      "route_m": 0.484,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.09,
+      "detour_side_gap_m": 0.136
+     },
+     {
+      "start": 2,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1102,
+       0.017
+      ],
+      "pick_xy": [
+       -0.029,
+       0.2337
+      ],
+      "goal_xy": [
+       -0.1914,
+       -0.1996
+      ],
+      "route_m": 0.463,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.091,
+      "detour_side_gap_m": 0.133
+     },
+     {
+      "start": 3,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1159,
+       0.0222
+      ],
+      "pick_xy": [
+       -0.026,
+       0.2357
+      ],
+      "goal_xy": [
+       -0.2058,
+       -0.1914
+      ],
+      "route_m": 0.463,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.094,
+      "detour_side_gap_m": 0.135
+     },
+     {
+      "start": 4,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1138,
+       0.0228
+      ],
+      "pick_xy": [
+       -0.0349,
+       0.2431
+      ],
+      "goal_xy": [
+       -0.1927,
+       -0.1974
+      ],
+      "route_m": 0.468,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.09,
+      "detour_side_gap_m": 0.15
+     },
+     {
+      "start": 5,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1341,
+       0.0358
+      ],
+      "pick_xy": [
+       -0.0642,
+       0.2699
+      ],
+      "goal_xy": [
+       -0.2039,
+       -0.1982
+      ],
+      "route_m": 0.488,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.086,
+      "detour_side_gap_m": 0.148
+     },
+     {
+      "start": 6,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1248,
+       0.0098
+      ],
+      "pick_xy": [
+       -0.0397,
+       0.2294
+      ],
+      "goal_xy": [
+       -0.2099,
+       -0.2098
+      ],
+      "route_m": 0.471,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.092,
+      "detour_side_gap_m": 0.148
+     },
+     {
+      "start": 7,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1383,
+       0.0158
+      ],
+      "pick_xy": [
+       -0.0733,
+       0.2258
+      ],
+      "goal_xy": [
+       -0.2034,
+       -0.1942
+      ],
+      "route_m": 0.44,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.087,
+      "detour_side_gap_m": 0.153
+     },
+     {
+      "start": 8,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1149,
+       0.0339
+      ],
+      "pick_xy": [
+       -0.0352,
+       0.2664
+      ],
+      "goal_xy": [
+       -0.1945,
+       -0.1986
+      ],
+      "route_m": 0.492,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.089,
+      "detour_side_gap_m": 0.14
+     },
+     {
+      "start": 9,
+      "kept": true,
+      "obstacle_xy": [
+       -0.1173,
+       0.0271
+      ],
+      "pick_xy": [
+       -0.0382,
+       0.2454
+      ],
+      "goal_xy": [
+       -0.1964,
+       -0.1912
+      ],
+      "route_m": 0.464,
+      "route_frac": 0.5,
+      "lateral_m": 0.0,
+      "route_overlap_m": 0.09,
+      "detour_side_gap_m": 0.146
+     }
+    ]
+   }
+  },
+  "language": "put both moka pots on the stove"
+ }
+}

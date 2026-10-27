@@ -58,9 +58,31 @@ class CollisionConfig:
     palm_overlap_tolerance_m: float = 0.0
     # STL G(Safe(obj)) keep-out zones, enforced at plan/control time. Empty by default (no constraints).
     keepout_zones: list["KeepoutZone"] = field(default_factory=list)
+    # STL G(Upright(obj, deg)): the most the carried object may tip from how it
+    # stood before it was picked up. None = no limit (the default).
+    max_tilt_deg: float | None = None
     # VLM-MPC-Cost baseline only: the active subtask's cost terms. Empty under
     # STeP, which drives the controller from the STL formula instead.
     mpc_cost_terms: list["MPCCostTerm"] = field(default_factory=list)
+    # VLM-MPC-Cost baseline: how the VLM's weights are mapped onto the
+    # controller's own scale.
+    #
+    # The VLM writes weights over Cartesian predicate distances (metres), and
+    # they were summed raw into an objective whose native terms are joint-space
+    # (radians, tracking 1.0 / terminal 4.0) and hand-tuned over many runs. The
+    # VLM is picking numbers on a scale it has never seen, so how hard its
+    # avoid-term fights its own reach-term was partly an accident of magnitude
+    # rather than anything the baseline's formalism implies -- measured, when
+    # max(avoid)/max(reach) >= 0.5 the baseline's task success is 27%, and below
+    # 0.5 it is 50%.
+    #
+    # Normalising divides by the largest reach weight, so the VLM's RELATIVE
+    # priorities -- the thing actually under test -- are preserved exactly, and
+    # only the overall magnitude is set by the gain below. Sweeping that one
+    # number gives the baseline the same tuning budget the method's own weights
+    # had, which is what a fair comparison needs.
+    mpc_cost_normalize: bool = True
+    mpc_cost_weight_gain: float = 1.0
 
 
 @dataclass
@@ -80,6 +102,14 @@ class KeepoutZone:
     # Bodies exempt from this zone -- normally the obstacle's own body (so it
     # doesn't forbid the scene object that defines it from existing).
     exempt_bodies: tuple[str, ...] = ()
+    # What must stay out. None is the end effector (the original behaviour).
+    # An object name means that object while it is carried, placed by the grasp
+    # transform -- G(Safe(obj, other, d)) is about the object, not the hand.
+    subject: str | None = None
+    # Part of radius_m that is planning buffer rather than the rule itself. The
+    # tracker lets the hand lag the plan by up to ~2 cm, so the plan keeps
+    # clear by that much more; a goal is judged against the rule alone.
+    buffer_m: float = 0.0
 
     def clearance(self, xy: Any) -> float:
         """Signed distance to the zone boundary: >0 outside, <0 inside."""

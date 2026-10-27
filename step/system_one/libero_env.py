@@ -43,6 +43,21 @@ def _libero_obs_array(obs: dict[str, Any], candidates: list[str], contains: list
     raise KeyError(f"Could not find observation array; candidates={candidates}, contains={contains}")
 
 
+def _retry_layout(make, tries=5):
+    """Call make() (a LIBERO reset, or building the env, which also resets),
+    drawing again when LIBERO cannot fit every object on the table. It samples
+    a random layout and gives up now and then in a crowded scene, such as one
+    with an added obstacle. Any draw is as good as another, and an init state
+    overwrites it anyway."""
+    for tries_left in range(tries - 1, -1, -1):
+        try:
+            return make()
+        except Exception as exc:
+            if tries_left == 0 or type(exc).__name__ != "RandomizationError":
+                raise
+
+
+
 class LiberoManipulationEnv(BaseManipulationEnv):
     """Run the shared STL-MPC skill executor inside a LIBERO task."""
 
@@ -134,7 +149,7 @@ class LiberoManipulationEnv(BaseManipulationEnv):
         camera_names = self.libero_cfg.get("camera_names")
         if camera_names is not None:
             env_args["camera_names"] = camera_names
-        self.env = OffScreenRenderEnv(**env_args)
+        self.env = _retry_layout(lambda: OffScreenRenderEnv(**env_args))
         try:
             self.env.seed(int(self.libero_cfg.get("seed", 0)))
         except Exception:
@@ -232,7 +247,7 @@ class LiberoManipulationEnv(BaseManipulationEnv):
 
     def _reset_backend(self) -> Dict[str, Any]:
         self._episode_terminated = False
-        obs = self.env.reset()
+        obs = _retry_layout(self.env.reset)
         self._last_obs = obs
         if self._init_state is not None:
             try:

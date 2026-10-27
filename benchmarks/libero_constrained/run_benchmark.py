@@ -50,6 +50,9 @@ def parse_args():
                    help="Pass no_stl to sweep the baseline: same VLM, skills and planner, no specification layer.")
     p.add_argument("--strip-constraint", action="store_true",
                    help="chance baseline: original LIBERO instruction, constraint clause removed")
+    p.add_argument("--base-scene-context", default=None,
+                   help="motion-config template to pass through to the runner. Used to sweep "
+                        "one setting across a family without editing the default template.")
     p.add_argument("--video", action="store_true", help="record a video per rollout")
     p.add_argument("--dry-run", action="store_true", help="list what would run, then stop")
     return p.parse_args()
@@ -93,6 +96,8 @@ def run_one(task, arm, state, args, outdir):
         cmd.append("--no-enforce-keepout")
     if args.strip_constraint:
         cmd.append("--strip-constraint")
+    if args.base_scene_context:
+        cmd += ["--base-scene-context", str(args.base_scene_context)]
     if args.video:
         cmd += ["--save-video", str(run_dir / "r.mp4")]
 
@@ -133,7 +138,8 @@ def main():
     plan = []
     for task in tasks:
         arms = args.arms if task.get("zone") else [a for a in args.arms if a == "on"] or ["on"]
-        for state in range(args.states):
+        # Obstacle tasks hold only the start layouts their build kept.
+        for state in range(min(args.states, int(task.get("num_states", args.states)))):
             for arm in arms:
                 plan.append((task, arm, state))
 

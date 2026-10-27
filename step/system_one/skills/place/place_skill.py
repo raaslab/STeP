@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from ...motion.attached_object import goal_object_quat
 from ...motion.collision import CollisionChecker, CollisionPhase, required_hand_pose_for_object_pose
 from ...motion.config import MotionConfig
 from ..ik_utils import escape_start_collision, solve_ik_robust as _solve_ik_robust
@@ -292,6 +293,7 @@ class PlaceSkill:
         # Keeps the object's current orientation throughout -- this skill
         # lowers it straight down, it doesn't re-orient in flight.
         object_pos_now, object_quat_now = scene.body_pose(attached.object_name)
+        object_quat_now = goal_object_quat(self.config, attached, object_quat_now)
         container_pos, _ = scene.body_pose(goal_container_body)
         floor_fn = _support_floor_and_rim_z if place_surface == "top" else _container_floor_and_rim_z
         _, rim_top_z = floor_fn(scene, goal_container_body)

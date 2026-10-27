@@ -220,7 +220,19 @@ def _apply_benchmark_task(args: argparse.Namespace) -> dict[str, Any] | None:
         args.task_id = int(task["task_id"])
     if args.init_state_id is None:
         args.init_state_id = int(task.get("init_state_id", 0))
+    if task.get("bddl"):
+        # An obstacle task: LIBERO's scene plus one added object, with start
+        # states built for that scene (benchmarks/libero_constrained/obstacles).
+        # init_state_id indexes those, not LIBERO's own file.
+        root = Path(__file__).resolve().parents[1]
+        if args.bddl_file is None:
+            args.bddl_file = str(root / task["bddl"])
+        args.init_states_file = str(root / task["init_states"])
     if getattr(args, "strip_constraint", False):
+        if task.get("base_prompt") and not args.prompt:
+            # The obstacle is in the scene either way; only the clause naming it
+            # is dropped, so this is LIBERO's instruction in the same scene.
+            args.prompt = task["base_prompt"]
         # Leave args.prompt unset so _resolve_prompt falls back to the suite's own
         # language, and leave the zone off the scene entirely. score.py recomputes
         # keep-out from the logged end-effector track plus the manifest zone, so
@@ -259,6 +271,8 @@ def _prepare_libero_scene(args: argparse.Namespace, outdir: Path) -> tuple[dict[
         libero["init_state_id"] = int(args.init_state_id)
     if args.bddl_file is not None:
         libero["bddl_file"] = args.bddl_file
+    if getattr(args, "init_states_file", None):
+        libero["init_states_file"] = args.init_states_file
 
     try:
         from step.system_one.libero_env import LiberoManipulationEnv

@@ -1,0 +1,7128 @@
+{
+ "name": "LIBERO-Constrained",
+ "version": 2,
+ "control_hz": 20,
+ "log": "benchmark_log.npz, written by logger.py",
+ "scoring": "spec.py evaluates each task's STL spec on the log; robustness in cm, degrees, cm/s",
+ "notes": "Every rule is an STL formula over logged motion. Spatial tasks add one real object to a stock LIBERO scene (obstacles/build.py; nothing already there is moved); the other families use LIBERO's own scenes and start states. Limits are set so that unconstrained motion breaks them and careful motion can meet them.",
+ "tasks": [
+  {
+   "id": "libero_10/4/S-offset",
+   "family": "placement",
+   "kind": "S-offset",
+   "type": "placement",
+   "suite": "libero_10",
+   "task_id": 4,
+   "init_state_id": 0,
+   "prompt": "put the white mug on the left plate and put the yellow and white mug on the right plate, leaving it about 5 cm to the left of the centre of the left plate",
+   "spec": {
+    "end": {
+     "and": [
+      {
+       "pred": [
+        {
+         "rel": [
+          "white_yellow_mug_1",
+          "plate_1"
+         ],
+         "axis": "y"
+        },
+        ">=",
+        -0.08
+       ]
+      },
+      {
+       "pred": [
+        {
+         "rel": [
+          "white_yellow_mug_1",
+          "plate_1"
+         ],
+         "axis": "y"
+        },
+        "<=",
+        -0.020000000000000004
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "placing to a specification, not just somewhere on the target",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/4/S-relative",
+   "family": "placement",
+   "kind": "S-relative",
+   "type": "placement",
+   "suite": "libero_10",
+   "task_id": 4,
+   "init_state_id": 0,
+   "prompt": "put the white mug on the left plate and put the yellow and white mug on the right plate, leaving it on the side of the left plate nearer the red coffee mug",
+   "spec": {
+    "end": {
+     "pred": [
+      {
+       "rel": [
+        "white_yellow_mug_1",
+        "plate_1"
+       ],
+       "axis": "y"
+      },
+      ">=",
+      0.02
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "placing to a specification, not just somewhere on the target",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/6/S-offset",
+   "family": "placement",
+   "kind": "S-offset",
+   "type": "placement",
+   "suite": "libero_10",
+   "task_id": 6,
+   "init_state_id": 0,
+   "prompt": "put the white mug on the plate and put the chocolate pudding to the right of the plate, leaving it about 5 cm to the left of the centre of the plate",
+   "spec": {
+    "end": {
+     "and": [
+      {
+       "pred": [
+        {
+         "rel": [
+          "porcelain_mug_1",
+          "plate_1"
+         ],
+         "axis": "y"
+        },
+        ">=",
+        -0.08
+       ]
+      },
+      {
+       "pred": [
+        {
+         "rel": [
+          "porcelain_mug_1",
+          "plate_1"
+         ],
+         "axis": "y"
+        },
+        "<=",
+        -0.020000000000000004
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "placing to a specification, not just somewhere on the target",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/6/S-relative",
+   "family": "placement",
+   "kind": "S-relative",
+   "type": "placement",
+   "suite": "libero_10",
+   "task_id": 6,
+   "init_state_id": 0,
+   "prompt": "put the white mug on the plate and put the chocolate pudding to the right of the plate, leaving it on the side of the plate nearer the chocolate pudding",
+   "spec": {
+    "end": {
+     "pred": [
+      {
+       "rel": [
+        "porcelain_mug_1",
+        "plate_1"
+       ],
+       "axis": "y"
+      },
+      ">=",
+      0.02
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "placing to a specification, not just somewhere on the target",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_goal/8/S-offset",
+   "family": "placement",
+   "kind": "S-offset",
+   "type": "placement",
+   "suite": "libero_goal",
+   "task_id": 8,
+   "init_state_id": 0,
+   "prompt": "put the bowl on the plate, leaving it about 5 cm to the left of the centre of the plate",
+   "spec": {
+    "end": {
+     "and": [
+      {
+       "pred": [
+        {
+         "rel": [
+          "akita_black_bowl_1",
+          "plate_1"
+         ],
+         "axis": "y"
+        },
+        ">=",
+        -0.08
+       ]
+      },
+      {
+       "pred": [
+        {
+         "rel": [
+          "akita_black_bowl_1",
+          "plate_1"
+         ],
+         "axis": "y"
+        },
+        "<=",
+        -0.020000000000000004
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "placing to a specification, not just somewhere on the target",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_goal/8/S-relative",
+   "family": "placement",
+   "kind": "S-relative",
+   "type": "placement",
+   "suite": "libero_goal",
+   "task_id": 8,
+   "init_state_id": 0,
+   "prompt": "put the bowl on the plate, leaving it on the side of the plate nearer the cream cheese",
+   "spec": {
+    "end": {
+     "pred": [
+      {
+       "rel": [
+        "akita_black_bowl_1",
+        "plate_1"
+       ],
+       "axis": "y"
+      },
+      ">=",
+      0.02
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "placing to a specification, not just somewhere on the target",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/0/S-offset",
+   "family": "placement",
+   "kind": "S-offset",
+   "type": "placement",
+   "suite": "libero_spatial",
+   "task_id": 0,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl between the plate and the ramekin and place it on the plate, leaving it about 5 cm to the left of the centre of the plate",
+   "spec": {
+    "end": {
+     "and": [
+      {
+       "pred": [
+        {
+         "rel": [
+          "akita_black_bowl_1",
+          "plate_1"
+         ],
+         "axis": "y"
+        },
+        ">=",
+        -0.08
+       ]
+      },
+      {
+       "pred": [
+        {
+         "rel": [
+          "akita_black_bowl_1",
+          "plate_1"
+         ],
+         "axis": "y"
+        },
+        "<=",
+        -0.020000000000000004
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "placing to a specification, not just somewhere on the target",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/0/S-relative",
+   "family": "placement",
+   "kind": "S-relative",
+   "type": "placement",
+   "suite": "libero_spatial",
+   "task_id": 0,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl between the plate and the ramekin and place it on the plate, leaving it on the side of the plate nearer the cookies",
+   "spec": {
+    "end": {
+     "pred": [
+      {
+       "rel": [
+        "akita_black_bowl_1",
+        "plate_1"
+       ],
+       "axis": "y"
+      },
+      "<=",
+      -0.02
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "placing to a specification, not just somewhere on the target",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/0/L-order",
+   "family": "logical",
+   "kind": "L-order",
+   "type": "order",
+   "suite": "libero_10",
+   "task_id": 0,
+   "init_state_id": 0,
+   "prompt": "put both the alphabet soup and the tomato sauce in the basket, putting them in alphabetical order",
+   "spec": {
+    "U": [
+     {
+      "not": {
+       "pred": [
+        {
+         "dist": [
+          "tomato_sauce_1",
+          "basket_1"
+         ]
+        },
+        "<=",
+        0.1
+       ]
+      }
+     },
+     {
+      "pred": [
+       {
+        "dist": [
+         "alphabet_soup_1",
+         "basket_1"
+        ]
+       },
+       "<=",
+       0.1
+      ]
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "stacking or loading order",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/0/L-precondition",
+   "family": "logical",
+   "kind": "L-precondition",
+   "type": "precondition",
+   "suite": "libero_10",
+   "task_id": 0,
+   "init_state_id": 0,
+   "prompt": "put both the alphabet soup and the tomato sauce in the basket, but only after making sure the basket is empty",
+   "spec": {
+    "U": [
+     {
+      "not": {
+       "pred": [
+        {
+         "dist": [
+          "alphabet_soup_1",
+          "basket_1"
+         ]
+        },
+        "<=",
+        0.1
+       ]
+      }
+     },
+     {
+      "and": [
+       {
+        "pred": [
+         {
+          "dist": [
+           "alphabet_soup_1",
+           "basket_1"
+          ]
+         },
+         "<=",
+         0.1
+        ]
+       },
+       {
+        "pred": [
+         {
+          "count_near": "basket_1",
+          "radius": 0.1,
+          "exclude": [
+           "alphabet_soup_1"
+          ]
+         },
+         "<=",
+         0.5
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a step that is valid only once a condition holds",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/1/L-order",
+   "family": "logical",
+   "kind": "L-order",
+   "type": "order",
+   "suite": "libero_10",
+   "task_id": 1,
+   "init_state_id": 0,
+   "prompt": "put both the cream cheese box and the butter in the basket, putting them in alphabetical order",
+   "spec": {
+    "U": [
+     {
+      "not": {
+       "pred": [
+        {
+         "dist": [
+          "cream_cheese_1",
+          "basket_1"
+         ]
+        },
+        "<=",
+        0.1
+       ]
+      }
+     },
+     {
+      "pred": [
+       {
+        "dist": [
+         "butter_1",
+         "basket_1"
+        ]
+       },
+       "<=",
+       0.1
+      ]
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "stacking or loading order",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/1/L-precondition",
+   "family": "logical",
+   "kind": "L-precondition",
+   "type": "precondition",
+   "suite": "libero_10",
+   "task_id": 1,
+   "init_state_id": 0,
+   "prompt": "put both the cream cheese box and the butter in the basket, but only after making sure the basket is empty",
+   "spec": {
+    "U": [
+     {
+      "not": {
+       "pred": [
+        {
+         "dist": [
+          "cream_cheese_1",
+          "basket_1"
+         ]
+        },
+        "<=",
+        0.1
+       ]
+      }
+     },
+     {
+      "and": [
+       {
+        "pred": [
+         {
+          "dist": [
+           "cream_cheese_1",
+           "basket_1"
+          ]
+         },
+         "<=",
+         0.1
+        ]
+       },
+       {
+        "pred": [
+         {
+          "count_near": "basket_1",
+          "radius": 0.1,
+          "exclude": [
+           "cream_cheese_1"
+          ]
+         },
+         "<=",
+         0.5
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a step that is valid only once a condition holds",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/7/L-order",
+   "family": "logical",
+   "kind": "L-order",
+   "type": "order",
+   "suite": "libero_10",
+   "task_id": 7,
+   "init_state_id": 0,
+   "prompt": "put both the alphabet soup and the cream cheese box in the basket, putting the bigger one in first",
+   "spec": {
+    "U": [
+     {
+      "not": {
+       "pred": [
+        {
+         "dist": [
+          "cream_cheese_1",
+          "basket_1"
+         ]
+        },
+        "<=",
+        0.1
+       ]
+      }
+     },
+     {
+      "pred": [
+       {
+        "dist": [
+         "alphabet_soup_1",
+         "basket_1"
+        ]
+       },
+       "<=",
+       0.1
+      ]
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "stacking or loading order",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/0/L-untouched",
+   "family": "logical",
+   "kind": "L-untouched",
+   "type": "untouched",
+   "suite": "libero_spatial",
+   "task_id": 0,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl between the plate and the ramekin and place it on the plate, without moving the other black bowl",
+   "spec": {
+    "G": {
+     "pred": [
+      {
+       "disp": "akita_black_bowl_2"
+      },
+      "<=",
+      0.02
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "leaving other people's items alone",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/1/L-untouched",
+   "family": "logical",
+   "kind": "L-untouched",
+   "type": "untouched",
+   "suite": "libero_spatial",
+   "task_id": 1,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl next to the ramekin and place it on the plate, without moving the other black bowl",
+   "spec": {
+    "G": {
+     "pred": [
+      {
+       "disp": "akita_black_bowl_2"
+      },
+      "<=",
+      0.02
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "leaving other people's items alone",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/2/L-untouched",
+   "family": "logical",
+   "kind": "L-untouched",
+   "type": "untouched",
+   "suite": "libero_spatial",
+   "task_id": 2,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl from table center and place it on the plate, without moving the other black bowl",
+   "spec": {
+    "G": {
+     "pred": [
+      {
+       "disp": "akita_black_bowl_2"
+      },
+      "<=",
+      0.02
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "leaving other people's items alone",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/0/T-dwell",
+   "family": "temporal",
+   "kind": "T-dwell",
+   "type": "dwell",
+   "suite": "libero_10",
+   "task_id": 0,
+   "init_state_id": 0,
+   "prompt": "put both the alphabet soup and the tomato sauce in the basket, holding it steady above the target for 2 seconds before letting go",
+   "spec": {
+    "or": [
+     {
+      "F": {
+       "G": {
+        "and": [
+         {
+          "pred": [
+           {
+            "height": "alphabet_soup_1"
+           },
+           ">=",
+           0.02
+          ]
+         },
+         {
+          "pred": [
+           {
+            "dist": [
+             "alphabet_soup_1",
+             "basket_1"
+            ]
+           },
+           "<=",
+           0.1
+          ]
+         },
+         {
+          "pred": [
+           {
+            "speed": "alphabet_soup_1"
+           },
+           "<=",
+           0.03
+          ]
+         }
+        ]
+       },
+       "in": [
+        0,
+        2
+       ]
+      }
+     },
+     {
+      "F": {
+       "G": {
+        "and": [
+         {
+          "pred": [
+           {
+            "height": "tomato_sauce_1"
+           },
+           ">=",
+           0.02
+          ]
+         },
+         {
+          "pred": [
+           {
+            "dist": [
+             "tomato_sauce_1",
+             "basket_1"
+            ]
+           },
+           "<=",
+           0.1
+          ]
+         },
+         {
+          "pred": [
+           {
+            "speed": "tomato_sauce_1"
+           },
+           "<=",
+           0.03
+          ]
+         }
+        ]
+       },
+       "in": [
+        0,
+        2
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "letting an item settle before release",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/2/T-stage",
+   "family": "temporal",
+   "kind": "T-stage",
+   "type": "gate",
+   "suite": "libero_10",
+   "task_id": 2,
+   "init_state_id": 0,
+   "prompt": "turn on the stove and put the moka pot on it, and do not pick anything up until the first step is fully complete",
+   "spec": {
+    "U": [
+     {
+      "not": {
+       "pred": [
+        {
+         "height": "moka_pot_1"
+        },
+        ">=",
+        0.02
+       ]
+      }
+     },
+     {
+      "pred": [
+       {
+        "bddl": "turnon flat_stove_1"
+       },
+       ">=",
+       0.5
+      ]
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a step that must not begin before another has finished",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/2/T-wait",
+   "family": "temporal",
+   "kind": "T-wait",
+   "type": "wait",
+   "suite": "libero_10",
+   "task_id": 2,
+   "init_state_id": 0,
+   "prompt": "turn on the stove and put the moka pot on it, waiting at least 4 seconds after turning on the stove before starting the next step",
+   "spec": {
+    "U": [
+     {
+      "not": {
+       "pred": [
+        {
+         "disp": "moka_pot_1"
+        },
+        ">=",
+        0.01
+       ]
+      }
+     },
+     {
+      "and": [
+       {
+        "pred": [
+         {
+          "bddl": "turnon flat_stove_1"
+         },
+         ">=",
+         0.5
+        ]
+       },
+       {
+        "G": {
+         "not": {
+          "pred": [
+           {
+            "disp": "moka_pot_1"
+           },
+           ">=",
+           0.01
+          ]
+         }
+        },
+        "in": [
+         0,
+         4
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a process that needs time before the next step (heating, settling)",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/3/T-stage",
+   "family": "temporal",
+   "kind": "T-stage",
+   "type": "gate",
+   "suite": "libero_10",
+   "task_id": 3,
+   "init_state_id": 0,
+   "prompt": "put the black bowl in the bottom drawer of the cabinet and close it, and do not start the last step until the object is fully in place",
+   "spec": {
+    "U": [
+     {
+      "not": {
+       "pred": [
+        {
+         "joint": "white_cabinet_1_bottom_level"
+        },
+        ">=",
+        -0.136
+       ]
+      }
+     },
+     {
+      "and": [
+       {
+        "pred": [
+         {
+          "bddl": "in akita_black_bowl_1 white_cabinet_1_bottom_region"
+         },
+         ">=",
+         0.5
+        ]
+       },
+       {
+        "pred": [
+         {
+          "held": "akita_black_bowl_1"
+         },
+         "<=",
+         0.5
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a step that must not begin before another has finished",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/3/T-wait",
+   "family": "temporal",
+   "kind": "T-wait",
+   "type": "wait",
+   "suite": "libero_10",
+   "task_id": 3,
+   "init_state_id": 0,
+   "prompt": "put the black bowl in the bottom drawer of the cabinet and close it, waiting at least 4 seconds after the first step is done before starting the next step",
+   "spec": {
+    "U": [
+     {
+      "not": {
+       "pred": [
+        {
+         "joint": "white_cabinet_1_bottom_level"
+        },
+        ">=",
+        -0.136
+       ]
+      }
+     },
+     {
+      "and": [
+       {
+        "pred": [
+         {
+          "bddl": "in akita_black_bowl_1 white_cabinet_1_bottom_region"
+         },
+         ">=",
+         0.5
+        ]
+       },
+       {
+        "G": {
+         "not": {
+          "pred": [
+           {
+            "joint": "white_cabinet_1_bottom_level"
+           },
+           ">=",
+           -0.136
+          ]
+         }
+        },
+        "in": [
+         0,
+         4
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a process that needs time before the next step (heating, settling)",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/4/T-dwell",
+   "family": "temporal",
+   "kind": "T-dwell",
+   "type": "dwell",
+   "suite": "libero_10",
+   "task_id": 4,
+   "init_state_id": 0,
+   "prompt": "put the white mug on the left plate and put the yellow and white mug on the right plate, holding it steady above the target for 2 seconds before letting go",
+   "spec": {
+    "or": [
+     {
+      "F": {
+       "G": {
+        "and": [
+         {
+          "pred": [
+           {
+            "height": "porcelain_mug_1"
+           },
+           ">=",
+           0.02
+          ]
+         },
+         {
+          "pred": [
+           {
+            "dist": [
+             "porcelain_mug_1",
+             "plate_1"
+            ]
+           },
+           "<=",
+           0.1
+          ]
+         },
+         {
+          "pred": [
+           {
+            "speed": "porcelain_mug_1"
+           },
+           "<=",
+           0.03
+          ]
+         }
+        ]
+       },
+       "in": [
+        0,
+        2
+       ]
+      }
+     },
+     {
+      "F": {
+       "G": {
+        "and": [
+         {
+          "pred": [
+           {
+            "height": "white_yellow_mug_1"
+           },
+           ">=",
+           0.02
+          ]
+         },
+         {
+          "pred": [
+           {
+            "dist": [
+             "white_yellow_mug_1",
+             "plate_2"
+            ]
+           },
+           "<=",
+           0.1
+          ]
+         },
+         {
+          "pred": [
+           {
+            "speed": "white_yellow_mug_1"
+           },
+           "<=",
+           0.03
+          ]
+         }
+        ]
+       },
+       "in": [
+        0,
+        2
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "letting an item settle before release",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/9/T-wait",
+   "family": "temporal",
+   "kind": "T-wait",
+   "type": "wait",
+   "suite": "libero_10",
+   "task_id": 9,
+   "init_state_id": 0,
+   "prompt": "put the yellow and white mug in the microwave and close it, waiting at least 4 seconds after the first step is done before starting the next step",
+   "spec": {
+    "U": [
+     {
+      "not": {
+       "pred": [
+        {
+         "joint": "microwave_1_microjoint"
+        },
+        ">=",
+        -1.53
+       ]
+      }
+     },
+     {
+      "and": [
+       {
+        "pred": [
+         {
+          "bddl": "in white_yellow_mug_1 microwave_1_heating_region"
+         },
+         ">=",
+         0.5
+        ]
+       },
+       {
+        "G": {
+         "not": {
+          "pred": [
+           {
+            "joint": "microwave_1_microjoint"
+           },
+           ">=",
+           -1.53
+          ]
+         }
+        },
+        "in": [
+         0,
+         4
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a process that needs time before the next step (heating, settling)",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_goal/1/T-dwell",
+   "family": "temporal",
+   "kind": "T-dwell",
+   "type": "dwell",
+   "suite": "libero_goal",
+   "task_id": 1,
+   "init_state_id": 0,
+   "prompt": "put the bowl on the stove, holding it steady above the target for 2 seconds before letting go",
+   "spec": {
+    "F": {
+     "G": {
+      "and": [
+       {
+        "pred": [
+         {
+          "height": "akita_black_bowl_1"
+         },
+         ">=",
+         0.02
+        ]
+       },
+       {
+        "pred": [
+         {
+          "dist": [
+           "akita_black_bowl_1",
+           "flat_stove_1"
+          ]
+         },
+         "<=",
+         0.1
+        ]
+       },
+       {
+        "pred": [
+         {
+          "speed": "akita_black_bowl_1"
+         },
+         "<=",
+         0.03
+        ]
+       }
+      ]
+     },
+     "in": [
+      0,
+      2
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "letting an item settle before release",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_goal/3/T-stage",
+   "family": "temporal",
+   "kind": "T-stage",
+   "type": "gate",
+   "suite": "libero_goal",
+   "task_id": 3,
+   "init_state_id": 0,
+   "prompt": "open the top drawer and put the bowl inside, making sure nothing is in the way before opening the drawer",
+   "spec": {
+    "U": [
+     {
+      "not": {
+       "pred": [
+        {
+         "joint": "wooden_cabinet_1_top_level"
+        },
+        "<=",
+        -0.01
+       ]
+      }
+     },
+     {
+      "and": [
+       {
+        "pred": [
+         {
+          "joint": "wooden_cabinet_1_top_level"
+         },
+         "<=",
+         -0.01
+        ]
+       },
+       {
+        "pred": [
+         {
+          "count_near": "wooden_cabinet_1",
+          "radius": 0.18
+         },
+         "<=",
+         0.5
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a step that must not begin before another has finished",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_goal/3/T-wait",
+   "family": "temporal",
+   "kind": "T-wait",
+   "type": "wait",
+   "suite": "libero_goal",
+   "task_id": 3,
+   "init_state_id": 0,
+   "prompt": "open the top drawer and put the bowl inside, waiting at least 4 seconds after opening the top drawer before starting the next step",
+   "spec": {
+    "U": [
+     {
+      "not": {
+       "pred": [
+        {
+         "disp": "akita_black_bowl_1"
+        },
+        ">=",
+        0.01
+       ]
+      }
+     },
+     {
+      "and": [
+       {
+        "pred": [
+         {
+          "joint": "wooden_cabinet_1_top_level"
+         },
+         "<=",
+         -0.1
+        ]
+       },
+       {
+        "G": {
+         "not": {
+          "pred": [
+           {
+            "disp": "akita_black_bowl_1"
+           },
+           ">=",
+           0.01
+          ]
+         }
+        },
+        "in": [
+         0,
+         4
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a process that needs time before the next step (heating, settling)",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_goal/8/T-dwell",
+   "family": "temporal",
+   "kind": "T-dwell",
+   "type": "dwell",
+   "suite": "libero_goal",
+   "task_id": 8,
+   "init_state_id": 0,
+   "prompt": "put the bowl on the plate, holding it steady above the target for 2 seconds before letting go",
+   "spec": {
+    "F": {
+     "G": {
+      "and": [
+       {
+        "pred": [
+         {
+          "height": "akita_black_bowl_1"
+         },
+         ">=",
+         0.02
+        ]
+       },
+       {
+        "pred": [
+         {
+          "dist": [
+           "akita_black_bowl_1",
+           "plate_1"
+          ]
+         },
+         "<=",
+         0.1
+        ]
+       },
+       {
+        "pred": [
+         {
+          "speed": "akita_black_bowl_1"
+         },
+         "<=",
+         0.03
+        ]
+       }
+      ]
+     },
+     "in": [
+      0,
+      2
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "letting an item settle before release",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/0/T-dwell",
+   "family": "temporal",
+   "kind": "T-dwell",
+   "type": "dwell",
+   "suite": "libero_spatial",
+   "task_id": 0,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl between the plate and the ramekin and place it on the plate, holding it steady above the target for 2 seconds before letting go",
+   "spec": {
+    "F": {
+     "G": {
+      "and": [
+       {
+        "pred": [
+         {
+          "height": "akita_black_bowl_1"
+         },
+         ">=",
+         0.02
+        ]
+       },
+       {
+        "pred": [
+         {
+          "dist": [
+           "akita_black_bowl_1",
+           "plate_1"
+          ]
+         },
+         "<=",
+         0.1
+        ]
+       },
+       {
+        "pred": [
+         {
+          "speed": "akita_black_bowl_1"
+         },
+         "<=",
+         0.03
+        ]
+       }
+      ]
+     },
+     "in": [
+      0,
+      2
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "letting an item settle before release",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/3/U-plain",
+   "family": "unconstrained",
+   "kind": "U-plain",
+   "type": null,
+   "suite": "libero_10",
+   "task_id": 3,
+   "init_state_id": 0,
+   "prompt": "put the black bowl in the bottom drawer of the cabinet and close it",
+   "spec": null,
+   "difficulty": 0,
+   "scoring": {
+    "type": "success_only"
+   }
+  },
+  {
+   "id": "libero_10/4/U-plain",
+   "family": "unconstrained",
+   "kind": "U-plain",
+   "type": null,
+   "suite": "libero_10",
+   "task_id": 4,
+   "init_state_id": 0,
+   "prompt": "put the white mug on the left plate and put the yellow and white mug on the right plate",
+   "spec": null,
+   "difficulty": 0,
+   "scoring": {
+    "type": "success_only"
+   }
+  },
+  {
+   "id": "libero_10/5/U-plain",
+   "family": "unconstrained",
+   "kind": "U-plain",
+   "type": null,
+   "suite": "libero_10",
+   "task_id": 5,
+   "init_state_id": 0,
+   "prompt": "pick up the book and place it in the back compartment of the caddy",
+   "spec": null,
+   "difficulty": 0,
+   "scoring": {
+    "type": "success_only"
+   }
+  },
+  {
+   "id": "libero_10/6/U-plain",
+   "family": "unconstrained",
+   "kind": "U-plain",
+   "type": null,
+   "suite": "libero_10",
+   "task_id": 6,
+   "init_state_id": 0,
+   "prompt": "put the white mug on the plate and put the chocolate pudding to the right of the plate",
+   "spec": null,
+   "difficulty": 0,
+   "scoring": {
+    "type": "success_only"
+   }
+  },
+  {
+   "id": "libero_goal/0/U-plain",
+   "family": "unconstrained",
+   "kind": "U-plain",
+   "type": null,
+   "suite": "libero_goal",
+   "task_id": 0,
+   "init_state_id": 0,
+   "prompt": "open the middle drawer of the cabinet",
+   "spec": null,
+   "difficulty": 0,
+   "scoring": {
+    "type": "success_only"
+   }
+  },
+  {
+   "id": "libero_goal/1/U-plain",
+   "family": "unconstrained",
+   "kind": "U-plain",
+   "type": null,
+   "suite": "libero_goal",
+   "task_id": 1,
+   "init_state_id": 0,
+   "prompt": "put the bowl on the stove",
+   "spec": null,
+   "difficulty": 0,
+   "scoring": {
+    "type": "success_only"
+   }
+  },
+  {
+   "id": "libero_goal/5/U-plain",
+   "family": "unconstrained",
+   "kind": "U-plain",
+   "type": null,
+   "suite": "libero_goal",
+   "task_id": 5,
+   "init_state_id": 0,
+   "prompt": "push the plate to the front of the stove",
+   "spec": null,
+   "difficulty": 0,
+   "scoring": {
+    "type": "success_only"
+   }
+  },
+  {
+   "id": "libero_goal/6/U-plain",
+   "family": "unconstrained",
+   "kind": "U-plain",
+   "type": null,
+   "suite": "libero_goal",
+   "task_id": 6,
+   "init_state_id": 0,
+   "prompt": "put the cream cheese in the bowl",
+   "spec": null,
+   "difficulty": 0,
+   "scoring": {
+    "type": "success_only"
+   }
+  },
+  {
+   "id": "libero_goal/8/U-plain",
+   "family": "unconstrained",
+   "kind": "U-plain",
+   "type": null,
+   "suite": "libero_goal",
+   "task_id": 8,
+   "init_state_id": 0,
+   "prompt": "put the bowl on the plate",
+   "spec": null,
+   "difficulty": 0,
+   "scoring": {
+    "type": "success_only"
+   }
+  },
+  {
+   "id": "libero_goal/9/U-plain",
+   "family": "unconstrained",
+   "kind": "U-plain",
+   "type": null,
+   "suite": "libero_goal",
+   "task_id": 9,
+   "init_state_id": 0,
+   "prompt": "put the wine bottle on the rack",
+   "spec": null,
+   "difficulty": 0,
+   "scoring": {
+    "type": "success_only"
+   }
+  },
+  {
+   "id": "libero_spatial/0/U-plain",
+   "family": "unconstrained",
+   "kind": "U-plain",
+   "type": null,
+   "suite": "libero_spatial",
+   "task_id": 0,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl between the plate and the ramekin and place it on the plate",
+   "spec": null,
+   "difficulty": 0,
+   "scoring": {
+    "type": "success_only"
+   }
+  },
+  {
+   "id": "libero_spatial/3/U-plain",
+   "family": "unconstrained",
+   "kind": "U-plain",
+   "type": null,
+   "suite": "libero_spatial",
+   "task_id": 3,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl on the cookie box and place it on the plate",
+   "spec": null,
+   "difficulty": 0,
+   "scoring": {
+    "type": "success_only"
+   }
+  },
+  {
+   "id": "libero_spatial/4/U-plain",
+   "family": "unconstrained",
+   "kind": "U-plain",
+   "type": null,
+   "suite": "libero_spatial",
+   "task_id": 4,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl in the top drawer of the wooden cabinet and place it on the plate",
+   "spec": null,
+   "difficulty": 0,
+   "scoring": {
+    "type": "success_only"
+   }
+  },
+  {
+   "id": "libero_spatial/6/U-plain",
+   "family": "unconstrained",
+   "kind": "U-plain",
+   "type": null,
+   "suite": "libero_spatial",
+   "task_id": 6,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl next to the cookie box and place it on the plate",
+   "spec": null,
+   "difficulty": 0,
+   "scoring": {
+    "type": "success_only"
+   }
+  },
+  {
+   "id": "libero_spatial/8/U-plain",
+   "family": "unconstrained",
+   "kind": "U-plain",
+   "type": null,
+   "suite": "libero_spatial",
+   "task_id": 8,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl next to the plate and place it on the plate",
+   "spec": null,
+   "difficulty": 0,
+   "scoring": {
+    "type": "success_only"
+   }
+  },
+  {
+   "id": "libero_10/2/O-L1",
+   "family": "spatial",
+   "kind": "O-L1",
+   "type": "no-contact",
+   "suite": "libero_10",
+   "task_id": 2,
+   "init_state_id": 0,
+   "prompt": "turn on the stove and put the moka pot on it, without touching the wine bottle",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "wine_bottle_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "wine_bottle_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_2_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_2_L1.npz",
+   "num_states": 10,
+   "level": "L1",
+   "level_note": "obstacle beside the object being picked, off the route",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/2/O-L2",
+   "family": "spatial",
+   "kind": "O-L2",
+   "type": "no-contact",
+   "suite": "libero_10",
+   "task_id": 2,
+   "init_state_id": 0,
+   "prompt": "turn on the stove and put the moka pot on it, without touching the wine bottle",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "wine_bottle_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "wine_bottle_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_2_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_2_L2.npz",
+   "num_states": 3,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/2/O-margin",
+   "family": "spatial",
+   "kind": "O-margin",
+   "type": "keep-out",
+   "suite": "libero_10",
+   "task_id": 2,
+   "init_state_id": 0,
+   "prompt": "turn on the stove and put the moka pot on it, keeping the moka pot at least 8 cm away from the wine bottle",
+   "spec": {
+    "and": [
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "dist": [
+            "moka_pot_1",
+            "wine_bottle_1"
+           ],
+           "b_at": "start"
+          },
+          ">=",
+          0.08
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "disp": "wine_bottle_1"
+          },
+          "<=",
+          0.01
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "wine_bottle_1"
+          },
+          "<=",
+          10.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a clearance around people, hot surfaces or fragile items",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_2_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_2_margin.npz",
+   "num_states": 3,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/2/C-margin-upright",
+   "family": "combined",
+   "kind": "C-margin-upright",
+   "type": "keep-out+upright",
+   "suite": "libero_10",
+   "task_id": 2,
+   "init_state_id": 0,
+   "prompt": "turn on the stove and put the moka pot on it, keeping the moka pot upright (tilt under 5 degrees) and at least 8 cm away from the wine bottle",
+   "spec": {
+    "and": [
+     {
+      "and": [
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "dist": [
+              "moka_pot_1",
+              "wine_bottle_1"
+             ],
+             "b_at": "start"
+            },
+            ">=",
+            0.08
+           ]
+          }
+         ]
+        }
+       },
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "disp": "wine_bottle_1"
+            },
+            "<=",
+            0.01
+           ]
+          },
+          {
+           "pred": [
+            {
+             "tilt": "wine_bottle_1"
+            },
+            "<=",
+            10.0
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     {
+      "G": {
+       "implies": [
+        {
+         "pred": [
+          {
+           "height": "moka_pot_1"
+          },
+          ">=",
+          0.02
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "moka_pot_1"
+          },
+          "<=",
+          5.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 2,
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_2_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_2_margin.npz",
+   "num_states": 3,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/2/C-margin-upright-dwell",
+   "family": "combined",
+   "kind": "C-margin-upright-dwell",
+   "type": "keep-out+upright+dwell",
+   "suite": "libero_10",
+   "task_id": 2,
+   "init_state_id": 0,
+   "prompt": "turn on the stove and put the moka pot on it, keeping the moka pot upright (tilt under 5 degrees) and at least 8 cm away from the wine bottle, and holding it steady above the target for 2 seconds before letting go",
+   "spec": {
+    "and": [
+     {
+      "and": [
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "dist": [
+              "moka_pot_1",
+              "wine_bottle_1"
+             ],
+             "b_at": "start"
+            },
+            ">=",
+            0.08
+           ]
+          }
+         ]
+        }
+       },
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "disp": "wine_bottle_1"
+            },
+            "<=",
+            0.01
+           ]
+          },
+          {
+           "pred": [
+            {
+             "tilt": "wine_bottle_1"
+            },
+            "<=",
+            10.0
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     {
+      "G": {
+       "implies": [
+        {
+         "pred": [
+          {
+           "height": "moka_pot_1"
+          },
+          ">=",
+          0.02
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "moka_pot_1"
+          },
+          "<=",
+          5.0
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "F": {
+       "G": {
+        "and": [
+         {
+          "pred": [
+           {
+            "height": "moka_pot_1"
+           },
+           ">=",
+           0.02
+          ]
+         },
+         {
+          "pred": [
+           {
+            "dist": [
+             "moka_pot_1",
+             "flat_stove_1"
+            ]
+           },
+           "<=",
+           0.1
+          ]
+         },
+         {
+          "pred": [
+           {
+            "speed": "moka_pot_1"
+           },
+           "<=",
+           0.03
+          ]
+         }
+        ]
+       },
+       "in": [
+        0,
+        2
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 3,
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_2_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_2_margin.npz",
+   "num_states": 3,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/4/O-L1",
+   "family": "spatial",
+   "kind": "O-L1",
+   "type": "no-contact",
+   "suite": "libero_10",
+   "task_id": 4,
+   "init_state_id": 0,
+   "prompt": "put the white mug on the left plate and put the yellow and white mug on the right plate, without touching the ketchup bottle",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "ketchup_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "ketchup_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_4_ketchup.bddl",
+   "obstacle": "ketchup_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_4_L1.npz",
+   "num_states": 8,
+   "level": "L1",
+   "level_note": "obstacle beside the object being picked, off the route",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/4/O-L2",
+   "family": "spatial",
+   "kind": "O-L2",
+   "type": "no-contact",
+   "suite": "libero_10",
+   "task_id": 4,
+   "init_state_id": 0,
+   "prompt": "put the white mug on the left plate and put the yellow and white mug on the right plate, without touching the ketchup bottle",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "ketchup_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "ketchup_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_4_ketchup.bddl",
+   "obstacle": "ketchup_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_4_L2.npz",
+   "num_states": 9,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/4/O-margin",
+   "family": "spatial",
+   "kind": "O-margin",
+   "type": "keep-out",
+   "suite": "libero_10",
+   "task_id": 4,
+   "init_state_id": 0,
+   "prompt": "put the white mug on the left plate and put the yellow and white mug on the right plate, keeping the white mug at least 8 cm away from the ketchup bottle",
+   "spec": {
+    "and": [
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "dist": [
+            "porcelain_mug_1",
+            "ketchup_1"
+           ],
+           "b_at": "start"
+          },
+          ">=",
+          0.08
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "disp": "ketchup_1"
+          },
+          "<=",
+          0.01
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "ketchup_1"
+          },
+          "<=",
+          10.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a clearance around people, hot surfaces or fragile items",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_4_ketchup.bddl",
+   "obstacle": "ketchup_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_4_margin.npz",
+   "num_states": 9,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/4/C-margin-upright",
+   "family": "combined",
+   "kind": "C-margin-upright",
+   "type": "keep-out+upright",
+   "suite": "libero_10",
+   "task_id": 4,
+   "init_state_id": 0,
+   "prompt": "put the white mug on the left plate and put the yellow and white mug on the right plate, keeping the white mug upright (tilt under 5 degrees) and at least 8 cm away from the ketchup bottle",
+   "spec": {
+    "and": [
+     {
+      "and": [
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "dist": [
+              "porcelain_mug_1",
+              "ketchup_1"
+             ],
+             "b_at": "start"
+            },
+            ">=",
+            0.08
+           ]
+          }
+         ]
+        }
+       },
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "disp": "ketchup_1"
+            },
+            "<=",
+            0.01
+           ]
+          },
+          {
+           "pred": [
+            {
+             "tilt": "ketchup_1"
+            },
+            "<=",
+            10.0
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     {
+      "G": {
+       "implies": [
+        {
+         "pred": [
+          {
+           "height": "porcelain_mug_1"
+          },
+          ">=",
+          0.02
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "porcelain_mug_1"
+          },
+          "<=",
+          5.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 2,
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_4_ketchup.bddl",
+   "obstacle": "ketchup_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_4_margin.npz",
+   "num_states": 9,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/4/C-margin-upright-dwell",
+   "family": "combined",
+   "kind": "C-margin-upright-dwell",
+   "type": "keep-out+upright+dwell",
+   "suite": "libero_10",
+   "task_id": 4,
+   "init_state_id": 0,
+   "prompt": "put the white mug on the left plate and put the yellow and white mug on the right plate, keeping the white mug upright (tilt under 5 degrees) and at least 8 cm away from the ketchup bottle, and holding it steady above the target for 2 seconds before letting go",
+   "spec": {
+    "and": [
+     {
+      "and": [
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "dist": [
+              "porcelain_mug_1",
+              "ketchup_1"
+             ],
+             "b_at": "start"
+            },
+            ">=",
+            0.08
+           ]
+          }
+         ]
+        }
+       },
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "disp": "ketchup_1"
+            },
+            "<=",
+            0.01
+           ]
+          },
+          {
+           "pred": [
+            {
+             "tilt": "ketchup_1"
+            },
+            "<=",
+            10.0
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     {
+      "G": {
+       "implies": [
+        {
+         "pred": [
+          {
+           "height": "porcelain_mug_1"
+          },
+          ">=",
+          0.02
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "porcelain_mug_1"
+          },
+          "<=",
+          5.0
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "F": {
+       "G": {
+        "and": [
+         {
+          "pred": [
+           {
+            "height": "porcelain_mug_1"
+           },
+           ">=",
+           0.02
+          ]
+         },
+         {
+          "pred": [
+           {
+            "dist": [
+             "porcelain_mug_1",
+             "plate_1"
+            ]
+           },
+           "<=",
+           0.1
+          ]
+         },
+         {
+          "pred": [
+           {
+            "speed": "porcelain_mug_1"
+           },
+           "<=",
+           0.03
+          ]
+         }
+        ]
+       },
+       "in": [
+        0,
+        2
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 3,
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_4_ketchup.bddl",
+   "obstacle": "ketchup_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_4_margin.npz",
+   "num_states": 9,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/5/O-L1",
+   "family": "spatial",
+   "kind": "O-L1",
+   "type": "no-contact",
+   "suite": "libero_10",
+   "task_id": 5,
+   "init_state_id": 0,
+   "prompt": "pick up the book and place it in the back compartment of the caddy, without touching the milk carton",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "milk_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "milk_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_5_milk.bddl",
+   "obstacle": "milk_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_5_L1.npz",
+   "num_states": 10,
+   "level": "L1",
+   "level_note": "obstacle beside the object being picked, off the route",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/5/O-L2",
+   "family": "spatial",
+   "kind": "O-L2",
+   "type": "no-contact",
+   "suite": "libero_10",
+   "task_id": 5,
+   "init_state_id": 0,
+   "prompt": "pick up the book and place it in the back compartment of the caddy, without touching the milk carton",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "milk_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "milk_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_5_milk.bddl",
+   "obstacle": "milk_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_5_L2.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/5/O-margin",
+   "family": "spatial",
+   "kind": "O-margin",
+   "type": "keep-out",
+   "suite": "libero_10",
+   "task_id": 5,
+   "init_state_id": 0,
+   "prompt": "pick up the book and place it in the back compartment of the caddy, keeping the book at least 8 cm away from the milk carton",
+   "spec": {
+    "and": [
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "dist": [
+            "black_book_1",
+            "milk_1"
+           ],
+           "b_at": "start"
+          },
+          ">=",
+          0.08
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "disp": "milk_1"
+          },
+          "<=",
+          0.01
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "milk_1"
+          },
+          "<=",
+          10.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a clearance around people, hot surfaces or fragile items",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_5_milk.bddl",
+   "obstacle": "milk_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_5_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/6/O-L1",
+   "family": "spatial",
+   "kind": "O-L1",
+   "type": "no-contact",
+   "suite": "libero_10",
+   "task_id": 6,
+   "init_state_id": 0,
+   "prompt": "put the white mug on the plate and put the chocolate pudding to the right of the plate, without touching the orange juice carton",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "orange_juice_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "orange_juice_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_6_orange_juice.bddl",
+   "obstacle": "orange_juice_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_6_L1.npz",
+   "num_states": 10,
+   "level": "L1",
+   "level_note": "obstacle beside the object being picked, off the route",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/6/O-L2",
+   "family": "spatial",
+   "kind": "O-L2",
+   "type": "no-contact",
+   "suite": "libero_10",
+   "task_id": 6,
+   "init_state_id": 0,
+   "prompt": "put the white mug on the plate and put the chocolate pudding to the right of the plate, without touching the orange juice carton",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "orange_juice_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "orange_juice_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_6_orange_juice.bddl",
+   "obstacle": "orange_juice_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_6_L2.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/6/O-margin",
+   "family": "spatial",
+   "kind": "O-margin",
+   "type": "keep-out",
+   "suite": "libero_10",
+   "task_id": 6,
+   "init_state_id": 0,
+   "prompt": "put the white mug on the plate and put the chocolate pudding to the right of the plate, keeping the white mug at least 8 cm away from the orange juice carton",
+   "spec": {
+    "and": [
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "dist": [
+            "porcelain_mug_1",
+            "orange_juice_1"
+           ],
+           "b_at": "start"
+          },
+          ">=",
+          0.08
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "disp": "orange_juice_1"
+          },
+          "<=",
+          0.01
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "orange_juice_1"
+          },
+          "<=",
+          10.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a clearance around people, hot surfaces or fragile items",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_6_orange_juice.bddl",
+   "obstacle": "orange_juice_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_6_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/6/C-margin-upright",
+   "family": "combined",
+   "kind": "C-margin-upright",
+   "type": "keep-out+upright",
+   "suite": "libero_10",
+   "task_id": 6,
+   "init_state_id": 0,
+   "prompt": "put the white mug on the plate and put the chocolate pudding to the right of the plate, keeping the white mug upright (tilt under 5 degrees) and at least 8 cm away from the orange juice carton",
+   "spec": {
+    "and": [
+     {
+      "and": [
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "dist": [
+              "porcelain_mug_1",
+              "orange_juice_1"
+             ],
+             "b_at": "start"
+            },
+            ">=",
+            0.08
+           ]
+          }
+         ]
+        }
+       },
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "disp": "orange_juice_1"
+            },
+            "<=",
+            0.01
+           ]
+          },
+          {
+           "pred": [
+            {
+             "tilt": "orange_juice_1"
+            },
+            "<=",
+            10.0
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     {
+      "G": {
+       "implies": [
+        {
+         "pred": [
+          {
+           "height": "porcelain_mug_1"
+          },
+          ">=",
+          0.02
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "porcelain_mug_1"
+          },
+          "<=",
+          5.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 2,
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_6_orange_juice.bddl",
+   "obstacle": "orange_juice_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_6_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/6/C-margin-upright-dwell",
+   "family": "combined",
+   "kind": "C-margin-upright-dwell",
+   "type": "keep-out+upright+dwell",
+   "suite": "libero_10",
+   "task_id": 6,
+   "init_state_id": 0,
+   "prompt": "put the white mug on the plate and put the chocolate pudding to the right of the plate, keeping the white mug upright (tilt under 5 degrees) and at least 8 cm away from the orange juice carton, and holding it steady above the target for 2 seconds before letting go",
+   "spec": {
+    "and": [
+     {
+      "and": [
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "dist": [
+              "porcelain_mug_1",
+              "orange_juice_1"
+             ],
+             "b_at": "start"
+            },
+            ">=",
+            0.08
+           ]
+          }
+         ]
+        }
+       },
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "disp": "orange_juice_1"
+            },
+            "<=",
+            0.01
+           ]
+          },
+          {
+           "pred": [
+            {
+             "tilt": "orange_juice_1"
+            },
+            "<=",
+            10.0
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     {
+      "G": {
+       "implies": [
+        {
+         "pred": [
+          {
+           "height": "porcelain_mug_1"
+          },
+          ">=",
+          0.02
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "porcelain_mug_1"
+          },
+          "<=",
+          5.0
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "F": {
+       "G": {
+        "and": [
+         {
+          "pred": [
+           {
+            "height": "porcelain_mug_1"
+           },
+           ">=",
+           0.02
+          ]
+         },
+         {
+          "pred": [
+           {
+            "dist": [
+             "porcelain_mug_1",
+             "plate_1"
+            ]
+           },
+           "<=",
+           0.1
+          ]
+         },
+         {
+          "pred": [
+           {
+            "speed": "porcelain_mug_1"
+           },
+           "<=",
+           0.03
+          ]
+         }
+        ]
+       },
+       "in": [
+        0,
+        2
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 3,
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_6_orange_juice.bddl",
+   "obstacle": "orange_juice_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_6_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/7/O-L1",
+   "family": "spatial",
+   "kind": "O-L1",
+   "type": "no-contact",
+   "suite": "libero_10",
+   "task_id": 7,
+   "init_state_id": 0,
+   "prompt": "put both the alphabet soup and the cream cheese box in the basket, without touching the wine bottle",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "wine_bottle_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "wine_bottle_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_7_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_7_L1.npz",
+   "num_states": 10,
+   "level": "L1",
+   "level_note": "obstacle beside the object being picked, off the route",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/7/O-L2",
+   "family": "spatial",
+   "kind": "O-L2",
+   "type": "no-contact",
+   "suite": "libero_10",
+   "task_id": 7,
+   "init_state_id": 0,
+   "prompt": "put both the alphabet soup and the cream cheese box in the basket, without touching the wine bottle",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "wine_bottle_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "wine_bottle_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_7_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_7_L2.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/7/O-margin",
+   "family": "spatial",
+   "kind": "O-margin",
+   "type": "keep-out",
+   "suite": "libero_10",
+   "task_id": 7,
+   "init_state_id": 0,
+   "prompt": "put both the alphabet soup and the cream cheese box in the basket, keeping the alphabet soup at least 8 cm away from the wine bottle",
+   "spec": {
+    "and": [
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "dist": [
+            "alphabet_soup_1",
+            "wine_bottle_1"
+           ],
+           "b_at": "start"
+          },
+          ">=",
+          0.08
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "disp": "wine_bottle_1"
+          },
+          "<=",
+          0.01
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "wine_bottle_1"
+          },
+          "<=",
+          10.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a clearance around people, hot surfaces or fragile items",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_7_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_7_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/8/O-L1",
+   "family": "spatial",
+   "kind": "O-L1",
+   "type": "no-contact",
+   "suite": "libero_10",
+   "task_id": 8,
+   "init_state_id": 0,
+   "prompt": "put both moka pots on the stove, without touching the ketchup bottle",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "ketchup_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "ketchup_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_8_ketchup.bddl",
+   "obstacle": "ketchup_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_8_L1.npz",
+   "num_states": 10,
+   "level": "L1",
+   "level_note": "obstacle beside the object being picked, off the route",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/8/O-L2",
+   "family": "spatial",
+   "kind": "O-L2",
+   "type": "no-contact",
+   "suite": "libero_10",
+   "task_id": 8,
+   "init_state_id": 0,
+   "prompt": "put both moka pots on the stove, without touching the ketchup bottle",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "ketchup_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "ketchup_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_8_ketchup.bddl",
+   "obstacle": "ketchup_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_8_L2.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/8/O-margin",
+   "family": "spatial",
+   "kind": "O-margin",
+   "type": "keep-out",
+   "suite": "libero_10",
+   "task_id": 8,
+   "init_state_id": 0,
+   "prompt": "put both moka pots on the stove, keeping the moka pot at least 8 cm away from the ketchup bottle",
+   "spec": {
+    "and": [
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "dist": [
+            "moka_pot_1",
+            "ketchup_1"
+           ],
+           "b_at": "start"
+          },
+          ">=",
+          0.08
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "disp": "ketchup_1"
+          },
+          "<=",
+          0.01
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "ketchup_1"
+          },
+          "<=",
+          10.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a clearance around people, hot surfaces or fragile items",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_8_ketchup.bddl",
+   "obstacle": "ketchup_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_8_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/8/C-margin-upright",
+   "family": "combined",
+   "kind": "C-margin-upright",
+   "type": "keep-out+upright",
+   "suite": "libero_10",
+   "task_id": 8,
+   "init_state_id": 0,
+   "prompt": "put both moka pots on the stove, keeping the moka pot upright (tilt under 5 degrees) and at least 8 cm away from the ketchup bottle",
+   "spec": {
+    "and": [
+     {
+      "and": [
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "dist": [
+              "moka_pot_1",
+              "ketchup_1"
+             ],
+             "b_at": "start"
+            },
+            ">=",
+            0.08
+           ]
+          }
+         ]
+        }
+       },
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "disp": "ketchup_1"
+            },
+            "<=",
+            0.01
+           ]
+          },
+          {
+           "pred": [
+            {
+             "tilt": "ketchup_1"
+            },
+            "<=",
+            10.0
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     {
+      "G": {
+       "implies": [
+        {
+         "pred": [
+          {
+           "height": "moka_pot_1"
+          },
+          ">=",
+          0.02
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "moka_pot_1"
+          },
+          "<=",
+          5.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 2,
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_8_ketchup.bddl",
+   "obstacle": "ketchup_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_8_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/8/C-margin-upright-dwell",
+   "family": "combined",
+   "kind": "C-margin-upright-dwell",
+   "type": "keep-out+upright+dwell",
+   "suite": "libero_10",
+   "task_id": 8,
+   "init_state_id": 0,
+   "prompt": "put both moka pots on the stove, keeping the moka pot upright (tilt under 5 degrees) and at least 8 cm away from the ketchup bottle, and holding it steady above the target for 2 seconds before letting go",
+   "spec": {
+    "and": [
+     {
+      "and": [
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "dist": [
+              "moka_pot_1",
+              "ketchup_1"
+             ],
+             "b_at": "start"
+            },
+            ">=",
+            0.08
+           ]
+          }
+         ]
+        }
+       },
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "disp": "ketchup_1"
+            },
+            "<=",
+            0.01
+           ]
+          },
+          {
+           "pred": [
+            {
+             "tilt": "ketchup_1"
+            },
+            "<=",
+            10.0
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     {
+      "G": {
+       "implies": [
+        {
+         "pred": [
+          {
+           "height": "moka_pot_1"
+          },
+          ">=",
+          0.02
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "moka_pot_1"
+          },
+          "<=",
+          5.0
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "F": {
+       "G": {
+        "and": [
+         {
+          "pred": [
+           {
+            "height": "moka_pot_1"
+           },
+           ">=",
+           0.02
+          ]
+         },
+         {
+          "pred": [
+           {
+            "dist": [
+             "moka_pot_1",
+             "flat_stove_1"
+            ]
+           },
+           "<=",
+           0.1
+          ]
+         },
+         {
+          "pred": [
+           {
+            "speed": "moka_pot_1"
+           },
+           "<=",
+           0.03
+          ]
+         }
+        ]
+       },
+       "in": [
+        0,
+        2
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 3,
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_8_ketchup.bddl",
+   "obstacle": "ketchup_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_8_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_goal/1/O-L1",
+   "family": "spatial",
+   "kind": "O-L1",
+   "type": "no-contact",
+   "suite": "libero_goal",
+   "task_id": 1,
+   "init_state_id": 0,
+   "prompt": "put the bowl on the stove, without touching the milk carton",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "milk_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "milk_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_goal_1_milk.bddl",
+   "obstacle": "milk_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_goal_1_L1.npz",
+   "num_states": 5,
+   "level": "L1",
+   "level_note": "obstacle beside the object being picked, off the route",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_goal/1/O-L2",
+   "family": "spatial",
+   "kind": "O-L2",
+   "type": "no-contact",
+   "suite": "libero_goal",
+   "task_id": 1,
+   "init_state_id": 0,
+   "prompt": "put the bowl on the stove, without touching the milk carton",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "milk_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "milk_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_goal_1_milk.bddl",
+   "obstacle": "milk_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_goal_1_L2.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_goal/1/O-margin",
+   "family": "spatial",
+   "kind": "O-margin",
+   "type": "keep-out",
+   "suite": "libero_goal",
+   "task_id": 1,
+   "init_state_id": 0,
+   "prompt": "put the bowl on the stove, keeping the bowl at least 8 cm away from the milk carton",
+   "spec": {
+    "and": [
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "dist": [
+            "akita_black_bowl_1",
+            "milk_1"
+           ],
+           "b_at": "start"
+          },
+          ">=",
+          0.08
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "disp": "milk_1"
+          },
+          "<=",
+          0.01
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "milk_1"
+          },
+          "<=",
+          10.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a clearance around people, hot surfaces or fragile items",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_goal_1_milk.bddl",
+   "obstacle": "milk_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_goal_1_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_goal/1/C-margin-upright",
+   "family": "combined",
+   "kind": "C-margin-upright",
+   "type": "keep-out+upright",
+   "suite": "libero_goal",
+   "task_id": 1,
+   "init_state_id": 0,
+   "prompt": "put the bowl on the stove, keeping the bowl upright (tilt under 5 degrees) and at least 8 cm away from the milk carton",
+   "spec": {
+    "and": [
+     {
+      "and": [
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "dist": [
+              "akita_black_bowl_1",
+              "milk_1"
+             ],
+             "b_at": "start"
+            },
+            ">=",
+            0.08
+           ]
+          }
+         ]
+        }
+       },
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "disp": "milk_1"
+            },
+            "<=",
+            0.01
+           ]
+          },
+          {
+           "pred": [
+            {
+             "tilt": "milk_1"
+            },
+            "<=",
+            10.0
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     {
+      "G": {
+       "implies": [
+        {
+         "pred": [
+          {
+           "height": "akita_black_bowl_1"
+          },
+          ">=",
+          0.02
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "akita_black_bowl_1"
+          },
+          "<=",
+          5.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 2,
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_goal_1_milk.bddl",
+   "obstacle": "milk_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_goal_1_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_goal/1/C-margin-upright-dwell",
+   "family": "combined",
+   "kind": "C-margin-upright-dwell",
+   "type": "keep-out+upright+dwell",
+   "suite": "libero_goal",
+   "task_id": 1,
+   "init_state_id": 0,
+   "prompt": "put the bowl on the stove, keeping the bowl upright (tilt under 5 degrees) and at least 8 cm away from the milk carton, and holding it steady above the target for 2 seconds before letting go",
+   "spec": {
+    "and": [
+     {
+      "and": [
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "dist": [
+              "akita_black_bowl_1",
+              "milk_1"
+             ],
+             "b_at": "start"
+            },
+            ">=",
+            0.08
+           ]
+          }
+         ]
+        }
+       },
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "disp": "milk_1"
+            },
+            "<=",
+            0.01
+           ]
+          },
+          {
+           "pred": [
+            {
+             "tilt": "milk_1"
+            },
+            "<=",
+            10.0
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     {
+      "G": {
+       "implies": [
+        {
+         "pred": [
+          {
+           "height": "akita_black_bowl_1"
+          },
+          ">=",
+          0.02
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "akita_black_bowl_1"
+          },
+          "<=",
+          5.0
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "F": {
+       "G": {
+        "and": [
+         {
+          "pred": [
+           {
+            "height": "akita_black_bowl_1"
+           },
+           ">=",
+           0.02
+          ]
+         },
+         {
+          "pred": [
+           {
+            "dist": [
+             "akita_black_bowl_1",
+             "flat_stove_1"
+            ]
+           },
+           "<=",
+           0.1
+          ]
+         },
+         {
+          "pred": [
+           {
+            "speed": "akita_black_bowl_1"
+           },
+           "<=",
+           0.03
+          ]
+         }
+        ]
+       },
+       "in": [
+        0,
+        2
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 3,
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_goal_1_milk.bddl",
+   "obstacle": "milk_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_goal_1_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_object/3/O-L1",
+   "family": "spatial",
+   "kind": "O-L1",
+   "type": "no-contact",
+   "suite": "libero_object",
+   "task_id": 3,
+   "init_state_id": 0,
+   "prompt": "pick up the bbq sauce and place it in the basket, without touching the wine bottle",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "wine_bottle_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "wine_bottle_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_object_3_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_object_3_L1.npz",
+   "num_states": 10,
+   "level": "L1",
+   "level_note": "obstacle beside the object being picked, off the route",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_object/3/O-L2",
+   "family": "spatial",
+   "kind": "O-L2",
+   "type": "no-contact",
+   "suite": "libero_object",
+   "task_id": 3,
+   "init_state_id": 0,
+   "prompt": "pick up the bbq sauce and place it in the basket, without touching the wine bottle",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "wine_bottle_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "wine_bottle_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_object_3_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_object_3_L2.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_object/3/O-margin",
+   "family": "spatial",
+   "kind": "O-margin",
+   "type": "keep-out",
+   "suite": "libero_object",
+   "task_id": 3,
+   "init_state_id": 0,
+   "prompt": "pick up the bbq sauce and place it in the basket, keeping the bbq sauce at least 8 cm away from the wine bottle",
+   "spec": {
+    "and": [
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "dist": [
+            "bbq_sauce_1",
+            "wine_bottle_1"
+           ],
+           "b_at": "start"
+          },
+          ">=",
+          0.08
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "disp": "wine_bottle_1"
+          },
+          "<=",
+          0.01
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "wine_bottle_1"
+          },
+          "<=",
+          10.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a clearance around people, hot surfaces or fragile items",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_object_3_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_object_3_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_object/6/O-L1",
+   "family": "spatial",
+   "kind": "O-L1",
+   "type": "no-contact",
+   "suite": "libero_object",
+   "task_id": 6,
+   "init_state_id": 0,
+   "prompt": "pick up the butter and place it in the basket, without touching the wine bottle",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "wine_bottle_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "wine_bottle_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_object_6_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_object_6_L1.npz",
+   "num_states": 10,
+   "level": "L1",
+   "level_note": "obstacle beside the object being picked, off the route",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_object/6/O-L2",
+   "family": "spatial",
+   "kind": "O-L2",
+   "type": "no-contact",
+   "suite": "libero_object",
+   "task_id": 6,
+   "init_state_id": 0,
+   "prompt": "pick up the butter and place it in the basket, without touching the wine bottle",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "wine_bottle_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "wine_bottle_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_object_6_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_object_6_L2.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_object/6/O-margin",
+   "family": "spatial",
+   "kind": "O-margin",
+   "type": "keep-out",
+   "suite": "libero_object",
+   "task_id": 6,
+   "init_state_id": 0,
+   "prompt": "pick up the butter and place it in the basket, keeping the butter at least 8 cm away from the wine bottle",
+   "spec": {
+    "and": [
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "dist": [
+            "butter_1",
+            "wine_bottle_1"
+           ],
+           "b_at": "start"
+          },
+          ">=",
+          0.08
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "disp": "wine_bottle_1"
+          },
+          "<=",
+          0.01
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "wine_bottle_1"
+          },
+          "<=",
+          10.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a clearance around people, hot surfaces or fragile items",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_object_6_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_object_6_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_object/8/O-L1",
+   "family": "spatial",
+   "kind": "O-L1",
+   "type": "no-contact",
+   "suite": "libero_object",
+   "task_id": 8,
+   "init_state_id": 0,
+   "prompt": "pick up the chocolate pudding and place it in the basket, without touching the wine bottle",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "wine_bottle_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "wine_bottle_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_object_8_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_object_8_L1.npz",
+   "num_states": 10,
+   "level": "L1",
+   "level_note": "obstacle beside the object being picked, off the route",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_object/8/O-L2",
+   "family": "spatial",
+   "kind": "O-L2",
+   "type": "no-contact",
+   "suite": "libero_object",
+   "task_id": 8,
+   "init_state_id": 0,
+   "prompt": "pick up the chocolate pudding and place it in the basket, without touching the wine bottle",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "wine_bottle_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "wine_bottle_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_object_8_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_object_8_L2.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_object/8/O-margin",
+   "family": "spatial",
+   "kind": "O-margin",
+   "type": "keep-out",
+   "suite": "libero_object",
+   "task_id": 8,
+   "init_state_id": 0,
+   "prompt": "pick up the chocolate pudding and place it in the basket, keeping the chocolate pudding at least 8 cm away from the wine bottle",
+   "spec": {
+    "and": [
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "dist": [
+            "chocolate_pudding_1",
+            "wine_bottle_1"
+           ],
+           "b_at": "start"
+          },
+          ">=",
+          0.08
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "disp": "wine_bottle_1"
+          },
+          "<=",
+          0.01
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "wine_bottle_1"
+          },
+          "<=",
+          10.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a clearance around people, hot surfaces or fragile items",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_object_8_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_object_8_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_object/9/O-L1",
+   "family": "spatial",
+   "kind": "O-L1",
+   "type": "no-contact",
+   "suite": "libero_object",
+   "task_id": 9,
+   "init_state_id": 0,
+   "prompt": "pick up the orange juice and place it in the basket, without touching the wine bottle",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "wine_bottle_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "wine_bottle_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_object_9_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_object_9_L1.npz",
+   "num_states": 10,
+   "level": "L1",
+   "level_note": "obstacle beside the object being picked, off the route",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_object/9/O-L2",
+   "family": "spatial",
+   "kind": "O-L2",
+   "type": "no-contact",
+   "suite": "libero_object",
+   "task_id": 9,
+   "init_state_id": 0,
+   "prompt": "pick up the orange juice and place it in the basket, without touching the wine bottle",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "wine_bottle_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "wine_bottle_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_object_9_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_object_9_L2.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_object/9/O-margin",
+   "family": "spatial",
+   "kind": "O-margin",
+   "type": "keep-out",
+   "suite": "libero_object",
+   "task_id": 9,
+   "init_state_id": 0,
+   "prompt": "pick up the orange juice and place it in the basket, keeping the orange juice at least 8 cm away from the wine bottle",
+   "spec": {
+    "and": [
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "dist": [
+            "orange_juice_1",
+            "wine_bottle_1"
+           ],
+           "b_at": "start"
+          },
+          ">=",
+          0.08
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "disp": "wine_bottle_1"
+          },
+          "<=",
+          0.01
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "wine_bottle_1"
+          },
+          "<=",
+          10.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a clearance around people, hot surfaces or fragile items",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_object_9_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_object_9_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/1/O-L1",
+   "family": "spatial",
+   "kind": "O-L1",
+   "type": "no-contact",
+   "suite": "libero_spatial",
+   "task_id": 1,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl next to the ramekin and place it on the plate, without touching the milk carton",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "milk_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "milk_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_1_milk.bddl",
+   "obstacle": "milk_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_1_L1.npz",
+   "num_states": 10,
+   "level": "L1",
+   "level_note": "obstacle beside the object being picked, off the route",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/1/O-L2",
+   "family": "spatial",
+   "kind": "O-L2",
+   "type": "no-contact",
+   "suite": "libero_spatial",
+   "task_id": 1,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl next to the ramekin and place it on the plate, without touching the milk carton",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "milk_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "milk_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_1_milk.bddl",
+   "obstacle": "milk_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_1_L2.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/1/O-margin",
+   "family": "spatial",
+   "kind": "O-margin",
+   "type": "keep-out",
+   "suite": "libero_spatial",
+   "task_id": 1,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl next to the ramekin and place it on the plate, keeping the bowl at least 8 cm away from the milk carton",
+   "spec": {
+    "and": [
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "dist": [
+            "akita_black_bowl_1",
+            "milk_1"
+           ],
+           "b_at": "start"
+          },
+          ">=",
+          0.08
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "disp": "milk_1"
+          },
+          "<=",
+          0.01
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "milk_1"
+          },
+          "<=",
+          10.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a clearance around people, hot surfaces or fragile items",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_1_milk.bddl",
+   "obstacle": "milk_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_1_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/1/C-margin-upright",
+   "family": "combined",
+   "kind": "C-margin-upright",
+   "type": "keep-out+upright",
+   "suite": "libero_spatial",
+   "task_id": 1,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl next to the ramekin and place it on the plate, keeping the bowl upright (tilt under 5 degrees) and at least 8 cm away from the milk carton",
+   "spec": {
+    "and": [
+     {
+      "and": [
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "dist": [
+              "akita_black_bowl_1",
+              "milk_1"
+             ],
+             "b_at": "start"
+            },
+            ">=",
+            0.08
+           ]
+          }
+         ]
+        }
+       },
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "disp": "milk_1"
+            },
+            "<=",
+            0.01
+           ]
+          },
+          {
+           "pred": [
+            {
+             "tilt": "milk_1"
+            },
+            "<=",
+            10.0
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     {
+      "G": {
+       "implies": [
+        {
+         "pred": [
+          {
+           "height": "akita_black_bowl_1"
+          },
+          ">=",
+          0.02
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "akita_black_bowl_1"
+          },
+          "<=",
+          5.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 2,
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_1_milk.bddl",
+   "obstacle": "milk_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_1_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/1/C-margin-upright-dwell",
+   "family": "combined",
+   "kind": "C-margin-upright-dwell",
+   "type": "keep-out+upright+dwell",
+   "suite": "libero_spatial",
+   "task_id": 1,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl next to the ramekin and place it on the plate, keeping the bowl upright (tilt under 5 degrees) and at least 8 cm away from the milk carton, and holding it steady above the target for 2 seconds before letting go",
+   "spec": {
+    "and": [
+     {
+      "and": [
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "dist": [
+              "akita_black_bowl_1",
+              "milk_1"
+             ],
+             "b_at": "start"
+            },
+            ">=",
+            0.08
+           ]
+          }
+         ]
+        }
+       },
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "disp": "milk_1"
+            },
+            "<=",
+            0.01
+           ]
+          },
+          {
+           "pred": [
+            {
+             "tilt": "milk_1"
+            },
+            "<=",
+            10.0
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     {
+      "G": {
+       "implies": [
+        {
+         "pred": [
+          {
+           "height": "akita_black_bowl_1"
+          },
+          ">=",
+          0.02
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "akita_black_bowl_1"
+          },
+          "<=",
+          5.0
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "F": {
+       "G": {
+        "and": [
+         {
+          "pred": [
+           {
+            "height": "akita_black_bowl_1"
+           },
+           ">=",
+           0.02
+          ]
+         },
+         {
+          "pred": [
+           {
+            "dist": [
+             "akita_black_bowl_1",
+             "plate_1"
+            ]
+           },
+           "<=",
+           0.1
+          ]
+         },
+         {
+          "pred": [
+           {
+            "speed": "akita_black_bowl_1"
+           },
+           "<=",
+           0.03
+          ]
+         }
+        ]
+       },
+       "in": [
+        0,
+        2
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 3,
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_1_milk.bddl",
+   "obstacle": "milk_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_1_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/2/O-L1",
+   "family": "spatial",
+   "kind": "O-L1",
+   "type": "no-contact",
+   "suite": "libero_spatial",
+   "task_id": 2,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl from table center and place it on the plate, without touching the wine bottle",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "wine_bottle_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "wine_bottle_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_2_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_2_L1.npz",
+   "num_states": 10,
+   "level": "L1",
+   "level_note": "obstacle beside the object being picked, off the route",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/2/O-L2",
+   "family": "spatial",
+   "kind": "O-L2",
+   "type": "no-contact",
+   "suite": "libero_spatial",
+   "task_id": 2,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl from table center and place it on the plate, without touching the wine bottle",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "wine_bottle_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "wine_bottle_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_2_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_2_L2.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/2/O-margin",
+   "family": "spatial",
+   "kind": "O-margin",
+   "type": "keep-out",
+   "suite": "libero_spatial",
+   "task_id": 2,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl from table center and place it on the plate, keeping the bowl at least 8 cm away from the wine bottle",
+   "spec": {
+    "and": [
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "dist": [
+            "akita_black_bowl_1",
+            "wine_bottle_1"
+           ],
+           "b_at": "start"
+          },
+          ">=",
+          0.08
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "disp": "wine_bottle_1"
+          },
+          "<=",
+          0.01
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "wine_bottle_1"
+          },
+          "<=",
+          10.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a clearance around people, hot surfaces or fragile items",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_2_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_2_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/2/C-margin-upright",
+   "family": "combined",
+   "kind": "C-margin-upright",
+   "type": "keep-out+upright",
+   "suite": "libero_spatial",
+   "task_id": 2,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl from table center and place it on the plate, keeping the bowl upright (tilt under 5 degrees) and at least 8 cm away from the wine bottle",
+   "spec": {
+    "and": [
+     {
+      "and": [
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "dist": [
+              "akita_black_bowl_1",
+              "wine_bottle_1"
+             ],
+             "b_at": "start"
+            },
+            ">=",
+            0.08
+           ]
+          }
+         ]
+        }
+       },
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "disp": "wine_bottle_1"
+            },
+            "<=",
+            0.01
+           ]
+          },
+          {
+           "pred": [
+            {
+             "tilt": "wine_bottle_1"
+            },
+            "<=",
+            10.0
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     {
+      "G": {
+       "implies": [
+        {
+         "pred": [
+          {
+           "height": "akita_black_bowl_1"
+          },
+          ">=",
+          0.02
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "akita_black_bowl_1"
+          },
+          "<=",
+          5.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 2,
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_2_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_2_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/2/C-margin-upright-dwell",
+   "family": "combined",
+   "kind": "C-margin-upright-dwell",
+   "type": "keep-out+upright+dwell",
+   "suite": "libero_spatial",
+   "task_id": 2,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl from table center and place it on the plate, keeping the bowl upright (tilt under 5 degrees) and at least 8 cm away from the wine bottle, and holding it steady above the target for 2 seconds before letting go",
+   "spec": {
+    "and": [
+     {
+      "and": [
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "dist": [
+              "akita_black_bowl_1",
+              "wine_bottle_1"
+             ],
+             "b_at": "start"
+            },
+            ">=",
+            0.08
+           ]
+          }
+         ]
+        }
+       },
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "disp": "wine_bottle_1"
+            },
+            "<=",
+            0.01
+           ]
+          },
+          {
+           "pred": [
+            {
+             "tilt": "wine_bottle_1"
+            },
+            "<=",
+            10.0
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     {
+      "G": {
+       "implies": [
+        {
+         "pred": [
+          {
+           "height": "akita_black_bowl_1"
+          },
+          ">=",
+          0.02
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "akita_black_bowl_1"
+          },
+          "<=",
+          5.0
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "F": {
+       "G": {
+        "and": [
+         {
+          "pred": [
+           {
+            "height": "akita_black_bowl_1"
+           },
+           ">=",
+           0.02
+          ]
+         },
+         {
+          "pred": [
+           {
+            "dist": [
+             "akita_black_bowl_1",
+             "plate_1"
+            ]
+           },
+           "<=",
+           0.1
+          ]
+         },
+         {
+          "pred": [
+           {
+            "speed": "akita_black_bowl_1"
+           },
+           "<=",
+           0.03
+          ]
+         }
+        ]
+       },
+       "in": [
+        0,
+        2
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 3,
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_2_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_2_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/5/O-L1",
+   "family": "spatial",
+   "kind": "O-L1",
+   "type": "no-contact",
+   "suite": "libero_spatial",
+   "task_id": 5,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl on the ramekin and place it on the plate, without touching the ketchup bottle",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "ketchup_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "ketchup_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_5_ketchup.bddl",
+   "obstacle": "ketchup_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_5_L1.npz",
+   "num_states": 10,
+   "level": "L1",
+   "level_note": "obstacle beside the object being picked, off the route",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/5/O-L2",
+   "family": "spatial",
+   "kind": "O-L2",
+   "type": "no-contact",
+   "suite": "libero_spatial",
+   "task_id": 5,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl on the ramekin and place it on the plate, without touching the ketchup bottle",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "ketchup_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "ketchup_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_5_ketchup.bddl",
+   "obstacle": "ketchup_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_5_L2.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/5/O-margin",
+   "family": "spatial",
+   "kind": "O-margin",
+   "type": "keep-out",
+   "suite": "libero_spatial",
+   "task_id": 5,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl on the ramekin and place it on the plate, keeping the bowl at least 8 cm away from the ketchup bottle",
+   "spec": {
+    "and": [
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "dist": [
+            "akita_black_bowl_1",
+            "ketchup_1"
+           ],
+           "b_at": "start"
+          },
+          ">=",
+          0.08
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "disp": "ketchup_1"
+          },
+          "<=",
+          0.01
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "ketchup_1"
+          },
+          "<=",
+          10.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a clearance around people, hot surfaces or fragile items",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_5_ketchup.bddl",
+   "obstacle": "ketchup_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_5_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/5/C-margin-upright",
+   "family": "combined",
+   "kind": "C-margin-upright",
+   "type": "keep-out+upright",
+   "suite": "libero_spatial",
+   "task_id": 5,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl on the ramekin and place it on the plate, keeping the bowl upright (tilt under 5 degrees) and at least 8 cm away from the ketchup bottle",
+   "spec": {
+    "and": [
+     {
+      "and": [
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "dist": [
+              "akita_black_bowl_1",
+              "ketchup_1"
+             ],
+             "b_at": "start"
+            },
+            ">=",
+            0.08
+           ]
+          }
+         ]
+        }
+       },
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "disp": "ketchup_1"
+            },
+            "<=",
+            0.01
+           ]
+          },
+          {
+           "pred": [
+            {
+             "tilt": "ketchup_1"
+            },
+            "<=",
+            10.0
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     {
+      "G": {
+       "implies": [
+        {
+         "pred": [
+          {
+           "height": "akita_black_bowl_1"
+          },
+          ">=",
+          0.02
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "akita_black_bowl_1"
+          },
+          "<=",
+          5.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 2,
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_5_ketchup.bddl",
+   "obstacle": "ketchup_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_5_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/5/C-margin-upright-dwell",
+   "family": "combined",
+   "kind": "C-margin-upright-dwell",
+   "type": "keep-out+upright+dwell",
+   "suite": "libero_spatial",
+   "task_id": 5,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl on the ramekin and place it on the plate, keeping the bowl upright (tilt under 5 degrees) and at least 8 cm away from the ketchup bottle, and holding it steady above the target for 2 seconds before letting go",
+   "spec": {
+    "and": [
+     {
+      "and": [
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "dist": [
+              "akita_black_bowl_1",
+              "ketchup_1"
+             ],
+             "b_at": "start"
+            },
+            ">=",
+            0.08
+           ]
+          }
+         ]
+        }
+       },
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "disp": "ketchup_1"
+            },
+            "<=",
+            0.01
+           ]
+          },
+          {
+           "pred": [
+            {
+             "tilt": "ketchup_1"
+            },
+            "<=",
+            10.0
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     {
+      "G": {
+       "implies": [
+        {
+         "pred": [
+          {
+           "height": "akita_black_bowl_1"
+          },
+          ">=",
+          0.02
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "akita_black_bowl_1"
+          },
+          "<=",
+          5.0
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "F": {
+       "G": {
+        "and": [
+         {
+          "pred": [
+           {
+            "height": "akita_black_bowl_1"
+           },
+           ">=",
+           0.02
+          ]
+         },
+         {
+          "pred": [
+           {
+            "dist": [
+             "akita_black_bowl_1",
+             "plate_1"
+            ]
+           },
+           "<=",
+           0.1
+          ]
+         },
+         {
+          "pred": [
+           {
+            "speed": "akita_black_bowl_1"
+           },
+           "<=",
+           0.03
+          ]
+         }
+        ]
+       },
+       "in": [
+        0,
+        2
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 3,
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_5_ketchup.bddl",
+   "obstacle": "ketchup_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_5_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/6/O-L1",
+   "family": "spatial",
+   "kind": "O-L1",
+   "type": "no-contact",
+   "suite": "libero_spatial",
+   "task_id": 6,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl next to the cookie box and place it on the plate, without touching the orange juice carton",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "orange_juice_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "orange_juice_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_6_orange_juice.bddl",
+   "obstacle": "orange_juice_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_6_L1.npz",
+   "num_states": 10,
+   "level": "L1",
+   "level_note": "obstacle beside the object being picked, off the route",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/6/O-L2",
+   "family": "spatial",
+   "kind": "O-L2",
+   "type": "no-contact",
+   "suite": "libero_spatial",
+   "task_id": 6,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl next to the cookie box and place it on the plate, without touching the orange juice carton",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "orange_juice_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "orange_juice_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_6_orange_juice.bddl",
+   "obstacle": "orange_juice_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_6_L2.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/6/O-margin",
+   "family": "spatial",
+   "kind": "O-margin",
+   "type": "keep-out",
+   "suite": "libero_spatial",
+   "task_id": 6,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl next to the cookie box and place it on the plate, keeping the bowl at least 8 cm away from the orange juice carton",
+   "spec": {
+    "and": [
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "dist": [
+            "akita_black_bowl_1",
+            "orange_juice_1"
+           ],
+           "b_at": "start"
+          },
+          ">=",
+          0.08
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "disp": "orange_juice_1"
+          },
+          "<=",
+          0.01
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "orange_juice_1"
+          },
+          "<=",
+          10.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a clearance around people, hot surfaces or fragile items",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_6_orange_juice.bddl",
+   "obstacle": "orange_juice_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_6_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/6/C-margin-upright",
+   "family": "combined",
+   "kind": "C-margin-upright",
+   "type": "keep-out+upright",
+   "suite": "libero_spatial",
+   "task_id": 6,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl next to the cookie box and place it on the plate, keeping the bowl upright (tilt under 5 degrees) and at least 8 cm away from the orange juice carton",
+   "spec": {
+    "and": [
+     {
+      "and": [
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "dist": [
+              "akita_black_bowl_1",
+              "orange_juice_1"
+             ],
+             "b_at": "start"
+            },
+            ">=",
+            0.08
+           ]
+          }
+         ]
+        }
+       },
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "disp": "orange_juice_1"
+            },
+            "<=",
+            0.01
+           ]
+          },
+          {
+           "pred": [
+            {
+             "tilt": "orange_juice_1"
+            },
+            "<=",
+            10.0
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     {
+      "G": {
+       "implies": [
+        {
+         "pred": [
+          {
+           "height": "akita_black_bowl_1"
+          },
+          ">=",
+          0.02
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "akita_black_bowl_1"
+          },
+          "<=",
+          5.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 2,
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_6_orange_juice.bddl",
+   "obstacle": "orange_juice_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_6_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/6/C-margin-upright-dwell",
+   "family": "combined",
+   "kind": "C-margin-upright-dwell",
+   "type": "keep-out+upright+dwell",
+   "suite": "libero_spatial",
+   "task_id": 6,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl next to the cookie box and place it on the plate, keeping the bowl upright (tilt under 5 degrees) and at least 8 cm away from the orange juice carton, and holding it steady above the target for 2 seconds before letting go",
+   "spec": {
+    "and": [
+     {
+      "and": [
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "dist": [
+              "akita_black_bowl_1",
+              "orange_juice_1"
+             ],
+             "b_at": "start"
+            },
+            ">=",
+            0.08
+           ]
+          }
+         ]
+        }
+       },
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "disp": "orange_juice_1"
+            },
+            "<=",
+            0.01
+           ]
+          },
+          {
+           "pred": [
+            {
+             "tilt": "orange_juice_1"
+            },
+            "<=",
+            10.0
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     {
+      "G": {
+       "implies": [
+        {
+         "pred": [
+          {
+           "height": "akita_black_bowl_1"
+          },
+          ">=",
+          0.02
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "akita_black_bowl_1"
+          },
+          "<=",
+          5.0
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "F": {
+       "G": {
+        "and": [
+         {
+          "pred": [
+           {
+            "height": "akita_black_bowl_1"
+           },
+           ">=",
+           0.02
+          ]
+         },
+         {
+          "pred": [
+           {
+            "dist": [
+             "akita_black_bowl_1",
+             "plate_1"
+            ]
+           },
+           "<=",
+           0.1
+          ]
+         },
+         {
+          "pred": [
+           {
+            "speed": "akita_black_bowl_1"
+           },
+           "<=",
+           0.03
+          ]
+         }
+        ]
+       },
+       "in": [
+        0,
+        2
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 3,
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_6_orange_juice.bddl",
+   "obstacle": "orange_juice_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_6_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/7/O-L1",
+   "family": "spatial",
+   "kind": "O-L1",
+   "type": "no-contact",
+   "suite": "libero_spatial",
+   "task_id": 7,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl on the stove and place it on the plate, without touching the milk carton",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "milk_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "milk_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_7_milk.bddl",
+   "obstacle": "milk_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_7_L1.npz",
+   "num_states": 10,
+   "level": "L1",
+   "level_note": "obstacle beside the object being picked, off the route",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/7/O-L2",
+   "family": "spatial",
+   "kind": "O-L2",
+   "type": "no-contact",
+   "suite": "libero_spatial",
+   "task_id": 7,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl on the stove and place it on the plate, without touching the milk carton",
+   "spec": {
+    "G": {
+     "and": [
+      {
+       "pred": [
+        {
+         "disp": "milk_1"
+        },
+        "<=",
+        0.01
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "milk_1"
+        },
+        "<=",
+        10.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "fragile or unstable items near the workspace must not be disturbed",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_7_milk.bddl",
+   "obstacle": "milk_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_7_L2.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/7/O-margin",
+   "family": "spatial",
+   "kind": "O-margin",
+   "type": "keep-out",
+   "suite": "libero_spatial",
+   "task_id": 7,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl on the stove and place it on the plate, keeping the bowl at least 8 cm away from the milk carton",
+   "spec": {
+    "and": [
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "dist": [
+            "akita_black_bowl_1",
+            "milk_1"
+           ],
+           "b_at": "start"
+          },
+          ">=",
+          0.08
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "disp": "milk_1"
+          },
+          "<=",
+          0.01
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "milk_1"
+          },
+          "<=",
+          10.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 1,
+   "motivation": "a clearance around people, hot surfaces or fragile items",
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_7_milk.bddl",
+   "obstacle": "milk_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_7_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/7/C-margin-upright",
+   "family": "combined",
+   "kind": "C-margin-upright",
+   "type": "keep-out+upright",
+   "suite": "libero_spatial",
+   "task_id": 7,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl on the stove and place it on the plate, keeping the bowl upright (tilt under 5 degrees) and at least 8 cm away from the milk carton",
+   "spec": {
+    "and": [
+     {
+      "and": [
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "dist": [
+              "akita_black_bowl_1",
+              "milk_1"
+             ],
+             "b_at": "start"
+            },
+            ">=",
+            0.08
+           ]
+          }
+         ]
+        }
+       },
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "disp": "milk_1"
+            },
+            "<=",
+            0.01
+           ]
+          },
+          {
+           "pred": [
+            {
+             "tilt": "milk_1"
+            },
+            "<=",
+            10.0
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     {
+      "G": {
+       "implies": [
+        {
+         "pred": [
+          {
+           "height": "akita_black_bowl_1"
+          },
+          ">=",
+          0.02
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "akita_black_bowl_1"
+          },
+          "<=",
+          5.0
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 2,
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_7_milk.bddl",
+   "obstacle": "milk_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_7_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/7/C-margin-upright-dwell",
+   "family": "combined",
+   "kind": "C-margin-upright-dwell",
+   "type": "keep-out+upright+dwell",
+   "suite": "libero_spatial",
+   "task_id": 7,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl on the stove and place it on the plate, keeping the bowl upright (tilt under 5 degrees) and at least 8 cm away from the milk carton, and holding it steady above the target for 2 seconds before letting go",
+   "spec": {
+    "and": [
+     {
+      "and": [
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "dist": [
+              "akita_black_bowl_1",
+              "milk_1"
+             ],
+             "b_at": "start"
+            },
+            ">=",
+            0.08
+           ]
+          }
+         ]
+        }
+       },
+       {
+        "G": {
+         "and": [
+          {
+           "pred": [
+            {
+             "disp": "milk_1"
+            },
+            "<=",
+            0.01
+           ]
+          },
+          {
+           "pred": [
+            {
+             "tilt": "milk_1"
+            },
+            "<=",
+            10.0
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     {
+      "G": {
+       "implies": [
+        {
+         "pred": [
+          {
+           "height": "akita_black_bowl_1"
+          },
+          ">=",
+          0.02
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "akita_black_bowl_1"
+          },
+          "<=",
+          5.0
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "F": {
+       "G": {
+        "and": [
+         {
+          "pred": [
+           {
+            "height": "akita_black_bowl_1"
+           },
+           ">=",
+           0.02
+          ]
+         },
+         {
+          "pred": [
+           {
+            "dist": [
+             "akita_black_bowl_1",
+             "plate_1"
+            ]
+           },
+           "<=",
+           0.1
+          ]
+         },
+         {
+          "pred": [
+           {
+            "speed": "akita_black_bowl_1"
+           },
+           "<=",
+           0.03
+          ]
+         }
+        ]
+       },
+       "in": [
+        0,
+        2
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 3,
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_spatial_7_milk.bddl",
+   "obstacle": "milk_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_spatial_7_margin.npz",
+   "num_states": 10,
+   "level": "L2",
+   "level_note": "obstacle on the straight route from the object to its destination",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/1/K-upright",
+   "family": "kinematic",
+   "kind": "K-upright",
+   "type": "upright",
+   "suite": "libero_spatial",
+   "task_id": 1,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl next to the ramekin and place it on the plate, keeping the bowl upright while carrying it (tilt under 5 degrees)",
+   "spec": {
+    "G": {
+     "implies": [
+      {
+       "pred": [
+        {
+         "height": "akita_black_bowl_1"
+        },
+        ">=",
+        0.02
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "akita_black_bowl_1"
+        },
+        "<=",
+        5.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "orientation constraints when carrying anything with liquid in it",
+   "num_states": 10,
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/2/K-upright",
+   "family": "kinematic",
+   "kind": "K-upright",
+   "type": "upright",
+   "suite": "libero_spatial",
+   "task_id": 2,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl from table center and place it on the plate, keeping the bowl upright while carrying it (tilt under 5 degrees)",
+   "spec": {
+    "G": {
+     "implies": [
+      {
+       "pred": [
+        {
+         "height": "akita_black_bowl_1"
+        },
+        ">=",
+        0.02
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "akita_black_bowl_1"
+        },
+        "<=",
+        5.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "orientation constraints when carrying anything with liquid in it",
+   "num_states": 10,
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_spatial/6/K-upright",
+   "family": "kinematic",
+   "kind": "K-upright",
+   "type": "upright",
+   "suite": "libero_spatial",
+   "task_id": 6,
+   "init_state_id": 0,
+   "prompt": "pick up the black bowl next to the cookie box and place it on the plate, keeping the bowl upright while carrying it (tilt under 5 degrees)",
+   "spec": {
+    "G": {
+     "implies": [
+      {
+       "pred": [
+        {
+         "height": "akita_black_bowl_1"
+        },
+        ">=",
+        0.02
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "akita_black_bowl_1"
+        },
+        "<=",
+        5.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "orientation constraints when carrying anything with liquid in it",
+   "num_states": 10,
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_goal/1/K-upright",
+   "family": "kinematic",
+   "kind": "K-upright",
+   "type": "upright",
+   "suite": "libero_goal",
+   "task_id": 1,
+   "init_state_id": 0,
+   "prompt": "put the bowl on the stove, keeping the bowl upright while carrying it (tilt under 5 degrees)",
+   "spec": {
+    "G": {
+     "implies": [
+      {
+       "pred": [
+        {
+         "height": "akita_black_bowl_1"
+        },
+        ">=",
+        0.02
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "akita_black_bowl_1"
+        },
+        "<=",
+        5.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "orientation constraints when carrying anything with liquid in it",
+   "num_states": 10,
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_goal/8/K-upright",
+   "family": "kinematic",
+   "kind": "K-upright",
+   "type": "upright",
+   "suite": "libero_goal",
+   "task_id": 8,
+   "init_state_id": 0,
+   "prompt": "put the bowl on the plate, keeping the bowl upright while carrying it (tilt under 5 degrees)",
+   "spec": {
+    "G": {
+     "implies": [
+      {
+       "pred": [
+        {
+         "height": "akita_black_bowl_1"
+        },
+        ">=",
+        0.02
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "akita_black_bowl_1"
+        },
+        "<=",
+        5.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "orientation constraints when carrying anything with liquid in it",
+   "num_states": 10,
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/6/K-upright",
+   "family": "kinematic",
+   "kind": "K-upright",
+   "type": "upright",
+   "suite": "libero_10",
+   "task_id": 6,
+   "init_state_id": 0,
+   "prompt": "put the white mug on the plate and put the chocolate pudding to the right of the plate, keeping the white mug upright while carrying it (tilt under 5 degrees)",
+   "spec": {
+    "G": {
+     "implies": [
+      {
+       "pred": [
+        {
+         "height": "porcelain_mug_1"
+        },
+        ">=",
+        0.02
+       ]
+      },
+      {
+       "pred": [
+        {
+         "tilt": "porcelain_mug_1"
+        },
+        "<=",
+        5.0
+       ]
+      }
+     ]
+    }
+   },
+   "difficulty": 1,
+   "motivation": "orientation constraints when carrying anything with liquid in it",
+   "num_states": 10,
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/4/C-offset-dwell",
+   "family": "combined",
+   "kind": "C-offset-dwell",
+   "type": "placement+dwell",
+   "suite": "libero_10",
+   "task_id": 4,
+   "init_state_id": 0,
+   "prompt": "put the white mug on the left plate and put the yellow and white mug on the right plate, leaving it about 5 cm to the left of the centre of the left plate, and holding it steady above the target for 2 seconds before letting go",
+   "spec": {
+    "and": [
+     {
+      "end": {
+       "and": [
+        {
+         "pred": [
+          {
+           "rel": [
+            "white_yellow_mug_1",
+            "plate_1"
+           ],
+           "axis": "y"
+          },
+          ">=",
+          -0.08
+         ]
+        },
+        {
+         "pred": [
+          {
+           "rel": [
+            "white_yellow_mug_1",
+            "plate_1"
+           ],
+           "axis": "y"
+          },
+          "<=",
+          -0.020000000000000004
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "or": [
+       {
+        "F": {
+         "G": {
+          "and": [
+           {
+            "pred": [
+             {
+              "height": "porcelain_mug_1"
+             },
+             ">=",
+             0.02
+            ]
+           },
+           {
+            "pred": [
+             {
+              "dist": [
+               "porcelain_mug_1",
+               "plate_1"
+              ]
+             },
+             "<=",
+             0.1
+            ]
+           },
+           {
+            "pred": [
+             {
+              "speed": "porcelain_mug_1"
+             },
+             "<=",
+             0.03
+            ]
+           }
+          ]
+         },
+         "in": [
+          0,
+          2
+         ]
+        }
+       },
+       {
+        "F": {
+         "G": {
+          "and": [
+           {
+            "pred": [
+             {
+              "height": "white_yellow_mug_1"
+             },
+             ">=",
+             0.02
+            ]
+           },
+           {
+            "pred": [
+             {
+              "dist": [
+               "white_yellow_mug_1",
+               "plate_2"
+              ]
+             },
+             "<=",
+             0.1
+            ]
+           },
+           {
+            "pred": [
+             {
+              "speed": "white_yellow_mug_1"
+             },
+             "<=",
+             0.03
+            ]
+           }
+          ]
+         },
+         "in": [
+          0,
+          2
+         ]
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "difficulty": 2,
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_goal/8/C-offset-dwell",
+   "family": "combined",
+   "kind": "C-offset-dwell",
+   "type": "placement+dwell",
+   "suite": "libero_goal",
+   "task_id": 8,
+   "init_state_id": 0,
+   "prompt": "put the bowl on the plate, leaving it about 5 cm to the left of the centre of the plate, and holding it steady above the target for 2 seconds before letting go",
+   "spec": {
+    "and": [
+     {
+      "end": {
+       "and": [
+        {
+         "pred": [
+          {
+           "rel": [
+            "akita_black_bowl_1",
+            "plate_1"
+           ],
+           "axis": "y"
+          },
+          ">=",
+          -0.08
+         ]
+        },
+        {
+         "pred": [
+          {
+           "rel": [
+            "akita_black_bowl_1",
+            "plate_1"
+           ],
+           "axis": "y"
+          },
+          "<=",
+          -0.020000000000000004
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "F": {
+       "G": {
+        "and": [
+         {
+          "pred": [
+           {
+            "height": "akita_black_bowl_1"
+           },
+           ">=",
+           0.02
+          ]
+         },
+         {
+          "pred": [
+           {
+            "dist": [
+             "akita_black_bowl_1",
+             "plate_1"
+            ]
+           },
+           "<=",
+           0.1
+          ]
+         },
+         {
+          "pred": [
+           {
+            "speed": "akita_black_bowl_1"
+           },
+           "<=",
+           0.03
+          ]
+         }
+        ]
+       },
+       "in": [
+        0,
+        2
+       ]
+      }
+     }
+    ]
+   },
+   "difficulty": 2,
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/7/C-obstacle-order",
+   "family": "combined",
+   "kind": "C-obstacle-order",
+   "type": "no-contact+order",
+   "suite": "libero_10",
+   "task_id": 7,
+   "init_state_id": 0,
+   "prompt": "put both the alphabet soup and the cream cheese box in the basket, without touching the wine bottle, putting the bigger one in first",
+   "spec": {
+    "and": [
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "disp": "wine_bottle_1"
+          },
+          "<=",
+          0.01
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "wine_bottle_1"
+          },
+          "<=",
+          10.0
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "U": [
+       {
+        "not": {
+         "pred": [
+          {
+           "dist": [
+            "cream_cheese_1",
+            "basket_1"
+           ]
+          },
+          "<=",
+          0.1
+         ]
+        }
+       },
+       {
+        "pred": [
+         {
+          "dist": [
+           "alphabet_soup_1",
+           "basket_1"
+          ]
+         },
+         "<=",
+         0.1
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "difficulty": 2,
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_7_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_7_L2.npz",
+   "num_states": 10,
+   "level": "L2",
+   "scoring": {
+    "type": "spec"
+   }
+  },
+  {
+   "id": "libero_10/2/C-obstacle-wait",
+   "family": "combined",
+   "kind": "C-obstacle-wait",
+   "type": "no-contact+wait",
+   "suite": "libero_10",
+   "task_id": 2,
+   "init_state_id": 0,
+   "prompt": "turn on the stove and put the moka pot on it, without touching the wine bottle, waiting at least 4 seconds after turning on the stove before starting the next step",
+   "spec": {
+    "and": [
+     {
+      "G": {
+       "and": [
+        {
+         "pred": [
+          {
+           "disp": "wine_bottle_1"
+          },
+          "<=",
+          0.01
+         ]
+        },
+        {
+         "pred": [
+          {
+           "tilt": "wine_bottle_1"
+          },
+          "<=",
+          10.0
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "U": [
+       {
+        "not": {
+         "pred": [
+          {
+           "disp": "moka_pot_1"
+          },
+          ">=",
+          0.01
+         ]
+        }
+       },
+       {
+        "and": [
+         {
+          "pred": [
+           {
+            "bddl": "turnon flat_stove_1"
+           },
+           ">=",
+           0.5
+          ]
+         },
+         {
+          "G": {
+           "not": {
+            "pred": [
+             {
+              "disp": "moka_pot_1"
+             },
+             ">=",
+             0.01
+            ]
+           }
+          },
+          "in": [
+           0,
+           4
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "difficulty": 2,
+   "bddl": "benchmarks/libero_constrained/obstacles/bddl/libero_10_2_wine_bottle.bddl",
+   "obstacle": "wine_bottle_1",
+   "init_states": "benchmarks/libero_constrained/obstacles/init_states/libero_10_2_L2.npz",
+   "num_states": 3,
+   "level": "L2",
+   "scoring": {
+    "type": "spec"
+   }
+  }
+ ]
+}

@@ -174,6 +174,10 @@ class AttachedObjectState:
     # Sphere approximation of the object's collision geometry, in the
     # OBJECT's own frame: [(local_offset_xyz, radius), ...].
     collision_spheres_object_frame: list[tuple[np.ndarray, float]] = field(default_factory=list)
+    # The object-frame direction that pointed straight up before the object was
+    # picked up. Upright is judged against this, not against the object's own z
+    # axis -- meshes carry arbitrary base rotations.
+    up_axis_object_frame: np.ndarray | None = None
 
 
 # --------------------------------------------------------------------------- execution / skill

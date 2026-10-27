@@ -13,6 +13,7 @@ import numpy as np
 
 from ...orientation_utils import orientation_error_rotvec
 from ...motion.attached_object import refresh_grasp_transform
+from ...motion.attached_object import goal_object_quat
 from ...motion.collision import required_hand_pose_for_object_pose
 from ...motion.config import MotionConfig
 from ...motion.panda import EE_SITE, JOINT_NAMES
@@ -256,7 +257,7 @@ class LiberoPlaceAdapter(_ServoMixin):
             target_xy = container_pos[:2]
         object_xyz = np.array([target_xy[0], target_xy[1], place_z])
 
-        object_quat_now = scene.body_pose(attached.object_name)[1]
+        object_quat_now = goal_object_quat(self.config, attached, scene.body_pose(attached.object_name)[1])
         place_hand_pos, place_hand_quat = required_hand_pose_for_object_pose(
             object_xyz, object_quat_now, attached.grasp_transform_hand_from_object
         )

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .scene_query import BodyExtent, SceneQuery, quat_to_rotmat_wxyz
+from .scene_query import BodyExtent, SceneQuery, quat_mul_wxyz, quat_to_rotmat_wxyz
 from .types import AttachedObjectState
 
 
@@ -202,3 +202,29 @@ class AttachedObjectManager:
 
     def detach(self) -> None:
         self._state = None
+
+
+def level_object_quat(quat_wxyz: np.ndarray, up_local: np.ndarray) -> np.ndarray:
+    """The orientation nearest quat_wxyz whose rest-up axis points straight up:
+    the smallest rotation undoing the tilt, leaving yaw as it was."""
+    u = quat_to_rotmat_wxyz(quat_wxyz) @ np.asarray(up_local, dtype=float)
+    u = u / max(np.linalg.norm(u), 1e-12)
+    z = np.array([0.0, 0.0, 1.0])
+    axis = np.cross(u, z)
+    s = float(np.linalg.norm(axis))
+    c = float(np.clip(u @ z, -1.0, 1.0))
+    if s < 1e-9:
+        return np.asarray(quat_wxyz, dtype=float)
+    half = 0.5 * np.arctan2(s, c)
+    align = np.concatenate([[np.cos(half)], np.sin(half) * axis / s])
+    return quat_mul_wxyz(align, np.asarray(quat_wxyz, dtype=float))
+
+
+def goal_object_quat(config, attached: AttachedObjectState, quat_now_wxyz: np.ndarray) -> np.ndarray:
+    """The orientation to carry or set the object down at: as it is now, or
+    levelled when the plan holds it to G(Upright(...)) -- a goal pose that kept
+    the tilt from the lift would break the rule by itself."""
+    if (getattr(config.collision, "max_tilt_deg", None) is not None
+            and attached.up_axis_object_frame is not None):
+        return level_object_quat(quat_now_wxyz, attached.up_axis_object_frame)
+    return np.asarray(quat_now_wxyz, dtype=float)

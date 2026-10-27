@@ -1150,6 +1150,17 @@ def get_libero_init_state(scene_context: dict[str, Any]) -> Any | None:
     # qpos slot. Confirmed directly: a custom single-plate drawer scene had
     # its plate silently relocated 0.3m away and its drawers desynced this
     # way, with no error raised anywhere.
+    states_file = cfg.get("init_states_file")
+    if states_file:
+        # Start states saved for a custom scene -- the obstacle tasks keep
+        # LIBERO's layouts but add an object, so LIBERO's own file no longer
+        # matches the model. Fail loudly on a bad index rather than clamp: a
+        # silent clamp would run a different start than the one recorded.
+        states = np.load(states_file)["states"]
+        index = int(cfg.get("init_state_id", cfg.get("initial_state_id", 0)))
+        if not 0 <= index < len(states):
+            raise ValueError(f"init_state_id {index} out of range: {states_file} holds {len(states)}")
+        return states[index]
     if suite is None or task_id is None or bddl_file:
         return None
     try:

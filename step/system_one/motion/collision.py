@@ -33,6 +33,14 @@ class CollisionPhase(str, Enum):
     PLACE_APPROACH = "place_approach"  # place: attached-object<->goal-container contact permitted
 
 
+def _same_body(body_name: str | None, entity: str) -> bool:
+    """Whether a MuJoCo body name (akita_black_bowl_1_main) is the scene
+    entity a plan names (akita_black_bowl_1)."""
+    if not body_name:
+        return False
+    return body_name == entity or body_name.removesuffix("_main") == entity
+
+
 def compose_world_pose(
     hand_pos: np.ndarray, hand_quat_wxyz: np.ndarray, transform_hand_from_object: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -336,13 +344,33 @@ class CollisionChecker:
         # 1b. STL keep-out zones (G(Safe(obj))): checked on the end-effector
         # site only (matches the benchmark's safe_ee signal), in both planning and live tracking.
         zones = getattr(self.config, "keepout_zones", None) or []
+        carried_pose = None
+        if attached is not None and (zones or getattr(self.config, "max_tilt_deg", None) is not None):
+            hand_pos, hand_quat = scratch.site_pose(self.ee_site)
+            carried_pose = compose_world_pose(hand_pos, hand_quat, attached.grasp_transform_hand_from_object)
         if zones:
             ee_xy = scratch.site_pose(self.ee_site)[0][:2]
             attached_name = attached.object_name if attached is not None else None
             for zone in zones:
                 if attached_name is not None and attached_name in zone.exempt_bodies:
                     continue
+                if zone.subject is not None:
+                    # A zone on a carried object applies only while that object
+                    # is the one in the hand; before the grasp it is sitting
+                    # where it started, which is clear by construction.
+                    if carried_pose is None or not _same_body(attached_name, zone.subject):
+                        continue
+                    d = zone.clearance(carried_pose[0][:2])
+                    if phase != CollisionPhase.FREE_SPACE:
+                        # Setting down or picking up: judged on the rule alone.
+                        d += zone.buffer_m
+                    min_clearance = min(min_clearance, d)
+                    if d < 0.0 and not _KEEPOUT_SOFT_ONLY:
+                        violations.append(Contact(f"attached:{attached_name}", f"keepout:{zone.name}", d))
+                    continue
                 d = zone.clearance(ee_xy)
+                if phase != CollisionPhase.FREE_SPACE:
+                    d += zone.buffer_m
                 min_clearance = min(min_clearance, d)
                 if d < 0.0 and not _KEEPOUT_SOFT_ONLY:
                     # Soft-only is the VLM-MPC-cost baseline: the zone still
@@ -353,6 +381,19 @@ class CollisionChecker:
                     violations.append(Contact(self.ee_site, f"keepout:{zone.name}", d))
                 # The carried object is deliberately not checked here: its
                 # true pose vs. nominal grasp transform differ enough that enforcing it made runs worse.
+
+        # 1c. STL G(Upright(obj, deg)): the carried object, placed by the grasp
+        # transform at this configuration, may not tip past the limit from how
+        # it stood before the pick. Checked here so every plan, shortcut and
+        # goal pose is held to it, exactly as the keep-out zones are.
+        max_tilt = getattr(self.config, "max_tilt_deg", None)
+        up_local = getattr(attached, "up_axis_object_frame", None) if attached is not None else None
+        if max_tilt is not None and carried_pose is not None and up_local is not None:
+            up_world = quat_to_rotmat_wxyz(carried_pose[1]) @ np.asarray(up_local, dtype=np.float64)
+            tilt = math.degrees(math.acos(max(-1.0, min(1.0, float(up_world[2])))))
+            if tilt > float(max_tilt):
+                violations.append(Contact(f"attached:{attached.object_name}", "upright",
+                                          math.radians(float(max_tilt) - tilt)))
 
         # 2. Sphere-approximated attached-object collision.
         if attached is not None:

@@ -191,6 +191,22 @@ class JointSpaceMPC:
         terms = getattr(self, "_cost_terms", None)
         if not terms:
             return 0.0, np.zeros_like(q_traj[1:])
+
+        # Map the VLM's weights onto this controller's scale before using them.
+        # It writes them over Cartesian distances while the native terms are
+        # joint-space and hand-tuned, so the raw sum let an arbitrary magnitude
+        # decide how hard the avoid-term fought the reach-term. Dividing by the
+        # largest reach weight keeps every ratio the VLM chose -- its actual
+        # output -- and leaves only the overall gain to be set. See
+        # CollisionConfig.mpc_cost_normalize.
+        cfg = getattr(self, "_cost_cfg", None)
+        scale = 1.0
+        if getattr(cfg, "mpc_cost_normalize", False):
+            reach = [abs(float(t.weight)) for t in terms if t.kind != "avoid"]
+            ref = max(reach) if reach else max(
+                (abs(float(t.weight)) for t in terms), default=1.0)
+            if ref > 0:
+                scale = float(getattr(cfg, "mpc_cost_weight_gain", 1.0)) / ref
         cost = 0.0
         grad = np.zeros_like(q_traj)
         for t in range(1, self.horizon + 1):
@@ -205,12 +221,14 @@ class JointSpaceMPC:
                 dist = float(np.linalg.norm(diff) + 1e-9)
                 if term.kind == "avoid":
                     violation = float(term.radius_m) - dist
-                    cost += term.weight * _softplus(np.array([violation]))[0]
+                    w = term.weight * scale
+                    cost += w * _softplus(np.array([violation]))[0]
                     dpen = -_softplus_grad(np.array([violation]))[0]
-                    dcost_dee = term.weight * dpen * (diff / dist)
+                    dcost_dee = w * dpen * (diff / dist)
                 else:  # reach
-                    cost += term.weight * float(dist**2)
-                    dcost_dee = term.weight * 2.0 * diff
+                    w = term.weight * scale
+                    cost += w * float(dist**2)
+                    dcost_dee = w * 2.0 * diff
                 grad[t] += dcost_dee @ J
         return cost, grad[1:]
 
@@ -336,6 +354,9 @@ class JointSpaceMPC:
         # file instead of six adapter call sites.
         if collision_checker is not None:
             self._cost_terms = getattr(collision_checker.config, "mpc_cost_terms", None) or []
+            # Kept too: the normalisation settings live beside the terms, and
+            # the checker itself is a local here, not on self.
+            self._cost_cfg = collision_checker.config
 
         u = np.concatenate([self._prev_actions[1:], self._prev_actions[-1:]], axis=0)
 

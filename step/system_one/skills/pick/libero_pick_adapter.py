@@ -32,6 +32,7 @@ from .grasp_generator import (
 from ...motion.kinematics import IKSolver
 from ...motion.mpc import JointSpaceMPC, MPCContext
 from ...motion.ompl_planner import MotionPlanner
+from ...motion.scene_query import quat_to_rotmat_wxyz
 from ...motion.panda import EE_SITE, GRIPPER_BODIES, JOINT_NAMES, ROBOT_BODIES
 from .pick_skill import PickSkill
 from ...motion.scene_query import SceneQuery, quat_to_rotmat_wxyz, resolve_body_name
@@ -286,6 +287,9 @@ class LiberoPickAdapter(_ServoMixin):
         body_names = [resolve_body_name(scene, name) for name in object_set]
         canonical_by_body = dict(zip(body_names, object_set))
 
+        # Every grasp attempt this pick makes; filled in by the generator chain below.
+        attempts: list[dict] = []
+
         handle_dir = constraints.get("handle_approach_dir")
         if handle_dir is not None:
             # Re-grasp for a side-opening container: only a handle grasp whose
@@ -328,7 +332,6 @@ class LiberoPickAdapter(_ServoMixin):
             # belong to the heuristic, the configured generator's own failure is
             # erased, and the run reads as evidence about a method that never got
             # scored. Recording each attempt keeps both.
-            attempts: list[dict] = []
 
             def _record(label, cands, result):
                 diag = getattr(result, "diagnostics", None) or {}
@@ -625,6 +628,13 @@ class LiberoPickAdapter(_ServoMixin):
         # ee_site, not the wrist ft_frame -- every consumer of this transform
         # (required_hand_pose_for_object_pose) solves IK/servos against ee_site, so using a different site here introduced a fixed ~9.7cm release-height offset.
         attached_state = attached_mgr.attach(attach_scene, object_body_name, self.ee_site, step=steps)
+        # Which way was up before the grasp: the reference for G(Upright(...)).
+        # Taken from the pre-grasp scene, since the lifts above may already
+        # have tipped the object a little.
+        _, rest_quat = scene.body_pose(object_body_name)
+        attached_state.up_axis_object_frame = (
+            quat_to_rotmat_wxyz(rest_quat).T @ np.array([0.0, 0.0, 1.0])
+        )
         plan_result.diagnostics["attached_object"] = {
             "object_name": attached_state.object_name,
             "collision_radius_m": attached_state.collision_radius_m,
