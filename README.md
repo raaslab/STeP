@@ -1,15 +1,9 @@
 # STeP
 
-<table>
-  <tr>
-    <td align="center"><img src="docs/media/libero10_task02.gif" width="420" alt="LIBERO-10 task 2 rollout"></td>
-    <td align="center"><img src="docs/media/libero10_task09.gif" width="420" alt="LIBERO-10 task 9 rollout"></td>
-  </tr>
-  <tr>
-    <td align="center"><em>"turn on the stove and put the moka pot on it"</em></td>
-    <td align="center"><em>"put the yellow and white mug in the microwave and close it"</em></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/media/libero10_task02.gif" width="100%" alt="LIBERO-10 task 2: turn on the stove and put the moka pot on it">
+  <img src="docs/media/libero10_task09.gif" width="100%" alt="LIBERO-10 task 9: put the yellow and white mug in the microwave and close it">
+</p>
 
 STeP runs language-instructed manipulation tasks in LIBERO with a two-level
 system:

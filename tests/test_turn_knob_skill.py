@@ -9,26 +9,22 @@ from step.system_one.motion.ompl_planner import MotionPlanner
 from step.system_one.motion.scene_query import quat_to_rotmat_wxyz
 from step.system_one.skills.turn_knob.turn_knob_skill import (
     TurnKnobSkill,
-    _arbitrary_perpendicular,
     _axis_angle_to_rotmat,
-    _orientation_for_tangential_grasp,
+    _knob_grip,
+    _orientation_for_grasp,
     _solve_ik_robust,
 )
 from step.system_one.motion.types import SkillFailureReason
 
 
-def test_orientation_closing_axis_perpendicular_to_approach_and_radial():
+def test_orientation_closes_along_requested_axis():
     approach = np.array([0.0, 0.0, -1.0])  # top-down onto the knob
-    radial = np.array([1.0, 0.0, 0.0])  # direction from center to the grasp chord
-    quat = _orientation_for_tangential_grasp(approach, radial)
-    R = quat_to_rotmat_wxyz(quat)
+    closing = np.array([0.6, 0.8, 0.0])
+    R = quat_to_rotmat_wxyz(_orientation_for_grasp(approach, closing))
     x_axis, y_axis, z_axis = R[:, 0], R[:, 1], R[:, 2]
 
     assert np.allclose(z_axis, approach, atol=1e-9)
-    # Closing axis is tangential -- perpendicular to both approach and radial.
-    assert np.isclose(np.dot(x_axis, approach), 0.0, atol=1e-9)
-    assert np.isclose(np.dot(x_axis, radial), 0.0, atol=1e-9)
-    assert np.isclose(np.linalg.norm(x_axis), 1.0, atol=1e-9)
+    assert np.allclose(x_axis, closing, atol=1e-9)
     assert np.allclose(np.cross(x_axis, y_axis), z_axis, atol=1e-9)
 
 
@@ -39,13 +35,6 @@ def test_axis_angle_to_rotmat_matches_known_rotations():
     # Identity at angle 0.
     R0 = _axis_angle_to_rotmat(np.array([0.0, 0.0, 1.0]), 0.0)
     assert np.allclose(R0, np.eye(3), atol=1e-9)
-
-
-def test_arbitrary_perpendicular_is_unit_and_orthogonal():
-    for axis in (np.array([0.0, 0.0, 1.0]), np.array([1.0, 0.0, 0.0]), np.array([0.3, 0.4, 0.5])):
-        perp = _arbitrary_perpendicular(axis)
-        assert np.isclose(np.linalg.norm(perp), 1.0, atol=1e-9)
-        assert np.isclose(np.dot(perp, axis / np.linalg.norm(axis)), 0.0, atol=1e-9)
 
 
 def _build_skill(libero_stove_scene, timeout_sec=10.0):
@@ -68,14 +57,16 @@ def test_knob_grasp_pose_is_reachable_by_ik(libero_stove_scene):
     assert qpos_hi > qpos_lo
 
     radius_m = estimate_knob_radius_m(libero_stove_scene, knob, axis_world)
-    assert radius_m > 0.0
+    grip_center, top_h, long_dir, thin_half, elongation = _knob_grip(libero_stove_scene, knob.knob_body, axis_world, center_world)
+    # The handle bar on top of LIBERO's stove knob: inside the knob, narrow
+    # enough to straddle, clearly elongated.
+    assert np.linalg.norm(grip_center - center_world) < radius_m
+    assert 0.0 < thin_half < 0.03
+    assert elongation > 1.3
+    assert np.isclose(long_dir @ axis_world, 0.0, atol=1e-9)
 
-    cfg = MotionConfig().knob
-    target_width = min(cfg.grasp_chord_width_m, 2.0 * radius_m * 0.99)
-    d = float(np.sqrt(max(radius_m**2 - (target_width / 2.0) ** 2, 0.0)))
-    radial0 = _arbitrary_perpendicular(axis_world)
-    grasp_pos = center_world + d * radial0
-    grasp_quat = _orientation_for_tangential_grasp(-axis_world, radial0)
+    grasp_pos = grip_center + (top_h - MotionConfig().knob.grasp_depths_below_top_m[0]) * axis_world
+    grasp_quat = _orientation_for_grasp(-axis_world, np.cross(axis_world, long_dir))
 
     ik = IKSolver(joint_names=JOINT_NAMES, site_name=EE_SITE)
     start_q = libero_stove_scene.get_qpos(JOINT_NAMES)
@@ -94,6 +85,12 @@ def test_turn_knob_skill_produces_feasible_plan(libero_stove_scene):
     assert result.planned_trajectory.success
     assert result.diagnostics["turn_fraction_used"] is not None
     assert result.diagnostics["target_qpos"] > result.diagnostics["current_qpos"]
+    # Grasps the handle at its midpoint, not a chord at the knob's rim.
+    grasp = np.asarray(result.diagnostics["grasp_position"])
+    grip = np.asarray(result.diagnostics["grip_center"])
+    axis = np.asarray(result.diagnostics["axis_world"])
+    offset = grasp - grip
+    assert np.linalg.norm(offset - axis * (offset @ axis)) < 1e-9
     # approach_positions is the descent (standoff -> grasp) only; the turn
     # leg (grasp -> turned_q) is tracked separately by the adapter, only
     # after the gripper has actually closed on the knob.
