@@ -15,8 +15,8 @@ from ...motion.config import MotionConfig
 from ...motion.kinematics import IKSolver
 from ...motion.ompl_planner import MotionPlanner
 from .turn_knob_skill import TurnKnobSkill, _axis_angle_to_rotmat
-from ...motion.panda import EE_SITE, GRIPPER_BODIES, HAND_SITE, JOINT_NAMES, ROBOT_BODIES
-from ...motion.scene_query import SceneQuery
+from ...motion.panda import EE_SITE, FINGER_JOINT_NAMES, GRIPPER_BODIES, HAND_SITE, JOINT_NAMES, ROBOT_BODIES
+from ...motion.scene_query import SceneQuery, quat_to_rotmat_wxyz, rotmat_to_quat_wxyz
 from ...motion.servo import MotionTraceRecorder, _ServoMixin, real_nonpermitted_contacts, track_and_settle
 from ...motion.time_parameterize import TimeParameterizer
 from ...motion.types import MPCCostConfig, SkillFailureReason, SkillResult
@@ -72,8 +72,6 @@ class LiberoStoveAdapter(_ServoMixin):
         grasp_quat_wxyz = np.asarray(plan_result.diagnostics["grasp_quat_wxyz"])
 
         approach_positions = np.asarray(plan_result.planned_trajectory.metadata["approach_positions"])
-        full_reference = np.concatenate([traj.positions, approach_positions[1:]], axis=0)
-        approach_start_idx = len(traj.positions)
 
         checker = skill.collision_checker
         knob_body = knob.knob_body
@@ -81,45 +79,64 @@ class LiberoStoveAdapter(_ServoMixin):
         steps = 0
         gripper_cmd = self.env.open_gripper_cmd
         descent_trace = MotionTraceRecorder()
-        descent_result = track_and_settle(
-            self,
-            full_reference,
-            joint_names=self.joint_names,
-            ee_site=self.ee_site,
-            approach_start_idx=approach_start_idx,
-            target_pos=grasp_position,
-            target_quat_wxyz=grasp_quat_wxyz,
-            collision_checker=checker,
-            mpc_horizon=int(self.config.mpc.get("horizon", 16)),
-            mpc_cost_config=MPCCostConfig(
-                **{k: v for k, v in self.config.mpc.items() if k in MPCCostConfig.__dataclass_fields__}
-            ),
-            replan_config=self.config.replan,
-            gripper_cmd=gripper_cmd,
-            settle_position_tol_m=cfg.settle_position_tol_m,
-            settle_orientation_tol_rad=cfg.settle_orientation_tol_rad,
-            stall_window_steps=cfg.stall_window_steps,
-            stall_position_tol_m=cfg.stall_position_tol_m,
-            max_settle_steps=cfg.max_settle_steps,
-            mpc_step_kwargs={"target_object_body": knob_body},
-            steps_so_far=steps,
-            max_steps=max_steps,
-            step_callback=step_callback,
-            target_object_body=knob_body,
-            trace=descent_trace,
-        )
+
+        def _track(reference, approach_start_idx, target_pos, trace=None):
+            return track_and_settle(
+                self,
+                reference,
+                joint_names=self.joint_names,
+                ee_site=self.ee_site,
+                approach_start_idx=approach_start_idx,
+                target_pos=target_pos,
+                target_quat_wxyz=grasp_quat_wxyz,
+                collision_checker=checker,
+                mpc_horizon=int(self.config.mpc.get("horizon", 16)),
+                mpc_cost_config=MPCCostConfig(
+                    **{k: v for k, v in self.config.mpc.items() if k in MPCCostConfig.__dataclass_fields__}
+                ),
+                replan_config=self.config.replan,
+                gripper_cmd=gripper_cmd,
+                settle_position_tol_m=cfg.settle_position_tol_m,
+                settle_orientation_tol_rad=cfg.settle_orientation_tol_rad,
+                stall_window_steps=cfg.stall_window_steps,
+                stall_position_tol_m=cfg.stall_position_tol_m,
+                max_settle_steps=cfg.max_settle_steps,
+                mpc_step_kwargs={"target_object_body": knob_body},
+                steps_so_far=steps,
+                max_steps=max_steps,
+                step_callback=step_callback,
+                target_object_body=knob_body,
+                trace=trace,
+            )
+
+        # Settle above the knob before descending, as pick does: the wrist
+        # rotates far slower than the hand translates, and descending while
+        # still ~45 deg off put an open finger on the burner, stalling short.
+        standoff_position = grasp_position + self.config.knob.approach_standoff_m * axis_world
+        above_result = _track(traj.positions, len(traj.positions), standoff_position)
+        steps += above_result.steps
+        plan_result.diagnostics["settle_to_above"] = above_result.as_diagnostics()
+
+        descent_result = _track(approach_positions, 0, grasp_position, trace=descent_trace)
         steps += descent_result.steps
         plan_result.diagnostics["settle"] = descent_result.as_diagnostics()
 
         # Close the gripper on the knob before tracking the turn leg.
         gripper_cmd = self.env.close_gripper_cmd
         close_dwell_steps = max(int(self.env.close_steps) * 2, 25)
-        for _ in range(close_dwell_steps):
+        # Then keep squeezing until the fingers stop moving: turning while they
+        # are still closing on the handle loses the first ~13 deg to slack.
+        openings: list[float] = []
+        for i in range(close_dwell_steps + 40):
             hold_pos, hold_ori, _, _ = self._servo_toward_cartesian_pose(grasp_position, grasp_quat_wxyz)
             self._step_env(hold_pos, hold_ori, gripper_cmd)
             steps += 1
             if step_callback is not None:
                 step_callback()
+            q = SceneQuery.from_robosuite_sim(self.env.env.sim).get_qpos(FINGER_JOINT_NAMES)
+            openings.append(abs(float(q[0] - q[1])))
+            if i >= close_dwell_steps and max(openings[-5:]) - min(openings[-5:]) < 0.0005:
+                break
 
         # Diagnostic only, not a hard gate -- the same fingerpad<->target
         # contact test CollisionChecker uses to decide permitted contact.
@@ -142,12 +159,15 @@ class LiberoStoveAdapter(_ServoMixin):
         delta_angle = turn_fraction_used * (target_qpos - current_qpos)
         r_grasp_to_turned = _axis_angle_to_rotmat(axis_world, delta_angle)
         turned_position = center_world + r_grasp_to_turned @ (grasp_position - center_world)
+        # The hand turns with the knob: settle at the turned orientation. The
+        # pre-turn one undid the turn once the reference ran out, which only
+        # went unnoticed for grasps far from the axis, where position alone
+        # dragged the hand (and the knob) round.
+        turned_quat_wxyz = rotmat_to_quat_wxyz(r_grasp_to_turned @ quat_to_rotmat_wxyz(grasp_quat_wxyz))
 
         current_q = SceneQuery.from_robosuite_sim(self.env.env.sim).get_qpos(self.joint_names)
         turn_reference = np.linspace(current_q, turned_q, 20)
         turn_trace = MotionTraceRecorder()
-        # check_orientation_convergence=False: the hand rotates with the
-        # knob, so the fixed pre-turn orientation would never converge; only position gates the settle.
         turn_result = track_and_settle(
             self,
             turn_reference,
@@ -155,7 +175,7 @@ class LiberoStoveAdapter(_ServoMixin):
             ee_site=self.ee_site,
             approach_start_idx=0,  # always TERMINAL_APPROACH -- gripper is already closed on the knob
             target_pos=turned_position,
-            target_quat_wxyz=grasp_quat_wxyz,
+            target_quat_wxyz=turned_quat_wxyz,
             collision_checker=checker,
             mpc_horizon=int(self.config.mpc.get("horizon", 16)),
             mpc_cost_config=MPCCostConfig(
@@ -172,7 +192,6 @@ class LiberoStoveAdapter(_ServoMixin):
             steps_so_far=steps,
             max_steps=max_steps,
             step_callback=step_callback,
-            check_orientation_convergence=False,
             target_object_body=knob_body,
             trace=turn_trace,
         )
@@ -203,7 +222,7 @@ class LiberoStoveAdapter(_ServoMixin):
         retreat_target = turned_position + self.config.knob.retreat_m * axis_world
         retreat_trace = MotionTraceRecorder()
         for _ in range(self.config.knob.retreat_steps):
-            retreat_pos, retreat_ori, _, _ = self._servo_toward_cartesian_pose(retreat_target, grasp_quat_wxyz)
+            retreat_pos, retreat_ori, _, _ = self._servo_toward_cartesian_pose(retreat_target, turned_quat_wxyz)
             self._step_env(retreat_pos, retreat_ori, gripper_cmd)
             steps += 1
             if step_callback is not None:

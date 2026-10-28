@@ -806,12 +806,18 @@ class VisionPerception:
             c = pts.mean(axis=0)
             if any(np.linalg.norm(c - h) < 0.04 for h in handles):
                 continue
-            owner = min(fixtures, key=lambda f: self._xy_distance_to_shape(c, f))
+            radius = float(np.max(np.linalg.norm(pts[:, :2] - c[:2], axis=1)))
+            # The VLM sometimes keeps the knob itself as a fixture ("black clamp
+            # stand"); it can't own itself, and its solid boxes would fill the
+            # space the fingers turn in.
+            owners = [f for f in fixtures if not self._is_knob_itself(f, c, radius)]
+            if not owners:
+                continue
+            owner = min(owners, key=lambda f: self._xy_distance_to_shape(c, f))
             # Knobs sit at a fixture's edge or just behind it (LIBERO's stove
             # knob is ~6 cm off the burner's base), not necessarily on top.
             if self._xy_distance_to_shape(c, owner) > 0.08:
                 continue
-            radius = float(np.max(np.linalg.norm(pts[:, :2] - c[:2], axis=1)))
             fp = owner._points
             dist = np.linalg.norm(fp - c, axis=1)
             ring = fp[(dist > radius + 0.01) & (dist < radius + 0.06)]
@@ -822,6 +828,10 @@ class VisionPerception:
                 n, d = fit
             if (c - (ring.mean(axis=0) if len(ring) else c - n)) @ n < 0:
                 n, d = -n, -d
+            # A mounting surface within 10 deg of level is level: the plane fit
+            # on a small ring of points is otherwise tilted by noise.
+            if n[2] > np.cos(np.radians(10.0)):
+                n, d = np.array([0.0, 0.0, 1.0]), -float(np.median(ring[:, 2])) if len(ring) else -float(pts[:, 2].min())
             height = max(float(np.max(pts @ n) + d), 0.005)
             perp = (pts - c) - np.outer((pts - c) @ n, n)
             radius = max(float(np.max(np.linalg.norm(perp, axis=1))), 0.01)
@@ -832,15 +842,51 @@ class VisionPerception:
                 half=np.array([radius, radius, 0.5 * height]),
                 range_rad=tuple(self.cfg.knob_range_rad),
             )
+            self._fit_knob_handle(knob, pts, height)
             if owner.name not in best or len(pts) > best[owner.name][0]:
                 best[owner.name] = (len(pts), knob)
-        self.world.knobs = [k for _, k in best.values()]
+        # Largest first; a smaller detection near a kept knob is the same knob
+        # seen partially.
+        knobs: list[PerceivedKnob] = []
+        for _, k in sorted(best.values(), key=lambda nk: -nk[0]):
+            if all(np.linalg.norm(k.center[:2] - kept.center[:2]) > 0.05 for kept in knobs):
+                knobs.append(k)
         # The VLM may already have named the knob as an object of its own.
-        for k in self.world.knobs:
+        for k in knobs:
             for name, obj in list(self.world.objects.items()):
-                if not obj.is_static_fixture and np.linalg.norm(obj.centroid()[:2] - k.center[:2]) < k.half[0] + 0.02:
+                if name != k.fixture and self._is_knob_itself(obj, k.center, k.half[0]):
                     del self.world.objects[name]
                     self._log("object_is_knob", object=name, knob=k.body_name)
+        self.world.knobs = [k for k in knobs if k.fixture in self.world.objects]
+
+    @staticmethod
+    def _fit_knob_handle(knob: PerceivedKnob, pts: np.ndarray, height: float) -> None:
+        """The handle is the knob's upper half: its midpoint and long
+        direction come from those points' extent in the mounting plane."""
+        h = (pts - knob.center) @ knob.axis
+        top = pts[h > 0.5 * height]
+        if len(top) < 10:
+            return
+        rel = (top - knob.center) - np.outer((top - knob.center) @ knob.axis, knob.axis)
+        evals, evecs = np.linalg.eigh(np.cov((rel - rel.mean(axis=0)).T))
+        if evals[-1] < 1.3**2 * evals[-2]:
+            return  # round: no handle direction to grasp across
+        long_dir = evecs[:, -1] - knob.axis * (evecs[:, -1] @ knob.axis)
+        long_dir /= np.linalg.norm(long_dir)
+        thin_dir = np.cross(knob.axis, long_dir)
+        along = np.percentile(rel @ long_dir, [3, 97])
+        across = np.percentile(rel @ thin_dir, [3, 97])
+        knob.grip_offset = 0.5 * along.sum() * long_dir + 0.5 * across.sum() * thin_dir
+        knob.grip_dir = long_dir
+        knob.grip_half = np.array([max(0.5 * np.ptp(along), 0.005), max(0.5 * np.ptp(across), 0.004), 0.5 * height])
+
+    @staticmethod
+    def _is_knob_itself(obj: PerceivedObject, knob_center: np.ndarray, knob_radius: float) -> bool:
+        """Knob-sized and centred on the knob."""
+        return bool(
+            np.linalg.norm(obj.centroid()[:2] - knob_center[:2]) < knob_radius + 0.02
+            and obj.footprint_radius() < knob_radius + 0.03
+        )
 
     @staticmethod
     def _xy_distance_to_shape(p: np.ndarray, obj: PerceivedObject) -> float:

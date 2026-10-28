@@ -114,9 +114,21 @@ def build_twin_model(world_xml: str, world: WorldEstimate) -> mujoco.MjModel:
             joint = knob.add_joint(name=k.body_name, type=mujoco.mjtJoint.mjJNT_HINGE, axis=[float(v) for v in axis_local])
             joint.limited = mujoco.mjtLimited.mjLIMITED_TRUE
             joint.range = [float(k.range_rad[0]), float(k.range_rad[1])]
-            # A box rather than a cylinder: estimate_knob_radius_m reads the
-            # AABB, and a box spins visibly in the twin's FK.
-            _add_box(knob, f"{k.body_name}_g0", axis_local * k.half[2], k.half, quat=_quat_aligning_z(axis_local))
+            # Boxes rather than cylinders: estimate_knob_radius_m reads the
+            # AABB, and a box spins visibly in the twin's FK. A thin base disc
+            # plus the handle, so the turn skill can find and straddle it.
+            q_axis = _quat_aligning_z(axis_local)
+            if k.grip_half is None:
+                _add_box(knob, f"{k.body_name}_g0", axis_local * k.half[2], k.half, quat=q_axis)
+            else:
+                base_hh = min(0.25 * k.half[2], 0.006)
+                _add_box(knob, f"{k.body_name}_g0", axis_local * base_hh, [k.half[0], k.half[1], base_hh], quat=q_axis)
+                x_local = R.T @ k.grip_dir
+                rot = np.column_stack([x_local, np.cross(axis_local, x_local), axis_local])
+                q_grip = np.zeros(4)
+                mujoco.mju_mat2Quat(q_grip, rot.reshape(9))
+                center = R.T @ k.grip_offset + axis_local * k.grip_half[2]
+                _add_box(knob, f"{k.body_name}_g1", center, k.grip_half, quat=q_grip)
 
     return spec.compile()
 

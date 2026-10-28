@@ -68,6 +68,12 @@ class PerceivedKnob:
     axis: np.ndarray  # unit, outward normal of the mounting surface
     half: np.ndarray  # (3,) radius, radius, half-height along axis
     range_rad: tuple[float, float]
+    # The handle (raised bar on the base disc): offset of its midpoint from
+    # `center` in the mounting plane, its long direction in that plane, and
+    # half-extents (long, thin, half-height). None when no handle was seen.
+    grip_offset: np.ndarray = field(default_factory=lambda: np.zeros(3))
+    grip_dir: np.ndarray = field(default_factory=lambda: np.array([1.0, 0.0, 0.0]))
+    grip_half: np.ndarray | None = None
     qpos: float = 0.0
     # While held: TCP rotation and knob angle at grasp time.
     grasp_tcp_rot: np.ndarray | None = None
