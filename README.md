@@ -1,9 +1,8 @@
 # STeP
 
-<p align="center">
-  <img src="docs/media/libero10_task02.gif" width="100%" alt="LIBERO-10 task 2: turn on the stove and put the moka pot on it">
-  <img src="docs/media/libero10_task09.gif" width="100%" alt="LIBERO-10 task 9: put the yellow and white mug in the microwave and close it">
-</p>
+![LIBERO-10 task 2: turn on the stove and put the moka pot on it](docs/media/libero10_task02.gif)
+
+![LIBERO-10 task 9: put the yellow and white mug in the microwave and close it](docs/media/libero10_task09.gif)
 
 STeP runs language-instructed manipulation tasks in LIBERO with a two-level
 system:
