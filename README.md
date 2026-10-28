@@ -22,8 +22,7 @@ system:
 3. System 2 writes the plan. In the default `--stl-mode stl_spec`, the VLM
    writes **one STL formula for the whole task**, and
    `step/system_two/stl_plan.py:decompose()` derives the ordered subtasks
-   (skill, parameters, per-subtask formula) from it deterministically. See
-   `STL_DECOMPOSITION_PLAN.md`.
+   (skill, parameters, per-subtask formula) from it deterministically.
 4. Validate the plan, then execute each subtask with System 1.
 5. If execution fails, recall System 2 against the current, unreset scene and
    retry (`--max-pipeline-retries`, default 3).
