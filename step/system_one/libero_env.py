@@ -27,6 +27,19 @@ from .libero_scene import (
     relocate_obstacle_into_path,
     update_scene_context_from_objects,
 )
+from ..perception import audit
+from ..perception.config import PRIVILEGED, VISION
+
+
+def _sensor_obs(obs: Dict[str, Any]) -> Dict[str, Any]:
+    """Only what a real robot observes: proprioception and camera images.
+    Drops LIBERO's per-object pose keys (<obj>_pos, <obj>_to_robot0_eef_pos,
+    object-state) so vision mode cannot read them by accident."""
+    return {
+        k: v
+        for k, v in (obs or {}).items()
+        if (k.startswith("robot0_") and "object" not in k) or k.endswith("_image") or k.endswith("_depth")
+    }
 
 
 def _libero_obs_array(obs: dict[str, Any], candidates: list[str], contains: list[str] | None = None) -> np.ndarray:
@@ -86,6 +99,7 @@ class LiberoManipulationEnv(BaseManipulationEnv):
         mpc_timing_deadline_weight: float = 55.0,
         mpc_timing_window_weight: float = 10.0,
         mpc_timing_early_hold_weight: float = 260.0,
+        perceive: bool = True,
     ) -> None:
         self._episode_terminated = False
         self._last_obs: Dict[str, Any] = {}
@@ -117,6 +131,20 @@ class LiberoManipulationEnv(BaseManipulationEnv):
         # a throwaway env for a single reset and don't pass horizon at all.
         self.horizon = int(horizon if horizon is not None else self.libero_cfg.get("horizon", 600))
         self._task_info = load_libero_task_from_scene_context(self.scene_context)
+        perception_cfg = self.platform_cfg.get("perception", {}) or {}
+        self.perception_mode = str(perception_cfg.get("mode", PRIVILEGED))
+        audit.set_vision_active(self.perception_mode == VISION)
+        self.perception = None
+        if self.perception_mode == VISION and perceive:
+            from ..perception.config import PerceptionConfig
+            from ..perception.vision import VisionPerception
+
+            self.perception = VisionPerception(
+                PerceptionConfig.from_dict(perception_cfg.get("vision")),
+                instruction=perception_cfg.get("instruction") or self._task_info.language or "",
+                prior=self.scene_context.get("perception_world"),
+                debug_dir=perception_cfg.get("debug_dir"),
+            )
         if not self._task_info.bddl_file:
             raise ValueError(
                 "LIBERO backend needs platform.libero.bddl_file or platform.libero.suite + task_id."
@@ -182,10 +210,15 @@ class LiberoManipulationEnv(BaseManipulationEnv):
         # floor domains (e.g. libero_object's EmptyArena) don't have a table at
         # all, so fall back to floor level (z=0) rather than the tabletop height.
         table_z = float(self.platform_cfg.get("table_z", 0.0))
-        try:
-            table_z = float(self.env.env.model.mujoco_arena.table_offset[2])
-        except Exception:
-            pass
+        if self.perception is not None:
+            # Perceived support plane from the scene snapshot; refined again at
+            # this env's own first keyframe.
+            table_z = float((self.scene_context.get("perception_world") or {}).get("support_z") or table_z)
+        else:
+            try:
+                table_z = float(self.env.env.model.mujoco_arena.table_offset[2])
+            except Exception:
+                pass
 
         exec_proxy = self.scene_context.get("execution_proxy", {}) or {}
 
@@ -285,6 +318,13 @@ class LiberoManipulationEnv(BaseManipulationEnv):
                 break
         self._grasped_latch = False
         self._active_obj_at_grasp = None
+        if self.perception_mode == VISION:
+            obs = _sensor_obs(obs)
+        if self.perception is not None:
+            self.perception.attach(self.env.env)
+            world = self.perception.discover()
+            if world.support_z is not None:
+                self._set_table_z(world.support_z)
         self._last_obs = obs
         self._refresh_scene_objects(obs)
         # The keep-out circle was centred on the obstacle's position in the
@@ -354,13 +394,35 @@ class LiberoManipulationEnv(BaseManipulationEnv):
         if done:
             info = dict(info or {})
             info["libero_success"] = True
+        if self.perception_mode == VISION:
+            obs = _sensor_obs(obs)
+        if self.perception is not None:
+            self.perception.on_step(action)
         self._last_obs = obs
         self._refresh_scene_objects(obs)
         return obs, reward, False, info
 
+    def _set_table_z(self, table_z: float) -> None:
+        """Move every height derived from the table with it."""
+        delta = float(table_z) - float(self.table_z)
+        self.table_z = float(table_z)
+        self.carry_z = float(self.carry_z) + delta
+        self.retreat_z = float(self.retreat_z) + delta
+
+    def perception_keyframe(self, reason: str = "") -> None:
+        """Re-perceive the scene (vision mode only); called at subtask starts."""
+        if self.perception is not None:
+            self.perception.refresh(reason=reason)
+            self._refresh_scene_objects(self._last_obs)
+
     # ----------------------------------------------------- observation api
 
     def _refresh_scene_objects(self, obs: Dict[str, Any]) -> None:
+        if self.perception_mode == VISION:
+            self.scene_objects.clear()
+            if self.perception is not None:
+                self.scene_objects.update(self.perception.object_positions())
+            return
         objects = infer_objects_from_obs(obs)
         if not objects:
             objects = infer_objects_from_mujoco(self.env)
@@ -411,6 +473,9 @@ class LiberoManipulationEnv(BaseManipulationEnv):
         # Best-effort fallback to first discovered object.
         if self.scene_objects:
             return next(iter(self.scene_objects.values())).astype(np.float32).copy()
+        if self.perception_mode == VISION:
+            # Nothing perceived (e.g. an image-capture-only env): no object to report.
+            return self._eef_pos(obs)
         objects = infer_objects_from_obs(obs)
         if objects:
             xyz = next(iter(objects.values())).get("xyz")
@@ -454,6 +519,9 @@ class LiberoManipulationEnv(BaseManipulationEnv):
         return None
 
     def _is_grasped(self) -> bool:
+        if self.perception is not None:
+            return self.perception.is_grasped()
+        audit.note("contact-based _is_grasped")
         # Prefer backend grasp check if available.
         try:
             obj = self._active_pick_object()
@@ -510,6 +578,7 @@ class LiberoManipulationEnv(BaseManipulationEnv):
         # this, a genuinely successful place gets reported as a failure
         # because System 1's release/retreat state machine never gets to run
         # another step.
+        audit.note("LIBERO _check_success", allowed="benchmark success check")
         try:
             return bool(self.env.env._check_success())
         except Exception:
@@ -575,6 +644,9 @@ class LiberoManipulationEnv(BaseManipulationEnv):
                 return np.zeros((int(height), int(width), 3), dtype=np.uint8)
 
     def relocalize_scene(self) -> Dict[str, Any]:
+        if self.perception is not None:
+            self.perception_keyframe(reason="relocalize")
+            return dict(self.scene_objects)
         if self.last_raw_obs is not None:
             self._refresh_scene_objects(self.last_raw_obs)
         return dict(self.scene_objects)
@@ -606,6 +678,7 @@ class LiberoManipulationEnv(BaseManipulationEnv):
             camera_name=camera_name,
             camera_height=height,
             camera_width=width,
+            perceive=False,
         )
         try:
             obs = env.reset()
@@ -623,9 +696,64 @@ class LiberoManipulationEnv(BaseManipulationEnv):
         env = LiberoManipulationEnv(scene_context=scene_context, has_renderer=False)
         try:
             obs = env.reset()
+            if env.perception is not None:
+                return apply_libero_experiment_geometry(perceived_scene_context(scene_context, env))
             objects = infer_objects_from_obs(obs) or infer_objects_from_mujoco(env.env)
             ctx = update_scene_context_from_objects(scene_context, objects, source="libero_snapshot")
             ctx = merge_drawer_fixtures_into_scene_context(ctx, env.env)
             return apply_libero_experiment_geometry(ctx)
         finally:
             env.close()
+
+
+def perceived_scene_context(scene_context: dict[str, Any], env: "LiberoManipulationEnv") -> dict[str, Any]:
+    """scene_context entities/geometry from the vision pipeline's world
+    estimate instead of simulator state. Fixture entities (drawers, cabinet
+    frames, the table) come from the same discovery code as privileged mode,
+    run over the perceived twin."""
+    import copy
+
+    world = env.perception.world
+    ctx = copy.deepcopy(scene_context)
+    # Drop entities a previous snapshot or the template derived from simulator names.
+    ctx["entities"] = [e for e in ctx.get("entities", []) if e.get("source") == "manual"]
+    ctx["geometry"] = {}
+    ctx.setdefault("live_scene_state", {})["objects"] = {}
+    category_counts: dict[str, int] = {}
+    for obj in world.objects.values():
+        category_counts[obj.category] = category_counts.get(obj.category, 0) + 1
+
+    scene = env.perception.scene_query()
+    objects: dict[str, dict[str, Any]] = {}
+    for obj in world.objects.values():
+        ext = scene.body_collision_extent_world(obj.name)
+        radius = float(max(ext.half_extents[0], ext.half_extents[1])) if ext is not None else 0.045
+        aliases = sorted({obj.name, obj.name.replace("_", " ")} | ({obj.category} if category_counts[obj.category] == 1 else set()))
+        ent = {
+            "name": obj.name,
+            "role": obj.role,
+            "object_class": obj.category,
+            "aliases": aliases,
+            "notes": " ".join(
+                p for p in ("Perceived from camera images.", obj.description and f"Appearance: {obj.description}.", obj.relation and f"It {obj.relation} (measured from depth).") if p
+            ),
+        }
+        if obj.is_static_fixture:
+            top = float(obj.shape.top_z)
+            ctx["entities"].append(ent)
+            ctx["geometry"][obj.name] = {
+                "xy": [float(obj.pos[0]), float(obj.pos[1])],
+                "xyz": [float(obj.pos[0]), float(obj.pos[1]), top],
+                "z": top,
+                "radius": radius,
+            }
+            continue
+        ctx["entities"].append(ent)
+        objects[obj.name] = {"xyz": [float(v) for v in obj.pos], "radius": radius, "source": "vision"}
+
+    ctx = update_scene_context_from_objects(ctx, objects, source="vision")
+    ctx = merge_drawer_fixtures_into_scene_context(ctx, env.env)
+    ctx["perception_world"] = world.to_json()
+    motion = ctx.setdefault("platform", {}).setdefault("libero", {}).setdefault("motion", {})
+    motion.setdefault("collision", {})["permit_gripper_target_contact"] = True
+    return ctx

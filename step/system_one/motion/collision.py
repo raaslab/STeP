@@ -148,6 +148,15 @@ class CollisionChecker:
         LIBERO object geoms (e.g. alphabet_soup_1_g7) don't substring-match
         their own body name (alphabet_soup_1_main).
         """
+        if (
+            phase == CollisionPhase.TERMINAL_APPROACH
+            and self.config.permit_gripper_target_contact
+            and (
+                (g1 in self.finger_geom_ids and g2 in target_object_geom_ids)
+                or (g2 in self.finger_geom_ids and g1 in target_object_geom_ids)
+            )
+        ):
+            return True
         fingerpad_touch = g1 in self.fingerpad_geom_ids or g2 in self.fingerpad_geom_ids
         if not fingerpad_touch:
             return False

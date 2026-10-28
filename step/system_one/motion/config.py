@@ -56,6 +56,12 @@ class CollisionConfig:
     # penetrate the object 1.1 to 6.9 mm at the palm and lift it successfully, so
     # rejecting that outright threw away real grasps.
     palm_overlap_tolerance_m: float = 0.0
+    # During TERMINAL_APPROACH, let the fingers (never the palm or arm) touch
+    # the grasp target. For perceived targets: a top-surface reconstruction can't
+    # show overhangs, so a bowl's flared wall is solid underneath and blocks
+    # the outer finger of every rim grasp (MoveIt's allowed-collision matrix
+    # and cuRobo excuse the target the same way).
+    permit_gripper_target_contact: bool = False
     # STL G(Safe(obj)) keep-out zones, enforced at plan/control time. Empty by default (no constraints).
     keepout_zones: list["KeepoutZone"] = field(default_factory=list)
     # STL G(Upright(obj, deg)): the most the carried object may tip from how it

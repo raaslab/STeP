@@ -21,6 +21,8 @@ import sys
 
 import numpy as np
 
+from ..perception import audit
+
 
 def _import_libero_benchmark():
     """Return (benchmark_module, get_libero_path).
@@ -239,6 +241,8 @@ def infer_objects_from_obs(obs: dict[str, Any]) -> dict[str, dict[str, Any]]:
             quat = _as_float_list(value, 4)
             if quat is not None and base in objects:
                 objects[base]["quat"] = quat
+    if objects:
+        audit.note("infer_objects_from_obs")
     return objects
 
 
@@ -252,6 +256,7 @@ def infer_objects_from_mujoco(env: Any) -> dict[str, dict[str, Any]]:
     sim = getattr(env, "sim", None) or getattr(getattr(env, "env", None), "sim", None)
     if sim is None:
         return out
+    audit.note("infer_objects_from_mujoco")
     try:
         model = sim.model
         data = sim.data
@@ -1393,6 +1398,7 @@ def relocate_obstacle_into_path(env: Any, scene_context: dict[str, Any], bddl_fi
 
     and the task is skipped only when that window is genuinely empty.
     """
+    audit.note("relocate_obstacle_into_path", allowed="experiment scene construction")
     experiment = (scene_context.get("platform", {}) or {}).get("libero_experiment", {}) or {}
     avoid = experiment.get("avoid_region") or {}
     if not avoid or not avoid.get("place_in_path"):

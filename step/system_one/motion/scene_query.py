@@ -25,6 +25,8 @@ except ImportError as exc:  # pragma: no cover - mujoco is a hard dependency of 
         "dependency via robosuite/LIBERO)."
     ) from exc
 
+from ...perception import audit
+
 
 def wxyz_to_xyzw(q: np.ndarray) -> np.ndarray:
     q = np.asarray(q, dtype=np.float64).reshape(4)
@@ -173,7 +175,14 @@ class SceneQuery:
         """Clone a fresh MjData for sim's model and sync qpos/qvel from
         the live sim once. The returned SceneQuery's data is fully
         independent of sim.data from this point on.
+
+        In vision perception mode (step.perception) this is the perceived
+        twin instead: the real robot plus only what perception reconstructed.
         """
+        perception = getattr(sim, "_step_perception", None)
+        if perception is not None:
+            return perception.scene_query()
+        audit.note("SceneQuery.from_robosuite_sim")
         raw_model = sim.model._model
         raw_data = mujoco.MjData(raw_model)
         raw_data.qpos[:] = sim.data.qpos
@@ -743,6 +752,7 @@ class SceneQuery:
     ) -> tuple[np.ndarray, np.ndarray]:
         from robosuite.utils.camera_utils import get_real_depth_map
 
+        audit.note("ground-truth segmentation render")
         sim = self._render_sim
         seg, depth_normalized = sim.render(
             width=width, height=height, camera_name=camera_name, depth=True, segmentation=True

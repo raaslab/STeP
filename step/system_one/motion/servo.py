@@ -38,6 +38,12 @@ def wait_steps(adapter, n_steps: int, gripper_cmd: float, step_callback=None) ->
     return steps
 
 
+# A settle whose position has plateaued is still making progress while its
+# orientation keeps improving by more than this over the same window -- a
+# knob turn about the grasp point is almost pure rotation.
+STALL_ORIENTATION_TOL_RAD = 0.01
+
+
 def is_settle_stalled(recent_errors: list[float], window: int, tol_m: float) -> bool:
     """True once a settle loop's rolling window of position errors shows no
     meaningful improvement over window consecutive steps.
@@ -323,6 +329,7 @@ def track_and_settle(
     stalled = False
     wrong_obstacle_contacts: list | None = None
     recent_pos_errs: list[float] = []
+    recent_ori_errs: list[float] = []
     t0 = 0
     held_steps = 0
     while local_steps < tracking_budget if max_reference_lead_m is not None else t0 < tracking_budget:
@@ -394,7 +401,10 @@ def track_and_settle(
                 converged = True
                 break
             recent_pos_errs.append(pos_err)
-            if is_settle_stalled(recent_pos_errs, stall_window_steps, stall_position_tol_m):
+            recent_ori_errs.append(ori_err)
+            if is_settle_stalled(recent_pos_errs, stall_window_steps, stall_position_tol_m) and is_settle_stalled(
+                recent_ori_errs, stall_window_steps, STALL_ORIENTATION_TOL_RAD
+            ):
                 stalled = True
                 if check_wrong_obstacle:
                     stall_scene = SceneQuery.from_robosuite_sim(adapter.env.env.sim)

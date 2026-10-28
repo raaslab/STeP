@@ -95,6 +95,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Override the keep-out radius (m) for every task. Difficulty knob.",
     )
+    p.add_argument(
+        "--perception",
+        default="privileged",
+        choices=["privileged", "vision"],
+        help="Passed through to libero_runner: simulator state or RGB-D perception.",
+    )
     p.add_argument("--dry-run", action="store_true")
     return p.parse_args()
 
@@ -242,6 +248,8 @@ def _build_command(
             cmd += ["--avoid-margin", str(float(margin))]
     if args.model:
         cmd += ["--model", args.model]
+    if args.perception != "privileged":
+        cmd += ["--perception", args.perception]
     if args.compiled_plan:
         cmd += ["--compiled-plan", args.compiled_plan]
     if not args.no_video:

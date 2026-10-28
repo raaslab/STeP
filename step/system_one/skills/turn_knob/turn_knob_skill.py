@@ -8,10 +8,10 @@ grasping, so it gets its own small skill rather than being forced through PickSk
 (qpos >= 0.5) so this skill's success check agrees with ground truth;
 overridable per-knob via KnobConfig.turn_on_qpos_threshold.
 
-**Grasp geometry**: a knob's diameter is typically wider than the gripper's
-max opening, so this grips a narrow chord near the outer edge instead --
-for radius R, offset d = sqrt(R^2 - (w/2)^2) from centre gives a chord of
-width w. The closing axis there is tangential, not radial, since a solid knob has no "inside" to straddle."""
+**Grasp geometry**: the hand grips the knob's handle (its raised bar, the
+tallest part) at its midpoint, fingers closing across the bar's thin side. Gripping a chord at the knob's outer edge instead left
+only the thin base disc to hold, right against the stove: the hand stalled
+short and swept the knob round rather than turning it."""
 
 from __future__ import annotations
 
@@ -41,15 +41,13 @@ class KnobConfig:
     knobs/dials only)."""
 
     approach_standoff_m: float = 0.06
-    # Target chord width near the rim (see module docstring) -- must stay
-    # comfortably under the gripper's real max opening.
-    grasp_chord_width_m: float = 0.035
-    # Vertical offsets along the rotation axis, tried with the angle search
-    # below -- a knob's non-cylindrical mesh means only a real contact check finds which height has material.
-    grasp_height_margins_m: tuple[float, ...] = (0.01, 0.0, 0.02, 0.015, 0.03, 0.005)
-    # Unlike a drawer handle's single position, a knob has a full circle of
-    # equally-valid grasp points, so this many evenly-spaced angles are swept too.
-    radial_angle_samples: int = 16
+    # How far below the grip's top the TCP sits, tried in order -- only a
+    # real contact check finds which depth has material between the pads.
+    grasp_depths_below_top_m: tuple[float, ...] = (0.015, 0.02, 0.01, 0.025, 0.03)
+    # Hand yaw offsets (rad) from "fingers closing across the grip", for IK
+    # room; a grip with no clear long direction sweeps half a turn instead.
+    grasp_yaw_offsets_rad: tuple[float, ...] = (0.0, 0.26, -0.26, 0.52, -0.52)
+    round_grip_yaw_samples: int = 8
     # Same "try a few, take the first feasible" shape as
     # DrawerConfig.pose_selection_attempts, spent per angle.
     pose_selection_attempts: int = 6
@@ -63,6 +61,9 @@ class KnobConfig:
     # How far past turn_on_qpos_threshold to target, rather than the joint's
     # full range end -- cranking to the mechanical stop drags the arm through the surrounding grate/table.
     turn_on_safety_margin_rad: float = 0.6
+    # A grasp counts as turning far enough once its planned turn passes the
+    # threshold by this much; beyond that, squareness on the handle matters more.
+    turn_reach_margin_rad: float = 0.1
     retreat_m: float = 0.06
     retreat_steps: int = 40
 
@@ -72,16 +73,6 @@ def _unit(v: np.ndarray) -> np.ndarray:
     if n < 1e-9:
         raise ValueError("cannot normalize a near-zero vector")
     return v / n
-
-
-def _arbitrary_perpendicular(axis_world: np.ndarray) -> np.ndarray:
-    """Any one unit vector perpendicular to axis_world -- there's no
-    single "correct" starting angular position around a knob, so this just
-    picks a well-conditioned one (avoids the degenerate cross-product case
-    where the reference happens to be parallel to the axis)."""
-    axis = _unit(axis_world)
-    reference = np.array([1.0, 0.0, 0.0]) if abs(axis[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
-    return _unit(np.cross(axis, reference))
 
 
 def _axis_angle_to_rotmat(axis_world: np.ndarray, angle_rad: float) -> np.ndarray:
@@ -123,15 +114,39 @@ def _grip_contact_depth(
     return deepest
 
 
-def _orientation_for_tangential_grasp(approach_world: np.ndarray, radial_world: np.ndarray) -> np.ndarray:
+def _orientation_for_grasp(approach_world: np.ndarray, closing_world: np.ndarray) -> np.ndarray:
     """Hand-frame quaternion (WXYZ) whose local +Z is approach_world and
-    whose local +X (closing axis) is tangential -- perpendicular to both the
-    approach direction and the radial direction to the grasp point on the knob's rim."""
+    whose local +X (closing axis) is closing_world."""
     z_axis = _unit(approach_world)
-    x_axis = _unit(np.cross(radial_world, z_axis))
+    x_axis = _unit(closing_world - z_axis * float(closing_world @ z_axis))
     y_axis = np.cross(z_axis, x_axis)
-    R = np.column_stack([x_axis, y_axis, z_axis])
-    return rotmat_to_quat_wxyz(R)
+    return rotmat_to_quat_wxyz(np.column_stack([x_axis, y_axis, z_axis]))
+
+
+def _knob_grip(
+    scene: SceneQuery, knob_body: str, axis_world: np.ndarray, center_world: np.ndarray
+) -> tuple[np.ndarray, float, np.ndarray, float, float]:
+    """The knob's raised grip, from its own collision geometry: the upper
+    half of the knob along its axis. Returns (grip centre in the mounting
+    plane, top height above that plane, long direction in the plane,
+    half-thickness across it, elongation)."""
+    bid = scene.body_id(knob_body)
+    R = scene.data.xmat[bid].reshape(3, 3)
+    pts = scene.body_surface_points_dense_local(knob_body) @ R.T + scene.data.xpos[bid]
+    h = (pts - center_world) @ axis_world
+    top_h = float(h.max())
+    top = pts[h > 0.5 * (top_h + float(h.min()))]
+    rel = (top - center_world) - np.outer((top - center_world) @ axis_world, axis_world)
+    evals, evecs = np.linalg.eigh(np.cov((rel - rel.mean(axis=0)).T))
+    long_dir = _unit(evecs[:, -1] - axis_world * float(evecs[:, -1] @ axis_world))
+    thin_dir = np.cross(axis_world, long_dir)
+    # Midpoint of the handle's extent: surface samples are uneven across
+    # geoms, which pulls their mean toward the knob's pointer end.
+    along, across = rel @ long_dir, rel @ thin_dir
+    offset = 0.5 * (along.min() + along.max()) * long_dir + 0.5 * (across.min() + across.max()) * thin_dir
+    thin_half = 0.5 * float(across.max() - across.min())
+    elongation = float(np.sqrt(evals[-1] / max(evals[-2], 1e-12)))
+    return center_world + offset, top_h, long_dir, thin_half, elongation
 
 
 class TurnKnobSkill:
@@ -183,13 +198,19 @@ class TurnKnobSkill:
             # correctly configured knob, but turn as far as possible rather than refuse outright.
             target_qpos = qpos_hi if abs(qpos_hi - current_qpos) >= abs(qpos_lo - current_qpos) else qpos_lo
 
-        # Grasp point: a chord near the knob's outer edge, narrow enough to
-        # fit the gripper -- d = sqrt(R^2 - (w/2)^2) for target chord width w.
-        target_width = min(cfg.grasp_chord_width_m, 2.0 * radius_m * 0.99)
-        d = float(np.sqrt(max(radius_m**2 - (target_width / 2.0) ** 2, 0.0)))
-        radial0 = _arbitrary_perpendicular(axis_world)
+        # Grasp the grip at its centre, fingers closing across its thin side.
+        grip_center, grip_top_h, grip_long, grip_thin_half, elongation = _knob_grip(
+            scene, knob.knob_body, axis_world, center_world
+        )
+        closing0 = np.cross(axis_world, grip_long)
+        if elongation >= 1.3:
+            # Either way round closes across the handle; the flip gives the wrist more room.
+            yaws = list(cfg.grasp_yaw_offsets_rad) + [y + np.pi for y in cfg.grasp_yaw_offsets_rad]
+        else:
+            yaws = [np.pi * i / cfg.round_grip_yaw_samples for i in range(cfg.round_grip_yaw_samples)]
         approach_world = -axis_world  # top-down onto the knob, same convention as every other grasp in this package
-        finger_half_travel = float(np.clip(target_width / 2.0, 0.0, 0.04))
+        # Close just past the grip's faces so the pads register real contact.
+        finger_half_travel = float(np.clip(grip_thin_half - 0.002, 0.0, 0.04))
         finger_closed_qpos = np.array([finger_half_travel, -finger_half_travel])
 
         # Grip choice and turn feasibility are coupled: a deepest-gripping
@@ -197,16 +218,18 @@ class TurnKnobSkill:
         best_grasp_ik = best_standoff_ik = best_turn_ik = None
         best_turn_fraction = -1.0
         best_depth = 0.0
-        best_radial = best_grasp_quat = best_grasp_center_world = None
+        best_grasp_pos = best_grasp_quat = None
+        best_key = None
         last_rejection = "no_ik_attempted"
         full_delta = target_qpos - current_qpos
-        for margin in cfg.grasp_height_margins_m:
-            grasp_center_world = center_world + margin * axis_world
-            for angle_idx in range(cfg.radial_angle_samples):
-                angle = 2.0 * np.pi * angle_idx / cfg.radial_angle_samples
-                radial = _axis_angle_to_rotmat(axis_world, angle) @ radial0
-                grasp_pos = grasp_center_world + d * radial
-                grasp_quat = _orientation_for_tangential_grasp(approach_world, radial)
+        for depth_below_top in cfg.grasp_depths_below_top_m:
+            height = max(grip_top_h - depth_below_top, 0.0)
+            # The pivot at this height: the turn rotates the grasp about it.
+            grasp_center_world = center_world + height * axis_world
+            grasp_pos = grip_center + height * axis_world
+            for yaw in yaws:
+                closing = _axis_angle_to_rotmat(axis_world, yaw) @ closing0
+                grasp_quat = _orientation_for_grasp(approach_world, closing)
                 candidate_grasp_ik = _solve_ik_robust(
                     self.ik_solver, scene, grasp_pos, grasp_quat, start_q, self._rng, n_restarts=cfg.pose_selection_attempts
                 )
@@ -274,15 +297,19 @@ class TurnKnobSkill:
                     last_rejection = "no_feasible_turn_target"
                     continue
 
-                # Largest deliverable turn wins outright; grip depth only
-                # breaks ties between candidates that turn equally far.
-                if candidate_turn_fraction < best_turn_fraction:
+                # Once a grasp's turn clears the "on" threshold with margin, the
+                # squarest grasp on the handle wins: a diagonal pinch slips
+                # ~15 deg before it bites, so its larger planned turn isn't
+                # real. Otherwise the largest turn wins. Grip depth breaks ties.
+                off_square = abs(float(np.sin(yaw)))
+                reaches = current_qpos + candidate_turn_fraction * full_delta >= threshold + cfg.turn_reach_margin_rad
+                key = (reaches, -off_square, candidate_turn_fraction, -depth) if reaches else (reaches, candidate_turn_fraction, -off_square, -depth)
+                if best_key is not None and key <= best_key:
                     continue
-                if candidate_turn_fraction == best_turn_fraction and depth >= best_depth:
-                    continue
+                best_key = key
                 best_grasp_ik, best_standoff_ik, best_turn_ik = candidate_grasp_ik, candidate_standoff_ik, candidate_turn_ik
                 best_turn_fraction, best_depth = candidate_turn_fraction, depth
-                best_radial, best_grasp_quat, best_grasp_center_world = radial, grasp_quat, grasp_center_world
+                best_grasp_pos, best_grasp_quat = grasp_pos, grasp_quat
 
         grasp_ik, standoff_ik, turn_ik = best_grasp_ik, best_standoff_ik, best_turn_ik
         if grasp_ik is None or standoff_ik is None or turn_ik is None:
@@ -292,14 +319,13 @@ class TurnKnobSkill:
                 diagnostics={
                     "detail": last_rejection,
                     "knob": knob.knob_body,
-                    "grasp_height_margins_m": list(cfg.grasp_height_margins_m),
-                    "radial_angle_samples": cfg.radial_angle_samples,
+                    "grasp_depths_below_top_m": list(cfg.grasp_depths_below_top_m),
+                    "grasp_yaws_rad": [float(y) for y in yaws],
                     "pose_selection_attempts": cfg.pose_selection_attempts,
                     "tried_fractions": list(cfg.turn_fraction_fallbacks),
                 },
             )
-        radial0, grasp_quat, grasp_center_world = best_radial, best_grasp_quat, best_grasp_center_world
-        grasp_pos = grasp_center_world + d * radial0
+        grasp_pos, grasp_quat = best_grasp_pos, best_grasp_quat
         turned_q = turn_ik.q
         turn_fraction_used = best_turn_fraction
 
@@ -341,7 +367,8 @@ class TurnKnobSkill:
                 "radius_m": radius_m,
                 "grasp_position": grasp_pos.tolist(),
                 "grasp_quat_wxyz": grasp_quat.tolist(),
-                "grasp_chord_width_m": target_width,
+                "grip_center": grip_center.tolist(),
+                "grip_thin_half_m": grip_thin_half,
                 "qpos_lo": qpos_lo,
                 "qpos_hi": qpos_hi,
                 "current_qpos": current_qpos,
