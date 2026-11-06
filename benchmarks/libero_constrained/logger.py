@@ -74,7 +74,7 @@ class BenchmarkLogger:
         self.predicates = [list(p) for p in goal] + [list(p) for p in extra_predicates]
         self.predicate_names = [" ".join(str(x) for x in p) for p in self.predicates]
 
-        self.rows = {k: [] for k in ("eef", "gripper", "held", "pos", "quat", "joints", "predicates")}
+        self.rows = {k: [] for k in ("eef", "eef_rot", "gripper", "held", "pos", "quat", "joints", "predicates")}
 
     def _subtree(self, root):
         m = self.sim.model
@@ -121,6 +121,9 @@ class BenchmarkLogger:
         d = self.sim.data
         r = self.rows
         r["eef"].append(np.array(d.site_xpos[self._grip_site], dtype=np.float32))
+        # The hand's orientation, so a carried object's tilt can be split into
+        # the hand tipping vs the object pivoting in the fingers.
+        r["eef_rot"].append(np.array(d.site_xmat[self._grip_site], dtype=np.float32).reshape(3, 3))
         r["gripper"].append(float(d.qpos[self._finger_q[0]] - d.qpos[self._finger_q[1]]))
         r["held"].append(self._held())
         r["pos"].append(np.array([d.body_xpos[b] for b in self._bodies], dtype=np.float32))
@@ -145,6 +148,7 @@ class BenchmarkLogger:
             object_pos=np.stack(r["pos"]) if T else np.zeros((0, len(self.names), 3), np.float32),
             object_quat_wxyz=np.stack(r["quat"]) if T else np.zeros((0, len(self.names), 4), np.float32),
             eef_pos=np.stack(r["eef"]) if T else np.zeros((0, 3), np.float32),
+            eef_rot=np.stack(r["eef_rot"]) if T else np.zeros((0, 3, 3), np.float32),
             gripper_width=np.array(r["gripper"], dtype=np.float32),
             held_index=np.array(r["held"], dtype=np.int16),
             joint_names=np.array(self.joint_names, dtype=object),

@@ -1,5 +1,83 @@
 # Running SmolVLA (or any policy) on LIBERO-Constrained
 
+## v2 (current: `tasks_v2.json`, 121 tasks)
+
+v2 replaces the invisible zones with real obstacles. 70 of the 121 tasks are
+LIBERO's scene plus one added object (milk carton, wine bottle, ketchup, orange
+juice), with their own BDDL file and start states. Every rule is an STL formula
+in the task's `spec`, scored by `spec.py`. Three things differ from v1 below:
+
+1. **Scene.** If a task has `bddl`, build the env from that file and take the
+   start state from its `init_states` file. Otherwise use stock LIBERO as before.
+2. **Log with `BenchmarkLogger`** (`logger.py`), not `record.py`. The v2 rules
+   also read drawer/knob joints, LIBERO's own goal predicates and which object
+   the fingers hold; only `BenchmarkLogger` records those.
+3. **Score with the v2 manifest** (`LIBERO_CONSTRAINED_MANIFEST`, below).
+
+```python
+import json, os, pathlib
+import numpy as np
+from libero.libero import benchmark, get_libero_path
+from libero.libero.envs import OffScreenRenderEnv
+from benchmarks.libero_constrained.logger import BenchmarkLogger
+
+REPO = pathlib.Path(".")                         # the STeP checkout
+tasks = json.loads((REPO / "benchmarks/libero_constrained/tasks_v2.json").read_text())["tasks"]
+
+for task in tasks:
+    bm = benchmark.get_benchmark_dict()[task["suite"]]()
+    lt = bm.get_task(task["task_id"])
+    if task.get("bddl"):                         # LIBERO's scene + one obstacle
+        bddl = str(REPO / task["bddl"])
+        init = np.load(REPO / task["init_states"])["states"][task["init_state_id"]]
+    else:
+        bddl = os.path.join(get_libero_path("bddl_files"), lt.problem_folder, lt.bddl_file)
+        init = bm.get_task_init_states(task["task_id"])[task["init_state_id"]]
+
+    env = OffScreenRenderEnv(bddl_file_name=bddl, camera_heights=256, camera_widths=256)
+    env.seed(0)
+    env.reset()
+    obs = env.set_init_state(init)
+    for _ in range(15):
+        obs = env.step([0] * 7)[0]
+
+    out = pathlib.Path("outputs/smolvla_v2") / f"{task['id'].replace('/', '_')}_s{task['init_state_id']}_on"
+    out.mkdir(parents=True, exist_ok=True)
+    log = BenchmarkLogger(env)
+    done = False
+    for _ in range(600):
+        action = policy.select_action(obs, task["prompt"])   # NOT lt.language
+        obs, reward, done, info = env.step(action)
+        log.step()
+        if done:
+            break
+    log.save(out / "benchmark_log.npz")
+    (out / "execution_summary.json").write_text(json.dumps({
+        "success": bool(done), "records": [],
+        "provenance": {"model": "HuggingFaceVLA/smolvla_libero", "benchmark_task": task["id"]},
+    }))
+    env.close()
+```
+
+Score (the variable is required; without it `score.py` falls back to v1's `tasks.json`):
+
+```
+LIBERO_CONSTRAINED_MANIFEST=benchmarks/libero_constrained/tasks_v2.json \
+  python benchmarks/libero_constrained/score.py outputs/smolvla_v2
+```
+
+On torch ≥ 2.6, LIBERO's own start-state files need
+`torch.load(..., weights_only=False)` (see "Things that will bite" below); the
+obstacle tasks' `.npz` files do not.
+
+Nothing has to be reported by hand: no `gripper_closed`, no `over_goal`, no
+subtasks. Every v2 task is scoreable from the log alone. Zip `outputs/smolvla_v2`
+and send it back.
+
+---
+
+## v1 (`tasks.json`, 66 tasks)
+
 This benchmark is **not tied to STeP**. No scene is modified, no object is moved,
 and the keep-out zone is a marked region rather than a physical body. If your
 policy already runs LIBERO, it runs this: you substitute one string and log a few

@@ -14,7 +14,7 @@
    "suite": "libero_10",
    "task_id": 4,
    "init_state_id": 0,
-   "prompt": "put the white mug on the left plate and put the yellow and white mug on the right plate, leaving it about 5 cm to the left of the centre of the left plate",
+   "prompt": "put the white mug on the left plate and put the yellow and white mug on the right plate, leaving the white mug about 5 cm to the left of the centre of the left plate",
    "spec": {
     "end": {
      "and": [
@@ -22,7 +22,7 @@
        "pred": [
         {
          "rel": [
-          "white_yellow_mug_1",
+          "porcelain_mug_1",
           "plate_1"
          ],
          "axis": "y"
@@ -35,7 +35,7 @@
        "pred": [
         {
          "rel": [
-          "white_yellow_mug_1",
+          "porcelain_mug_1",
           "plate_1"
          ],
          "axis": "y"
@@ -61,13 +61,13 @@
    "suite": "libero_10",
    "task_id": 4,
    "init_state_id": 0,
-   "prompt": "put the white mug on the left plate and put the yellow and white mug on the right plate, leaving it on the side of the left plate nearer the red coffee mug",
+   "prompt": "put the white mug on the left plate and put the yellow and white mug on the right plate, leaving the white mug on the side of the left plate nearer the red coffee mug",
    "spec": {
     "end": {
      "pred": [
       {
        "rel": [
-        "white_yellow_mug_1",
+        "porcelain_mug_1",
         "plate_1"
        ],
        "axis": "y"
@@ -91,7 +91,7 @@
    "suite": "libero_10",
    "task_id": 6,
    "init_state_id": 0,
-   "prompt": "put the white mug on the plate and put the chocolate pudding to the right of the plate, leaving it about 5 cm to the left of the centre of the plate",
+   "prompt": "put the white mug on the plate and put the chocolate pudding to the right of the plate, leaving the white mug about 5 cm to the left of the centre of the plate",
    "spec": {
     "end": {
      "and": [
@@ -138,7 +138,7 @@
    "suite": "libero_10",
    "task_id": 6,
    "init_state_id": 0,
-   "prompt": "put the white mug on the plate and put the chocolate pudding to the right of the plate, leaving it on the side of the plate nearer the chocolate pudding",
+   "prompt": "put the white mug on the plate and put the chocolate pudding to the right of the plate, leaving the white mug on the right side of the plate",
    "spec": {
     "end": {
      "pred": [
@@ -659,9 +659,9 @@
    "suite": "libero_10",
    "task_id": 0,
    "init_state_id": 0,
-   "prompt": "put both the alphabet soup and the tomato sauce in the basket, holding it steady above the target for 2 seconds before letting go",
+   "prompt": "put both the alphabet soup and the tomato sauce in the basket, holding each one steady above the target for 2 seconds before letting go",
    "spec": {
-    "or": [
+    "and": [
      {
       "F": {
        "G": {
@@ -973,9 +973,9 @@
    "suite": "libero_10",
    "task_id": 4,
    "init_state_id": 0,
-   "prompt": "put the white mug on the left plate and put the yellow and white mug on the right plate, holding it steady above the target for 2 seconds before letting go",
+   "prompt": "put the white mug on the left plate and put the yellow and white mug on the right plate, holding each one steady above the target for 2 seconds before letting go",
    "spec": {
-    "or": [
+    "and": [
      {
       "F": {
        "G": {
@@ -1155,7 +1155,7 @@
          {
           "dist": [
            "akita_black_bowl_1",
-           "flat_stove_1"
+           "flat_stove_1_cook_region"
           ]
          },
          "<=",
@@ -1990,7 +1990,7 @@
            {
             "dist": [
              "moka_pot_1",
-             "flat_stove_1"
+             "flat_stove_1_cook_region"
             ]
            },
            "<=",
@@ -3221,7 +3221,7 @@
    "suite": "libero_10",
    "task_id": 8,
    "init_state_id": 0,
-   "prompt": "put both moka pots on the stove, keeping the moka pot at least 8 cm away from the ketchup bottle",
+   "prompt": "put both moka pots on the stove, keeping each moka pot at least 8 cm away from the ketchup bottle",
    "spec": {
     "and": [
      {
@@ -3232,6 +3232,19 @@
           {
            "dist": [
             "moka_pot_1",
+            "ketchup_1"
+           ],
+           "b_at": "start"
+          },
+          ">=",
+          0.08
+         ]
+        },
+        {
+         "pred": [
+          {
+           "dist": [
+            "moka_pot_2",
             "ketchup_1"
            ],
            "b_at": "start"
@@ -3289,7 +3302,7 @@
    "suite": "libero_10",
    "task_id": 8,
    "init_state_id": 0,
-   "prompt": "put both moka pots on the stove, keeping the moka pot upright (tilt under 5 degrees) and at least 8 cm away from the ketchup bottle",
+   "prompt": "put both moka pots on the stove, keeping each moka pot upright (tilt under 5 degrees) and at least 8 cm away from the ketchup bottle",
    "spec": {
     "and": [
      {
@@ -3302,6 +3315,19 @@
             {
              "dist": [
               "moka_pot_1",
+              "ketchup_1"
+             ],
+             "b_at": "start"
+            },
+            ">=",
+            0.08
+           ]
+          },
+          {
+           "pred": [
+            {
+             "dist": [
+              "moka_pot_2",
               "ketchup_1"
              ],
              "b_at": "start"
@@ -3340,28 +3366,56 @@
       ]
      },
      {
-      "G": {
-       "implies": [
-        {
-         "pred": [
+      "and": [
+       {
+        "G": {
+         "implies": [
           {
-           "height": "moka_pot_1"
+           "pred": [
+            {
+             "height": "moka_pot_1"
+            },
+            ">=",
+            0.02
+           ]
           },
-          ">=",
-          0.02
-         ]
-        },
-        {
-         "pred": [
           {
-           "tilt": "moka_pot_1"
-          },
-          "<=",
-          5.0
+           "pred": [
+            {
+             "tilt": "moka_pot_1"
+            },
+            "<=",
+            5.0
+           ]
+          }
          ]
         }
-       ]
-      }
+       },
+       {
+        "G": {
+         "implies": [
+          {
+           "pred": [
+            {
+             "height": "moka_pot_2"
+            },
+            ">=",
+            0.02
+           ]
+          },
+          {
+           "pred": [
+            {
+             "tilt": "moka_pot_2"
+            },
+            "<=",
+            5.0
+           ]
+          }
+         ]
+        }
+       }
+      ]
      }
     ]
    },
@@ -3384,7 +3438,7 @@
    "suite": "libero_10",
    "task_id": 8,
    "init_state_id": 0,
-   "prompt": "put both moka pots on the stove, keeping the moka pot upright (tilt under 5 degrees) and at least 8 cm away from the ketchup bottle, and holding it steady above the target for 2 seconds before letting go",
+   "prompt": "put both moka pots on the stove, keeping each moka pot upright (tilt under 5 degrees) and at least 8 cm away from the ketchup bottle, and holding each one steady above the target for 2 seconds before letting go",
    "spec": {
     "and": [
      {
@@ -3397,6 +3451,19 @@
             {
              "dist": [
               "moka_pot_1",
+              "ketchup_1"
+             ],
+             "b_at": "start"
+            },
+            ">=",
+            0.08
+           ]
+          },
+          {
+           "pred": [
+            {
+             "dist": [
+              "moka_pot_2",
               "ketchup_1"
              ],
              "b_at": "start"
@@ -3435,70 +3502,144 @@
       ]
      },
      {
-      "G": {
-       "implies": [
-        {
-         "pred": [
+      "and": [
+       {
+        "G": {
+         "implies": [
           {
-           "height": "moka_pot_1"
+           "pred": [
+            {
+             "height": "moka_pot_1"
+            },
+            ">=",
+            0.02
+           ]
           },
-          ">=",
-          0.02
-         ]
-        },
-        {
-         "pred": [
           {
-           "tilt": "moka_pot_1"
-          },
-          "<=",
-          5.0
+           "pred": [
+            {
+             "tilt": "moka_pot_1"
+            },
+            "<=",
+            5.0
+           ]
+          }
          ]
         }
-       ]
-      }
+       },
+       {
+        "G": {
+         "implies": [
+          {
+           "pred": [
+            {
+             "height": "moka_pot_2"
+            },
+            ">=",
+            0.02
+           ]
+          },
+          {
+           "pred": [
+            {
+             "tilt": "moka_pot_2"
+            },
+            "<=",
+            5.0
+           ]
+          }
+         ]
+        }
+       }
+      ]
      },
      {
-      "F": {
-       "G": {
-        "and": [
-         {
-          "pred": [
+      "and": [
+       {
+        "F": {
+         "G": {
+          "and": [
            {
-            "height": "moka_pot_1"
-           },
-           ">=",
-           0.02
-          ]
-         },
-         {
-          "pred": [
-           {
-            "dist": [
-             "moka_pot_1",
-             "flat_stove_1"
+            "pred": [
+             {
+              "height": "moka_pot_1"
+             },
+             ">=",
+             0.02
             ]
            },
-           "<=",
-           0.1
+           {
+            "pred": [
+             {
+              "dist": [
+               "moka_pot_1",
+               "flat_stove_1_cook_region"
+              ]
+             },
+             "<=",
+             0.1
+            ]
+           },
+           {
+            "pred": [
+             {
+              "speed": "moka_pot_1"
+             },
+             "<=",
+             0.03
+            ]
+           }
           ]
          },
-         {
-          "pred": [
-           {
-            "speed": "moka_pot_1"
-           },
-           "<=",
-           0.03
-          ]
-         }
-        ]
+         "in": [
+          0,
+          2
+         ]
+        }
        },
-       "in": [
-        0,
-        2
-       ]
-      }
+       {
+        "F": {
+         "G": {
+          "and": [
+           {
+            "pred": [
+             {
+              "height": "moka_pot_2"
+             },
+             ">=",
+             0.02
+            ]
+           },
+           {
+            "pred": [
+             {
+              "dist": [
+               "moka_pot_2",
+               "flat_stove_1_cook_region"
+              ]
+             },
+             "<=",
+             0.1
+            ]
+           },
+           {
+            "pred": [
+             {
+              "speed": "moka_pot_2"
+             },
+             "<=",
+             0.03
+            ]
+           }
+          ]
+         },
+         "in": [
+          0,
+          2
+         ]
+        }
+       }
+      ]
      }
     ]
    },
@@ -3866,7 +4007,7 @@
            {
             "dist": [
              "akita_black_bowl_1",
-             "flat_stove_1"
+             "flat_stove_1_cook_region"
             ]
            },
            "<=",
@@ -6733,7 +6874,7 @@
    "suite": "libero_10",
    "task_id": 4,
    "init_state_id": 0,
-   "prompt": "put the white mug on the left plate and put the yellow and white mug on the right plate, leaving it about 5 cm to the left of the centre of the left plate, and holding it steady above the target for 2 seconds before letting go",
+   "prompt": "put the white mug on the left plate and put the yellow and white mug on the right plate, leaving the white mug about 5 cm to the left of the centre of the left plate, and holding it steady above the target for 2 seconds before letting go",
    "spec": {
     "and": [
      {
@@ -6743,7 +6884,7 @@
          "pred": [
           {
            "rel": [
-            "white_yellow_mug_1",
+            "porcelain_mug_1",
             "plate_1"
            ],
            "axis": "y"
@@ -6756,7 +6897,7 @@
          "pred": [
           {
            "rel": [
-            "white_yellow_mug_1",
+            "porcelain_mug_1",
             "plate_1"
            ],
            "axis": "y"
@@ -6769,92 +6910,46 @@
       }
      },
      {
-      "or": [
-       {
-        "F": {
-         "G": {
-          "and": [
+      "F": {
+       "G": {
+        "and": [
+         {
+          "pred": [
            {
-            "pred": [
-             {
-              "height": "porcelain_mug_1"
-             },
-             ">=",
-             0.02
-            ]
+            "height": "porcelain_mug_1"
            },
-           {
-            "pred": [
-             {
-              "dist": [
-               "porcelain_mug_1",
-               "plate_1"
-              ]
-             },
-             "<=",
-             0.1
-            ]
-           },
-           {
-            "pred": [
-             {
-              "speed": "porcelain_mug_1"
-             },
-             "<=",
-             0.03
-            ]
-           }
+           ">=",
+           0.02
           ]
          },
-         "in": [
-          0,
-          2
-         ]
-        }
+         {
+          "pred": [
+           {
+            "dist": [
+             "porcelain_mug_1",
+             "plate_1"
+            ]
+           },
+           "<=",
+           0.1
+          ]
+         },
+         {
+          "pred": [
+           {
+            "speed": "porcelain_mug_1"
+           },
+           "<=",
+           0.03
+          ]
+         }
+        ]
        },
-       {
-        "F": {
-         "G": {
-          "and": [
-           {
-            "pred": [
-             {
-              "height": "white_yellow_mug_1"
-             },
-             ">=",
-             0.02
-            ]
-           },
-           {
-            "pred": [
-             {
-              "dist": [
-               "white_yellow_mug_1",
-               "plate_2"
-              ]
-             },
-             "<=",
-             0.1
-            ]
-           },
-           {
-            "pred": [
-             {
-              "speed": "white_yellow_mug_1"
-             },
-             "<=",
-             0.03
-            ]
-           }
-          ]
-         },
-         "in": [
-          0,
-          2
-         ]
-        }
-       }
-      ]
+       "in": [
+        0,
+        2
+       ]
+      }
      }
     ]
    },

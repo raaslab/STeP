@@ -34,10 +34,12 @@ Signals:
   {"joint": NAME}             an articulated joint's position (knob, drawer, door)
   {"count_near": C, "radius": r, "exclude": [A, ...]}   objects within r of C, in xy
 
-  A or B is an object name as logged, or "eef" for the gripper.
+  A or B is an object name as logged, or "eef" for the gripper, or a fixture
+  region named as in BDDL (flat_stove_1_cook_region) -- see FIXTURE_REGIONS.
 """
 
 import math
+import re
 
 import numpy as np
 
@@ -58,6 +60,15 @@ UNITS = {
     "held": 1e-4,
     "bddl": 1e-4,
     "count_near": 1e-4,
+}
+
+# A BDDL goal such as flat_stove_1_cook_region is a site on a fixture, not a
+# body, so it is never logged. Each region is placed from its fixture's logged
+# pose by its offset in the fixture's own frame, from LIBERO's asset XML. The
+# stove's burner sits 15 cm from the stove's origin, so measuring to the stove
+# itself puts a pot resting on the burner 20 cm "away".
+FIXTURE_REGIONS = {
+    "flat_stove": {"cook_region": (0.15, 0.0, 0.0)},
 }
 
 # Speed is a finite difference of positions logged at the control rate, which
@@ -134,8 +145,21 @@ class Trajectory:
         if name == "eef":
             return _ffill(self.eef)
         if name not in self.names:
+            region = self._region(name)
+            if region is not None:
+                return region
             raise Unscorable(f"{name} was not logged")
         return _ffill(self.pos[:, self.names.index(name), :])
+
+    def _region(self, name):
+        for kind, regions in FIXTURE_REGIONS.items():
+            for region, offset in regions.items():
+                m = re.fullmatch(rf"({kind}_\d+)_{region}", name)
+                if m and m.group(1) in self.names:
+                    fixture = m.group(1)
+                    rot = np.array([_quat_mat(q) for q in self.orientation(fixture)])
+                    return self.position(fixture) + rot @ np.asarray(offset)
+        return None
 
     def orientation(self, name):
         if self.quat is None or name not in self.names:

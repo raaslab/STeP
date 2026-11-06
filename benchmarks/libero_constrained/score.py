@@ -61,6 +61,9 @@ def load_rollout(run_dir: pathlib.Path):
         data["over_goal"] = np.asarray(npz["over_goal"], dtype=float)
         if "object_quat" in npz.files:
             data["object_quat"] = np.asarray(npz["object_quat"], dtype=float)
+        elif "object_quat_wxyz" in npz.files:
+            # Readers below expect robosuite's xyzw.
+            data["object_quat"] = np.asarray(npz["object_quat_wxyz"], dtype=float)[..., [1, 2, 3, 0]]
     return data
 
 
@@ -645,6 +648,10 @@ def _condition(summary) -> str:
     if prov.get("strip_constraint"):
         return "chance (no constraint)"
     mode = prov.get("stl_mode")
+    if mode is None and not _dir_has_plans(run_dir_of(summary)):
+        # No STeP plan anywhere in this sweep: another policy's rollouts, which
+        # name their model in provenance (record.py, or the v2 recipe).
+        return prov.get("model") or "external policy"
     if mode is None:
         # Recorded before provenance carried the mode. A single run is not enough
         # to tell: a STeP task with no keep-out zone also emits no Safe term. The
@@ -697,6 +704,13 @@ def _dir_condition(run_dir) -> str | None:
 
 def run_dir_of(summary):
     return (summary or {}).get("_run_dir")
+
+
+def _dir_has_plans(run_dir) -> bool:
+    """Did STeP plan anything in this output directory? An outside policy never does."""
+    if run_dir is None:
+        return True
+    return any(pathlib.Path(run_dir).parent.glob("*/direct_stl_plan.json"))
 
 
 def _dir_has_spec(run_dir) -> bool:

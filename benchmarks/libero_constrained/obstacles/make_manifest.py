@@ -43,6 +43,7 @@ sys.path.insert(0, str(BENCH))
 
 from build import SPOKEN  # noqa: E402
 import spec_library as L  # noqa: E402
+from spec import FIXTURE_REGIONS  # noqa: E402
 
 # ---------------------------------------------------------------- limits
 # Set from how STeP carries objects without a rule (3-8 degrees of tilt on bowls
@@ -100,11 +101,11 @@ UPRIGHT_OK = {"akita_black_bowl_1", "porcelain_mug_1", "moka_pot_1"}
 # v1 rule tasks: the formal rule for each, where v1's scoring entry alone does
 # not say enough (which object, which event). Prompts are v1's, unchanged.
 TEMPORAL_SPECS = {
-    "libero_10/0/T-dwell": ("dwell", {"or": [L.dwell("alphabet_soup_1", "basket_1", 2),
-                                             L.dwell("tomato_sauce_1", "basket_1", 2)]}),
-    "libero_10/4/T-dwell": ("dwell", {"or": [L.dwell("porcelain_mug_1", "plate_1", 2),
-                                             L.dwell("white_yellow_mug_1", "plate_2", 2)]}),
-    "libero_goal/1/T-dwell": ("dwell", L.dwell("akita_black_bowl_1", "flat_stove_1", 2)),
+    "libero_10/0/T-dwell": ("dwell", L.AND(L.dwell("alphabet_soup_1", "basket_1", 2),
+                                           L.dwell("tomato_sauce_1", "basket_1", 2))),
+    "libero_10/4/T-dwell": ("dwell", L.AND(L.dwell("porcelain_mug_1", "plate_1", 2),
+                                           L.dwell("white_yellow_mug_1", "plate_2", 2))),
+    "libero_goal/1/T-dwell": ("dwell", L.dwell("akita_black_bowl_1", "flat_stove_1_cook_region", 2)),
     "libero_goal/8/T-dwell": ("dwell", L.dwell("akita_black_bowl_1", "plate_1", 2)),
     "libero_spatial/0/T-dwell": ("dwell", L.dwell("akita_black_bowl_1", "plate_1", 2)),
     "libero_10/2/T-wait": ("wait", L.wait_after(L.P({"bddl": "turnon flat_stove_1"}, ">=", 0.5),
@@ -135,6 +136,43 @@ TEMPORAL_SPECS = {
               L.P({"count_near": "wooden_cabinet_1", "radius": 0.18}, "<=", 0.5))]}),
 }
 
+# v1 prompts with two objects where "it" could be either one: the object is
+# named, and the rule is about the object named. libero_10/6's "side of the
+# plate nearer the chocolate pudding" also leaned on wherever the policy put the
+# pudding, so it names the side instead. id -> (prompt, rule's target or None).
+PROMPT_FIX = {
+    "libero_10/4/S-offset": (
+        "put the white mug on the left plate and put the yellow and white mug on the right plate, "
+        "leaving the white mug about 5 cm to the left of the centre of the left plate", "porcelain_mug_1"),
+    "libero_10/4/S-relative": (
+        "put the white mug on the left plate and put the yellow and white mug on the right plate, "
+        "leaving the white mug on the side of the left plate nearer the red coffee mug", "porcelain_mug_1"),
+    "libero_10/6/S-offset": (
+        "put the white mug on the plate and put the chocolate pudding to the right of the plate, "
+        "leaving the white mug about 5 cm to the left of the centre of the plate", "porcelain_mug_1"),
+    "libero_10/6/S-relative": (
+        "put the white mug on the plate and put the chocolate pudding to the right of the plate, "
+        "leaving the white mug on the right side of the plate", "porcelain_mug_1"),
+    "libero_10/0/T-dwell": (
+        "put both the alphabet soup and the tomato sauce in the basket, holding each one steady above "
+        "the target for 2 seconds before letting go", None),
+    "libero_10/4/T-dwell": (
+        "put the white mug on the left plate and put the yellow and white mug on the right plate, "
+        "holding each one steady above the target for 2 seconds before letting go", None),
+    "libero_10/4/C-offset-dwell": (
+        "put the white mug on the left plate and put the yellow and white mug on the right plate, "
+        "leaving the white mug about 5 cm to the left of the centre of the left plate, and holding it "
+        "steady above the target for 2 seconds before letting go", None),
+}
+
+# Obstacle scenes whose task carries more than one object the rule must cover:
+# key -> (the objects, how the prompt names them). Each one clears the obstacle
+# by more than MARGIN_M + MARGIN_SLACK_M at every margin start (checked: the
+# second moka pot is 15-18 cm from the ketchup).
+CARRIED_GROUP = {
+    "libero_10/8": (["moka_pot_1", "moka_pot_2"], "each moka pot"),
+}
+
 TYPE_OF_KIND = {
     "L-order": "order", "L-precondition": "precondition", "L-untouched": "untouched",
     "S-offset": "placement", "S-relative": "placement",
@@ -160,8 +198,12 @@ def libero_language(suite, task_id):
 
 
 def goal_object(target):
-    """The object a BDDL goal target names: plate_1, or flat_stove_1 for
-    flat_stove_1_cook_region."""
+    """The object a BDDL goal target names: plate_1. A fixture region the scorer
+    can place (flat_stove_1_cook_region) is kept whole, since the region, not
+    the fixture's origin, is where the object goes."""
+    if any(re.fullmatch(rf"{kind}_\d+_{region}", target)
+           for kind, regions in FIXTURE_REGIONS.items() for region in regions):
+        return target
     m = re.match(r"^(.*?_\d+)(_|$)", target)
     return m.group(1) if m else target
 
@@ -205,6 +247,11 @@ def main():
             out_tasks.append(task(t["id"], "unconstrained", "U-plain", None, prompt=t["prompt"],
                                   spec=None, difficulty=0, **base))
             continue
+        if t["id"] in PROMPT_FIX:
+            prompt, target = PROMPT_FIX[t["id"]]
+            t = dict(t, prompt=prompt)
+            if target is not None:
+                t["scoring"] = dict(t["scoring"], target=target)
         if t["id"] in TEMPORAL_SPECS:
             ctype, sp = TEMPORAL_SPECS[t["id"]]
         else:
@@ -249,24 +296,27 @@ def main():
         np.savez_compressed(dst, states=data["states"][keep], source_init_ids=data["source_init_ids"][keep])
         mstates = {"init_states": str(dst.relative_to(ROOT)), "num_states": len(keep), "level": "L2",
                    "level_note": LEVEL_NOTE["L2"]}
-        margin_spec = L.margin(carried, ob, MARGIN_M)
+        group, the_carried = CARRIED_GROUP.get(key, ([carried], f"the {c_word}"))
+        each = (lambda make: make(group[0])) if len(group) == 1 else (lambda make: L.AND(*map(make, group)))
+        it = "it" if len(group) == 1 else "each one"
+        margin_spec = L.AND(L.keepout(group, ob, MARGIN_M), L.no_contact(ob))
         margin_words = f"at least {MARGIN_M*100:.0f} cm away from the {ob_word}"
         out_tasks.append(task(f"{key}/O-margin", "spatial", "O-margin", "keep-out", suite, tid_,
-                              f"{base}, keeping the {c_word} {margin_words}", margin_spec, 1,
+                              f"{base}, keeping {the_carried} {margin_words}", margin_spec, 1,
                               **scene, **mstates))
         if carried in UPRIGHT_OK:
-            up = L.upright(carried, UPRIGHT_DEG)
+            up = each(lambda o: L.upright(o, UPRIGHT_DEG))
             dest = goal_object(r["goal"])
-            hold = L.dwell(carried, dest, DWELL_S)
+            hold = each(lambda o: L.dwell(o, dest, DWELL_S))
             out_tasks.append(task(
                 f"{key}/C-margin-upright", "combined", "C-margin-upright", "keep-out+upright", suite, tid_,
-                f"{base}, keeping the {c_word} upright (tilt under {UPRIGHT_DEG:.0f} degrees) and {margin_words}",
+                f"{base}, keeping {the_carried} upright (tilt under {UPRIGHT_DEG:.0f} degrees) and {margin_words}",
                 L.AND(margin_spec, up), 2, **scene, **mstates))
             out_tasks.append(task(
                 f"{key}/C-margin-upright-dwell", "combined", "C-margin-upright-dwell", "keep-out+upright+dwell",
                 suite, tid_,
-                f"{base}, keeping the {c_word} upright (tilt under {UPRIGHT_DEG:.0f} degrees) and "
-                f"{margin_words}, and holding it steady above the target for {DWELL_S} seconds before "
+                f"{base}, keeping {the_carried} upright (tilt under {UPRIGHT_DEG:.0f} degrees) and "
+                f"{margin_words}, and holding {it} steady above the target for {DWELL_S} seconds before "
                 f"letting go",
                 L.AND(margin_spec, up, hold), 3, **scene, **mstates))
 
@@ -282,7 +332,7 @@ def main():
                               L.upright(carried, UPRIGHT_DEG), 1, **common))
 
     # ---- combined: v1's two-rule tasks, rebuilt from their parts' rules
-    def combo(cid, kind, ctype, prompt, part_ids):
+    def combo(cid, kind, ctype, prompt, part_ids, specs=None):
         parts = [by_id.get(p) or obstacle.get(p) for p in part_ids]
         if any(p is None for p in parts):
             print(f"  skip {cid}: a part is missing")
@@ -290,10 +340,15 @@ def main():
         src = parts[0]
         extra = {k: src[k] for k in ("bddl", "obstacle", "init_states", "num_states", "level") if k in src}
         out_tasks.append(task(cid, "combined", kind, ctype, src["suite"], src["task_id"], prompt,
-                              L.AND(*[p["spec"] for p in parts]), len(parts), **extra))
+                              L.AND(*(specs or [p["spec"] for p in parts])), len(parts), **extra))
 
     for cid in ("libero_10/4/C-offset-dwell", "libero_goal/8/C-offset-dwell"):
         t = v1_by_id[cid]
+        if cid in PROMPT_FIX:
+            # names the white mug, so the hold is the white mug's alone
+            combo(cid, "C-offset-dwell", "placement+dwell", PROMPT_FIX[cid][0], t["scoring"]["parts"],
+                  specs=[by_id["libero_10/4/S-offset"]["spec"], L.dwell("porcelain_mug_1", "plate_1", DWELL_S)])
+            continue
         combo(cid, "C-offset-dwell", "placement+dwell", t["prompt"], t["scoring"]["parts"])
     combo("libero_10/7/C-obstacle-order", "C-obstacle-order", "no-contact+order",
           libero_language("libero_10", 7) + ", without touching the wine bottle, putting the bigger one in first",
