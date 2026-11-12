@@ -154,10 +154,17 @@ class DecompositionError(ValueError):
     top-level implies/or, or a predicate set with no registered skill)."""
 
 
+# Predicates that constrain how a skill runs rather than which skill it is.
+# System 2 sometimes nests one inside a goal (e.g. Safe/Upright next to
+# OverGoal); they stay in the subtask formula for System 1, but do not count
+# toward the skill signature.
+CONSTRAINT_PREDICATES = frozenset({"Safe", "Upright", "CarryHigh", "DescendOnlyNearGoal", "InRegion"})
+
+
 def infer_skill_from_predicates(formula: Formula) -> str:
     """EXPERIMENTAL (see STL_DECOMPOSITION_PLAN.md). Maps one achievement-goal
     formula to the skill that satisfies it, by its predicate-name set."""
-    names = frozenset(_collect_predicate_names(formula))
+    names = frozenset(_collect_predicate_names(formula)) - CONSTRAINT_PREDICATES
     skill = PREDICATE_TO_SKILL.get(names)
     if skill is None:
         raise DecompositionError(
@@ -531,6 +538,31 @@ def find_predicate_args(formula: Formula, name: str) -> list[Any] | None:
             formula.get("right", {}), name
         )
     return None
+
+
+def find_all_predicate_args(formula: Formula, name: str) -> list[list[Any]]:
+    """Args of every predicate node named name, in tree order.
+
+    find_predicate_args stops at the first match, which is right for an
+    execution hint but not for constraints: a subtask can carry several
+    G(Safe(...)) terms, one per thing to keep clear of.
+    """
+    if not isinstance(formula, dict):
+        return []
+    ftype = formula.get("type")
+    if ftype == "predicate":
+        return [list(formula.get("args") or [])] if formula.get("name") == name else []
+    if ftype in {"not", "always", "eventually"}:
+        return find_all_predicate_args(formula.get("child", {}), name)
+    if ftype == "and":
+        out: list[list[Any]] = []
+        for child in formula.get("children", []) or []:
+            out.extend(find_all_predicate_args(child, name))
+        return out
+    if ftype in {"implies", "until"}:
+        return (find_all_predicate_args(formula.get("left", {}), name)
+                + find_all_predicate_args(formula.get("right", {}), name))
+    return []
 
 
 def formula_to_string(formula: Formula) -> str:

@@ -21,6 +21,7 @@ from ..ik_utils import escape_start_collision, yaw_quat_wxyz
 from ...motion.kinematics import IKSolver
 from ...motion.ompl_planner import MotionPlanner
 from ...motion.panda import ROBOT_BODIES
+from ...motion.attached_object import goal_object_quat
 from ...motion.scene_query import SceneQuery, quat_mul_wxyz
 from ...motion.types import AttachedObjectState, PlannerFailureReason, SkillFailureReason, SkillResult
 from ..place.place_skill import _container_floor_and_rim_z, _support_floor_and_rim_z, support_top_surface
@@ -92,6 +93,12 @@ class TransportSkill:
         # The grip is rigid, but the world-frame yaw to hold it at is still
         # free to choose; sweeps yaw deltas about world Z since the pick's own yaw can leave IK unreachable.
         object_quat_now_base = scene.body_pose(attached.object_name)[1]
+        object_quat_now_base = goal_object_quat(self.config, attached, object_quat_now_base)
+        # Keep-out zones on the carried object: a hover spot inside one is not
+        # a goal at all, so it is skipped before any IK is spent on it.
+        object_zones = [z for z in (getattr(self.config.collision, "keepout_zones", None) or [])
+                        if z.subject is not None
+                        and attached.object_name.removesuffix("_main") == z.subject]
         # Smallest rotation first: the hand servo can't follow a large wrist
         # turn (a 90 deg jump drove the arm into a stuck full extension).
         yaw_deltas = [0.0, np.pi / 4.0, -np.pi / 4.0, np.pi / 2.0, -np.pi / 2.0, np.pi]
@@ -192,6 +199,10 @@ class TransportSkill:
                         rim_top_z + pcfg.hover_clearance_m + overhang_m,
                     ]
                 )
+                if any(z.clearance(candidate_hover_xyz[:2]) + z.buffer_m < 0.0 for z in object_zones):
+                    last_rejection = "hover_in_keepout"
+                    _note("hover_in_keepout")
+                    continue
                 candidate_hover_hand_pos, candidate_hover_hand_quat = required_hand_pose_for_object_pose(
                     candidate_hover_xyz, object_quat_now, attached.grasp_transform_hand_from_object
                 )
@@ -396,3 +407,4 @@ class TransportSkill:
                 "plan_solve_status": plan.metadata.get("solve_status"),
             },
         )
+

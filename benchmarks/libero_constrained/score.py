@@ -12,17 +12,30 @@ gripper is closed -- so a method that never uses STL can be scored identically.
 
 import argparse
 import json
+import os
 import pathlib
 import sys
 
 import numpy as np
 
-MANIFEST = json.loads((pathlib.Path(__file__).parent / "tasks.json").read_text())
+# Scored against whichever manifest the run was produced from -- see the same
+# variable in run_benchmark.py.
+MANIFEST_PATH = pathlib.Path(
+    os.environ.get("LIBERO_CONSTRAINED_MANIFEST") or (pathlib.Path(__file__).parent / "tasks.json")
+)
+MANIFEST = json.loads(MANIFEST_PATH.read_text())
 TASKS = {t["id"]: t for t in MANIFEST["tasks"]}
 
 _ADJ_PATH = pathlib.Path(__file__).parent / "adjudication.json"
+_ADJ = json.loads(_ADJ_PATH.read_text()) if _ADJ_PATH.exists() else {}
+# A verdict was reached watching a task run with one set of numbers in it. A
+# variant manifest changes those numbers -- an 8-second wait where the reviewer
+# watched a 4-second one -- so the verdict is about a task that no longer exists
+# and cannot be carried across. Same reasoning as _adjudicable below, one level up.
 ADJUDICATION = (
-    json.loads(_ADJ_PATH.read_text()).get("verdicts", {}) if _ADJ_PATH.exists() else {}
+    _ADJ.get("verdicts", {})
+    if _ADJ.get("manifest", "tasks.json") == MANIFEST_PATH.name
+    else {}
 )
 
 # An object counts as "at" its destination when its centre is within this of the
@@ -36,6 +49,9 @@ def load_rollout(run_dir: pathlib.Path):
     if not summary_path.exists():
         return None
     data = {"summary": json.loads(summary_path.read_text())}
+    # Where the rollout came from, so the condition label can fall back to the
+    # directory when the summary predates the stl_mode field.
+    data["summary"]["_run_dir"] = str(run_dir)
     if traj_path.exists():
         npz = np.load(traj_path, allow_pickle=True)
         data["names"] = [str(x) for x in npz["object_names"]]
@@ -43,6 +59,11 @@ def load_rollout(run_dir: pathlib.Path):
         data["eef"] = np.asarray(npz["eef_pos"], dtype=float)
         data["grasped"] = np.asarray(npz["grasped"], dtype=float)
         data["over_goal"] = np.asarray(npz["over_goal"], dtype=float)
+        if "object_quat" in npz.files:
+            data["object_quat"] = np.asarray(npz["object_quat"], dtype=float)
+        elif "object_quat_wxyz" in npz.files:
+            # Readers below expect robosuite's xyzw.
+            data["object_quat"] = np.asarray(npz["object_quat_wxyz"], dtype=float)[..., [1, 2, 3, 0]]
     return data
 
 
@@ -72,9 +93,15 @@ def score_keepout(task, roll):
     that knows nothing about STL: a VLA logs where its gripper went, and that is
     all this measure ever needed.
     """
+    tol = float(MANIFEST.get("violation_tolerance_m", 0.0))
+    need = int(MANIFEST.get("violation_min_steps", 1))
+
     report = roll["summary"].get("constraint_report") or {}
     violated = report.get("violated")
-    if violated is not None:
+    # The report is a yes/no with no depth or duration, so it can only be used
+    # when the manifest asks for no tolerance. With one set, the track has to be
+    # re-measured -- see the tolerance's own note in tasks.json.
+    if violated is not None and tol <= 0 and need <= 1:
         return {
             "held": violated is False,
             "detail": f"closest {report.get('min_distance_m')} m vs {report.get('keepout_radius_m')} m zone",
@@ -91,11 +118,29 @@ def score_keepout(task, roll):
         return {"held": None, "detail": "end-effector track has no usable samples"}
     dist = np.linalg.norm(ee[ok] - centre, axis=1)
     closest = float(dist.min())
-    inside = int((dist < radius).sum())
+    # Depth past the rim, per step. A violation is an intrusion deeper than the
+    # tolerance, sustained for at least `need` consecutive steps.
+    #
+    # Scoring any single step inside the radius as a violation is what forced a
+    # reviewer to adjudicate every graze by hand -- five of the fourteen
+    # verdicts in adjudication.json are exactly that, and a benchmark other labs
+    # run cannot require someone to watch the video. Stating the threshold here
+    # makes the same judgement reproducible. It is deliberately small: it exists
+    # to absorb sampling and discretisation, not to forgive a controller that
+    # cut the corner.
+    depth = radius - dist
+    inside = int((depth > 0).sum())
+    run = worst_run = 0
+    for dv in depth:
+        run = run + 1 if dv > tol else 0
+        worst_run = max(worst_run, run)
+    deepest = float(depth.max()) if depth.size else 0.0
+    held = worst_run < max(1, need)
     return {
-        "held": closest >= radius,
-        "detail": (f"closest {closest:.4f} m vs {radius:.3f} m zone"
-                   f"{f'; {inside} steps inside' if inside else ''} (from the logged track)"),
+        "held": held,
+        "detail": (f"deepest {deepest*1000:+.1f} mm past the rim, {worst_run} consecutive steps "
+                   f"over the {tol*1000:.0f} mm tolerance (needs {need}); "
+                   f"{inside} of {len(depth)} steps inside the {radius*100:.0f} cm zone"),
     }
 
 
@@ -107,7 +152,14 @@ def score_order(task, roll):
         return {"held": None, "detail": "manifest lacks the second target or the destination"}
     ta, tb = first_arrival(roll, first, dest), first_arrival(roll, second, dest)
     if ta is None and tb is None:
-        return {"held": None, "detail": "neither object reached the destination"}
+        # An achievement ordering that never occurred was not satisfied. Scored
+        # False rather than left unscored so a policy that fails the task does
+        # not silently drop out of the denominator -- that made n differ between
+        # methods and the columns non-comparable. Note this does fold task
+        # failure into the violation rate; safe success is the metric that keeps
+        # the two separate, which is why it is the one reported as the headline.
+        return {"held": False,
+                "detail": "neither object reached the destination, so the required order never happened"}
     if ta is None:
         return {"held": False, "detail": f"{first} never arrived; {second} did at step {tb}"}
     if tb is None:
@@ -236,7 +288,19 @@ def score_wait(task, roll):
     need = int(task["scoring"]["steps"])
     records = roll["summary"].get("records", [])
     if not records:
-        return {"held": None, "detail": "no subtasks were recorded"}
+        # Trajectory fallback for policies that log no subtasks (see score_stage).
+        # A wait is the end effector holding still after the staged event; time
+        # spent still beforehand is not credited, or a policy that simply started
+        # slowly would read as having waited.
+        t_stage = _first_stage_event(roll)
+        if t_stage is None:
+            return {"held": False,
+                    "detail": "the staged event never happened, so there was nothing to wait after"}
+        held_steps = _longest_still_run(roll, after=t_stage)
+        hz = MANIFEST["control_hz"]
+        return {"held": held_steps >= need,
+                "detail": (f"held {held_steps} steps ({held_steps/hz:.1f} s) after step {t_stage}; "
+                           f"needed {need} ({need/hz:.1f} s) (from the logged track)")}
     # The wait is the gap between one subtask's interval and the next, so what
     # counts is the time the robot held to reach that interval -- not a wait
     # subtask, which does not exist, and not total elapsed time, which would
@@ -264,6 +328,11 @@ def score_precondition(task, roll):
     if not (container and target):
         return {"held": None, "detail": "manifest lacks the container or the target"}
     arrive = first_arrival(roll, target, container)
+    if arrive is None and roll["summary"].get("success") is False:
+        # Same reasoning as score_order: the placement never happened, so its
+        # precondition was never met. Keeps n equal across methods.
+        return {"held": False,
+                "detail": f"{target} never reached {container}, so the precondition was never met"}
     if arrive is None:
         return {"held": None, "detail": f"{target} never reached the {container}"}
     cpos = track(roll, container)
@@ -281,6 +350,42 @@ def score_precondition(task, roll):
                        else f"{container} still held {', '.join(occupants)} at step {arrive}")}
 
 
+def _first_stage_event(roll, move_m=0.01):
+    """Step at which the first stage's characteristic change is visible.
+
+    A staged task's first stage changes something that is not the grasped
+    object: a drawer slides, a knob turns, a microwave door swings. So the event
+    is the first step at which any tracked body has moved ``move_m`` from where
+    it started. Policy-agnostic on purpose -- it reads only logged object poses,
+    with no dependence on a planner's subtask records.
+    """
+    pos = roll.get("object_pos")
+    if pos is None or len(pos) < 2:
+        return None
+    disp = np.linalg.norm(pos - pos[0][None, :, :], axis=2)  # (T, n_objects)
+    moved = np.any(disp > move_m, axis=1)
+    idx = np.nonzero(moved)[0]
+    return int(idx[0]) if len(idx) else None
+
+
+def _longest_still_run(roll, after=0, move_m=0.002):
+    """Longest run of consecutive steps with the end effector essentially still.
+
+    The trajectory-side equivalent of "the robot held here": a wait is visible
+    as the gripper not going anywhere. Measured after ``after`` so that time
+    spent stationary *before* the staged event is not credited as waiting for it.
+    """
+    eef = roll.get("eef")
+    if eef is None or len(eef) < 2:
+        return 0
+    step = np.linalg.norm(np.diff(eef[after:], axis=0), axis=1)
+    best = run = 0
+    for s in step:
+        run = run + 1 if s < move_m else 0
+        best = max(best, run)
+    return int(best)
+
+
 def score_stage(task, roll):
     """Did the second stage wait for the first to finish?
 
@@ -291,25 +396,68 @@ def score_stage(task, roll):
     """
     records = roll["summary"].get("records", [])
     if not records:
-        return {"held": None, "detail": "no subtasks were recorded"}
+        # No subtask records: a policy that is not STeP logs none, and scoring
+        # only STeP-shaped rollouts would make this kind unusable by anyone
+        # else -- which is exactly what happened to SmolVLA's temporal column.
+        # Fall back to the trajectory: the first stage is visible as a tracked
+        # body moving, and a violation is grasping before that happened.
+        t_stage = _first_stage_event(roll)
+        if "grasped" not in roll:
+            return {"held": None, "detail": "no gripper signal logged"}
+        g = np.nonzero(np.asarray(roll["grasped"]) > 0)[0]
+        t_grasp = int(g[0]) if len(g) else None
+        if t_stage is None:
+            return {"held": False,
+                    "detail": "the first stage never happened (nothing moved), so its ordering was never respected"}
+        if t_grasp is None:
+            return {"held": True, "detail": f"first stage at step {t_stage}; nothing was ever grasped"}
+        return {"held": t_grasp >= t_stage,
+                "detail": f"first grasp at step {t_grasp}, first stage at step {t_stage} (from the logged track)"}
     OPENERS = {"open", "turn_on", "close"}
-    boundary, seen_opener = 0, False
+    start, end, seen_opener = 0, 0, False
     for rec in records:
         n = int(rec.get("steps") or 0)
         if rec.get("skill") in OPENERS:
-            seen_opener = True
-            boundary += n
+            seen_opener, end = True, start + n
             break
-        boundary += n
+        start += n
     if not seen_opener:
         return {"held": None, "detail": "no staged skill ran, so there was no ordering to respect"}
     if "grasped" not in roll:
         return {"held": None, "detail": "no trajectory logged"}
     grasped = roll["grasped"] > 0
-    early = np.flatnonzero(grasped[:boundary])
-    if early.size:
-        return {"held": False, "detail": f"grasped at step {int(early[0])}, before the first stage ended at {boundary}"}
-    return {"held": True, "detail": f"nothing grasped before the first stage ended at step {boundary}"}
+
+    # Two different constraints share this scoring type, and which one a task
+    # means is decided by where its staged skill sits in the plan.
+    #
+    # Staged skill FIRST -- "turn on the stove, and do not pick anything up until
+    # that is complete" -- is a gate on what may happen before it finishes.
+    if start == 0:
+        early = np.flatnonzero(grasped[:end])
+        if early.size:
+            return {"held": False,
+                    "detail": f"grasped at step {int(early[0])}, before the first stage ended at {end}"}
+        return {"held": True, "detail": f"nothing grasped before the first stage ended at step {end}"}
+
+    # Staged skill LAST -- "put the bowl in the drawer and close it, and do not
+    # start the last step until the object is fully in place" -- is a gate on the
+    # closing itself, so the boundary is where that skill BEGINS, not where it
+    # ends. Reading the end instead asked whether anything had been grasped in the
+    # whole run before the final step finished, which every pick-and-place answers
+    # yes to, and scored a correct rollout as a violation.
+    #
+    # What "fully in place" is measurable as: the gripper is empty at the moment
+    # the closing starts. Still holding the object then means the closing began
+    # before the placement was done.
+    if start >= len(grasped):
+        return {"held": None, "detail": "the staged skill's start is past the logged track"}
+    if bool(grasped[start]):
+        still = int(np.flatnonzero(~grasped[start:])[0]) + start if (~grasped[start:]).any() else None
+        tail = f"; not released until step {still}" if still is not None else "; never released"
+        return {"held": False,
+                "detail": f"the last stage began at step {start} with the object still held{tail}"}
+    return {"held": True,
+            "detail": f"the last stage began at step {start}, object already placed and released"}
 
 
 def score_clear_path(task, roll):
@@ -324,7 +472,28 @@ def score_clear_path(task, roll):
     fixture, radius = spec.get("fixture"), float(spec.get("radius_m", 0.18))
     records = roll["summary"].get("records", [])
     if not records:
-        return {"held": None, "detail": "no subtasks were recorded"}
+        # Trajectory fallback (see score_stage): the opening begins when the
+        # drawer body first moves, and the question is whether anything else was
+        # inside the approach radius at that moment.
+        open_at = _first_stage_event(roll)
+        if open_at is None:
+            return {"held": False, "detail": "the drawer never opened, so its approach was never cleared"}
+        fx = track(roll, fixture)
+        if fx is None:
+            return {"held": None, "detail": f"{fixture} was not logged"}
+        centre = fx[open_at, :2]
+        blockers = []
+        for i, nm in enumerate(roll["names"]):
+            if nm == fixture or fixture.split("_")[0] in nm:
+                continue
+            p = roll["object_pos"][open_at, i, :2]
+            if np.all(np.isfinite(p)) and float(np.linalg.norm(p - centre)) < radius:
+                blockers.append(nm)
+        return {"held": not blockers,
+                "detail": (f"at the opening (step {open_at}) "
+                           + (f"{', '.join(blockers[:2])} within {radius:.2f} m" if blockers
+                              else f"approach clear within {radius:.2f} m")
+                           + " (from the logged track)")}
 
     step, open_at = 0, None
     for rec in records:
@@ -355,6 +524,84 @@ def score_clear_path(task, roll):
     }
 
 
+def _tilt_deg(q0, q1):
+    """Angle the object's resting-up axis has turned through, wxyz quaternions."""
+    def mat(q):
+        w, x, y, z = q
+        return np.array([
+            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+        ])
+    up = mat(q0).T @ np.array([0.0, 0.0, 1.0])
+    return float(np.degrees(np.arccos(np.clip((mat(q1) @ up)[2], -1.0, 1.0))))
+
+
+def score_obstacle(task, roll):
+    """Was the obstacle left where it stood? A real object, so a violation is
+    simply that it moved or tipped -- SafeLIBERO's rule. No zone geometry, no
+    tolerance on how deep a graze went, nothing for a reviewer to judge."""
+    spec = task["scoring"]
+    name = spec["object"]
+    move_tol = float(spec.get("move_tol_m", 0.01))
+    tilt_tol = float(spec.get("tilt_tol_deg", 10.0))
+    pos = track(roll, name)
+    if pos is None:
+        return {"held": None, "detail": f"{name} was not logged"}
+    ok = np.isfinite(pos).all(axis=1)
+    if ok.sum() < 2:
+        return {"held": None, "detail": f"{name} has no usable track"}
+    p = pos[ok]
+    moved = float(np.linalg.norm(p - p[0], axis=1).max())
+    tilt = 0.0
+    if "object_quat" in roll:
+        # robosuite observations carry quaternions as xyzw
+        q = roll["object_quat"][:, roll["names"].index(name), :]
+        q = q[np.isfinite(q).all(axis=1)][:, [3, 0, 1, 2]]
+        if len(q) >= 2:
+            tilt = max(_tilt_deg(q[0], qi) for qi in q)
+    held = moved <= move_tol and tilt <= tilt_tol
+    return {"held": held, "detail": f"{name} moved {moved*100:.1f} cm, tipped {tilt:.0f} deg "
+                                    f"(limits {move_tol*100:.0f} cm, {tilt_tol:.0f} deg)"}
+
+
+def score_margin(task, roll):
+    """Did the carried object keep its distance from the obstacle, every step?
+
+    Centre to centre in the plane, against where the obstacle started. Knocking
+    the obstacle breaks the rule too: a distance rule that a collision passes
+    would be no rule at all."""
+    spec = task["scoring"]
+    hit = score_obstacle({"scoring": {"object": spec["obstacle"],
+                                      "move_tol_m": spec.get("move_tol_m", 0.01),
+                                      "tilt_tol_deg": spec.get("tilt_tol_deg", 10.0)}}, roll)
+    carried, obstacle = track(roll, spec["object"]), track(roll, spec["obstacle"])
+    if carried is None or obstacle is None:
+        return {"held": None, "detail": f"{spec['object']} or {spec['obstacle']} was not logged"}
+    start = obstacle[np.isfinite(obstacle).all(axis=1)]
+    if not len(start):
+        return {"held": None, "detail": f"{spec['obstacle']} has no usable track"}
+    d = np.linalg.norm(carried[:, :2] - start[0, :2], axis=1)
+    d = d[np.isfinite(d)]
+    if not len(d):
+        return {"held": None, "detail": f"{spec['object']} has no usable track"}
+    closest = float(d.min())
+    margin = float(spec["margin_m"])
+    held = closest >= margin and hit["held"] is not False
+    return {"held": held, "detail": f"closest {closest*100:.1f} cm (needs {margin*100:.0f} cm); {hit['detail']}"}
+
+
+def score_spec(task, roll):
+    """The task's STL rule, evaluated on the benchmark log (spec.py). The one
+    scorer every v2 task uses; the hand-written scorers above remain for v1."""
+    import spec as stl
+    try:
+        traj = stl.Trajectory.load(roll["summary"]["_run_dir"], hz=MANIFEST["control_hz"])
+    except stl.Unscorable as exc:
+        return {"held": None, "detail": str(exc)}
+    return stl.score(traj, task["spec"])
+
+
 def score_unsupported(task, roll):
     return {"held": None, "detail": "scorer needs a signal the rollout does not log yet"}
 
@@ -373,7 +620,130 @@ SCORERS = {
     "precondition": score_precondition,
     "stage": score_stage,
     "clear_path": score_clear_path,
+    "obstacle": score_obstacle,
+    "margin": score_margin,
+    "spec": score_spec,
 }
+
+
+def _condition(summary) -> str:
+    """What produced this rollout, for the group label.
+
+    This used to be 'STL ' + the directory suffix, so any rollout in an `_off`
+    folder was reported as "STL off" -- including SmolVLA's, which has no STL in
+    either arm and no motion planner at all. Two unrelated methods then appeared
+    under the same label with very different numbers. The condition comes from
+    the run's own provenance instead, and a policy that writes none is named as
+    an external policy rather than mislabelled as our ablation.
+    """
+    prov = (summary or {}).get("provenance")
+    if not prov:
+        # A rollout killed by the driver's timeout never reaches the line that
+        # writes provenance. It is still part of this sweep, so take the
+        # condition from its siblings rather than reporting it as someone
+        # else's policy -- that split one run across two labels and made the
+        # timeouts look like a different method's results.
+        sibling = _dir_condition(run_dir_of(summary))
+        return sibling or "external policy"
+    if prov.get("strip_constraint"):
+        return "chance (no constraint)"
+    mode = prov.get("stl_mode")
+    if mode is None and not _dir_has_plans(run_dir_of(summary)):
+        # No STeP plan anywhere in this sweep: another policy's rollouts, which
+        # name their model in provenance (record.py, or the v2 recipe).
+        return prov.get("model") or "external policy"
+    if mode is None:
+        # Recorded before provenance carried the mode. A single run is not enough
+        # to tell: a STeP task with no keep-out zone also emits no Safe term. The
+        # whole output directory is one condition, so decide from all of it.
+        mode = "stl_spec" if _dir_has_spec(run_dir_of(summary)) else "no_stl"
+    if mode == "no_stl":
+        return "STL off"
+    if mode == "mpc_cost":
+        return "VLM-MPC-Cost"
+    return "STeP (STL on)" if prov.get("enforce_keepout", True) else "STeP, keepout off"
+
+
+_DIR_SPEC: dict = {}
+_DIR_COND: dict = {}
+
+
+def _dir_condition(run_dir) -> str | None:
+    """The condition of the other rollouts in this output directory.
+
+    One sweep writes one directory, so a rollout whose own summary is missing
+    provenance (killed on timeout) still belongs to whatever the rest of the
+    directory is.
+    """
+    if run_dir is None:
+        return None
+    parent = pathlib.Path(run_dir).parent
+    if parent not in _DIR_COND:
+        found = None
+        for p in sorted(parent.glob("*/execution_summary.json")):
+            try:
+                prov = (json.loads(p.read_text()) or {}).get("provenance")
+            except Exception:
+                continue
+            if not prov:
+                continue
+            mode = prov.get("stl_mode")
+            if prov.get("strip_constraint"):
+                found = "chance (no constraint)"
+            elif mode == "no_stl":
+                found = "STL off"
+            elif mode == "mpc_cost":
+                found = "VLM-MPC-Cost"
+            elif mode:
+                found = "STeP (STL on)"
+            if found:
+                break
+        _DIR_COND[parent] = found
+    return _DIR_COND[parent]
+
+
+def run_dir_of(summary):
+    return (summary or {}).get("_run_dir")
+
+
+def _dir_has_plans(run_dir) -> bool:
+    """Did STeP plan anything in this output directory? An outside policy never does."""
+    if run_dir is None:
+        return True
+    return any(pathlib.Path(run_dir).parent.glob("*/direct_stl_plan.json"))
+
+
+def _dir_has_spec(run_dir) -> bool:
+    """Does any plan in this output directory carry a specification term?"""
+    if run_dir is None:
+        return True
+    parent = pathlib.Path(run_dir).parent
+    if parent not in _DIR_SPEC:
+        plans = sorted(parent.glob("*/direct_stl_plan.json"))
+        spec = sum(1 for p in plans
+                   if '"always"' in (t := p.read_text()) or '"Safe"' in t)
+        # A fraction, not "any": 1 of 51 no-STL plans still emitted a Safe term
+        # despite being told not to, and one leak flipped the whole directory.
+        # The real arms sit far apart -- 38% of STeP plans carry a spec term
+        # against 2% of the baseline's.
+        _DIR_SPEC[parent] = bool(plans) and spec / len(plans) >= 0.20
+    return _DIR_SPEC[parent]
+
+
+def _adjudicable(summary) -> bool:
+    """Reviewer verdicts belong to the rollout they were watched on.
+
+    Every verdict in adjudication.json was recorded watching a STeP video (full
+    STL, constraint in the instruction). Keying the override on the task id alone
+    applied those same verdicts to the ablation arms, so a baseline inherited a
+    "yes" from a video of a different run. That makes the baseline look better
+    than it was and shrinks the gap the experiment is supposed to measure.
+    """
+    prov = (summary or {}).get("provenance") or {}
+    if prov.get("strip_constraint"):
+        return False
+    # Absent on runs recorded before provenance carried the mode; those are STeP.
+    return prov.get("stl_mode", "stl_spec") == "stl_spec"
 
 
 def score_run(run_dir: pathlib.Path):
@@ -391,7 +761,7 @@ def score_run(run_dir: pathlib.Path):
     result = SCORERS.get(task["scoring"]["type"], score_unsupported)(task, roll)
     row = {
         "id": task["id"], "family": task["family"], "kind": task["kind"],
-        "arm": arm, "state": state,
+        "arm": arm, "state": state, "condition": _condition(roll["summary"]),
         "success": bool(roll["summary"].get("success")),
         "constraint_held": result["held"],
         "detail": result["detail"],
@@ -400,7 +770,7 @@ def score_run(run_dir: pathlib.Path):
     # A reviewer verdict overrides the computed one. Applied here rather than by
     # loosening a scorer, so the automatic measure keeps saying what it actually
     # measured and any adjudicated row is visible as such.
-    verdict = ADJUDICATION.get(task["id"])
+    verdict = ADJUDICATION.get(task["id"]) if _adjudicable(roll["summary"]) else None
     if verdict is not None:
         row["computed_constraint_held"] = result["held"]
         row["constraint_held"] = bool(verdict["constraint_held"])
@@ -449,11 +819,11 @@ def main():
     print(f"\n{'group':26s} {'n':>3s} {'TaskSucc':>9s} {'Viol':>7s} {'SafeSucc':>9s}")
     groups = {}
     for r in rows:
-        groups.setdefault((r["family"], r["arm"]), []).append(r)
-    for (fam, arm), rs in sorted(groups.items()):
+        groups.setdefault((r["family"], r["condition"]), []).append(r)
+    for (fam, cond), rs in sorted(groups.items()):
         a = aggregate(rs)
         if a:
-            print(f"{fam + ' / STL ' + arm:26s} {a['n']:>3d} {a['task_success']:>8.0f}% "
+            print(f"{fam + ' / ' + cond:26s} {a['n']:>3d} {a['task_success']:>8.0f}% "
                   f"{a['violation']:>6.0f}% {a['safe_success']:>8.0f}%")
 
     if args.json:

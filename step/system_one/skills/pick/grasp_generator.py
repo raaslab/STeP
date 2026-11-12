@@ -57,6 +57,15 @@ from ...motion.types import GraspCandidate
 
 @dataclass
 class GraspSampleConfig:
+    # Which generator proposes this pick's candidates.
+    #
+    # "object_class" (default) decides per object via a keyword table over
+    # MuJoCo body names -- a LIBERO artefact: it matches akita_black_bowl_1 and
+    # nothing in a backend that names every task object obj_main, so the manual
+    # pose silently wins every object there. "graspnet_first" and
+    # "demo:<task>[:<mesh>]" name a generator outright and skip both the table
+    # and the manual pre-attempt.
+    routing: str = "object_class"
     num_yaw_samples: int = 8
     # Centered on the object's own best-fit orientation, not swept blindly.
     yaw_search_half_range_rad: float = 0.7853981633974483  # pi/4, i.e. +-45 degrees

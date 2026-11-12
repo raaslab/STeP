@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "system2_plan": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "mpc_cost_plan"
+        },
+        "task_name": {
+          "type": "string"
+        },
+        "scene_summary": {
+          "type": "string"
+        },
+        "subtasks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/subtask"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "task_name",
+        "scene_summary",
+        "subtasks"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "system2_plan"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "subtask": {
+      "type": "object",
+      "properties": {
+        "subtask_id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skill": {
+          "type": "string",
+          "enum": [
+            "pick",
+            "transport",
+            "place",
+            "pour",
+            "open",
+            "close",
+            "turn_on"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "cost_terms": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/cost_term"
+          },
+          "description": "Weighted terms summed into the MPC running cost for this subtask."
+        },
+        "failure_threshold": {
+          "type": "number",
+          "description": "Recall to System 2 if the subtask's cost stays above this."
+        }
+      },
+      "required": [
+        "subtask_id",
+        "skill",
+        "params",
+        "cost_terms",
+        "failure_threshold"
+      ],
+      "additionalProperties": false
+    },
+    "cost_term": {
+      "type": "object",
+      "properties": {
+        "predicate": {
+          "type": "string",
+          "enum": [
+            "PreGrasp",
+            "Grasped",
+            "OverGoal",
+            "Placed",
+            "Released",
+            "Safe",
+            "Opened",
+            "Closed",
+            "TurnedOn"
+          ]
+        },
+        "args": {
+          "type": "array",
+          "items": {}
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "predicate",
+        "args",
+        "weight"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

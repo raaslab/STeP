@@ -32,6 +32,7 @@ from .grasp_generator import (
 from ...motion.kinematics import IKSolver
 from ...motion.mpc import JointSpaceMPC, MPCContext
 from ...motion.ompl_planner import MotionPlanner
+from ...motion.scene_query import quat_to_rotmat_wxyz
 from ...motion.panda import EE_SITE, GRIPPER_BODIES, JOINT_NAMES, ROBOT_BODIES
 from .pick_skill import PickSkill
 from ...motion.scene_query import SceneQuery, quat_to_rotmat_wxyz, resolve_body_name
@@ -76,6 +77,25 @@ def _drawer_extraction_target_z(scene: SceneQuery, object_body_name: str) -> flo
     return best_target_z
 
 
+def _routing_names_a_generator(config) -> bool:
+    """Has the scene context named the generator this pick must use?
+
+    "object_class", the default, decides per object through a keyword table over
+    MuJoCo body names. That table is a LIBERO artefact -- it matches names like
+    akita_black_bowl_1, and a backend naming every task object obj_main matches
+    nothing in it, so the manual pose wins every object by default.
+
+    "graspnet_first" and "demo:<task>[:<mesh>]" name a generator outright, and
+    then the table and the manual pre-attempt are both skipped. A pick told which
+    method to use and silently running another reports diagnostics for a method
+    that never ran -- which is exactly what happened when this covered only
+    graspnet_first: the demo generator proposed grasps three times and the manual
+    path's rejections were recorded as if they were the demo grasps' own.
+    """
+    routing = str(getattr(getattr(config, "grasp", None), "routing", "object_class"))
+    return routing == "graspnet_first" or routing.startswith("demo:")
+
+
 class LiberoPickAdapter(_ServoMixin):
     def __init__(self, env, motion_config: MotionConfig | None = None) -> None:
         self.env = env
@@ -99,7 +119,29 @@ class LiberoPickAdapter(_ServoMixin):
             scene, self.joint_names, self.ee_site, ROBOT_BODIES, GRIPPER_BODIES, collision_config
         )
         lo, hi = scene.joint_qpos_range(self.joint_names)
-        if self.config.contact_graspnet.enabled:
+        routing = str(getattr(self.config.grasp, "routing", "object_class"))
+        if routing.startswith("demo:"):
+            # Grasps mined from the backend's own human demonstrations, applied
+            # object-relative (MimicGen's transfer rule). "demo:<task>:<mesh>" --
+            # the mesh matters, because the rule re-anchors a grasp to a new pose
+            # of the SAME object and no further, and RoboCasa samples a new mesh
+            # every episode. The backend ships under benchmarks/robocasa; set
+            # STEP_ROBOCASA_DIR for a checkout elsewhere.
+            import os as _os
+            import sys as _sys
+
+            _rc = _os.environ.get("STEP_ROBOCASA_DIR") or str(
+                Path(__file__).resolve().parents[4] / "benchmarks" / "robocasa"
+            )
+            if _rc not in _sys.path:
+                _sys.path.insert(0, _rc)
+            from demo_grasp_generator import DemoGraspGenerator
+
+            parts = routing.split(":")
+            gen: GraspGenerator = DemoGraspGenerator(
+                parts[1], model=parts[2] if len(parts) > 2 else None
+            )
+        elif self.config.contact_graspnet.enabled:
             # Lazy import (CUDA only touched when enabled); GraspNet-only, not
             # composited, since PickSkill's cost function would let the cheap heuristic candidate win regardless.
             from .contact_graspnet_generator import ContactGraspNetGenerator
@@ -245,6 +287,9 @@ class LiberoPickAdapter(_ServoMixin):
         body_names = [resolve_body_name(scene, name) for name in object_set]
         canonical_by_body = dict(zip(body_names, object_set))
 
+        # Every grasp attempt this pick makes; filled in by the generator chain below.
+        attempts: list[dict] = []
+
         handle_dir = constraints.get("handle_approach_dir")
         if handle_dir is not None:
             # Re-grasp for a side-opening container: only a handle grasp whose
@@ -267,7 +312,8 @@ class LiberoPickAdapter(_ServoMixin):
         else:
             # A rim-graspable object always needs GraspNet; everything else uses
             # the fixed manual pose unless manual_pose_width_feasible says its axis can't span the object (checked up front, not after rejection).
-            manual_only = bool(body_names) and all(
+            # A named generator skips the object-class table entirely.
+            manual_only = (not _routing_names_a_generator(self.config)) and bool(body_names) and all(
                 not _is_rim_graspable_object_class(b)
                 and (
                     manual_pose_width_feasible(scene, b, skill.grasp_generator.gripper_max_opening_m)
@@ -276,30 +322,58 @@ class LiberoPickAdapter(_ServoMixin):
                 for b in body_names
             )
 
+            # Every grasp attempt this pick makes, kept separately.
+            #
+            # The fallback chain below overwrites plan_result with whichever
+            # attempt ran last, on the reasoning that once the primary generator
+            # has definitively failed the fallback's rejections are the
+            # interesting ones. That holds while the primary rarely fails. When
+            # it is the method under test it inverts: the reported rejections
+            # belong to the heuristic, the configured generator's own failure is
+            # erased, and the run reads as evidence about a method that never got
+            # scored. Recording each attempt keeps both.
+
+            def _record(label, cands, result):
+                diag = getattr(result, "diagnostics", None) or {}
+                attempts.append({
+                    "generator": label,
+                    "n_candidates": len(cands),
+                    "success": bool(getattr(result, "success", False)),
+                    "failure_reason": str(getattr(result, "failure_reason", None)),
+                    "rejection_reasons": list(diag.get("rejection_reasons") or []),
+                    "detail": diag.get("detail"),
+                })
+                return result
+
             manual_plan_result = None
             manual_candidates: list = []
-            if self.config.contact_graspnet.enabled:
+            # A named generator also means: do not spend a plan attempt on the
+            # manual pose before that generator has been tried.
+            if self.config.contact_graspnet.enabled and not _routing_names_a_generator(self.config):
                 manual_candidates = ManualDeepCenterGraspGenerator(
                     skill.grasp_generator.gripper_max_opening_m
                 ).generate(scene, body_names)
                 if manual_candidates:
-                    manual_plan_result = skill.execute(
+                    manual_plan_result = _record("manual", manual_candidates, skill.execute(
                         scene, body_names, start_q, constraints, candidates=manual_candidates
-                    )
+                    ))
 
             if manual_plan_result is not None and (manual_plan_result.success or manual_only):
                 candidates, plan_result = manual_candidates, manual_plan_result
             else:
                 candidates = skill.grasp_generator.generate(scene, body_names)
-                plan_result = skill.execute(scene, body_names, start_q, constraints, candidates=candidates)
+                plan_result = _record(
+                    type(skill.grasp_generator).__name__, candidates,
+                    skill.execute(scene, body_names, start_q, constraints, candidates=candidates),
+                )
 
             if manual_only and not plan_result.success and plan_result.failure_reason == SkillFailureReason.NO_FEASIBLE_CANDIDATE:
                 # Manual-only gets the same widened-tolerance retry the heuristic
                 # path uses as a last resort -- cheap, since it's one candidate, not a full search.
                 relaxed_skill = self._build_pick_skill(scene, finger_overlap_tolerance_m=0.02)
-                relaxed_plan_result = relaxed_skill.execute(
+                relaxed_plan_result = _record("manual (relaxed)", manual_candidates, relaxed_skill.execute(
                     scene, body_names, start_q, constraints, candidates=manual_candidates
-                )
+                ))
                 candidates, plan_result = manual_candidates, relaxed_plan_result
 
             pre_steps = pre_home_steps  # the homing move above is real env time too
@@ -320,8 +394,11 @@ class LiberoPickAdapter(_ServoMixin):
                         pre_steps = hover_steps
                         new_start_q = new_scene.get_qpos(self.joint_names)
                         new_candidates = skill.grasp_generator.generate(new_scene, body_names)
-                        new_plan_result = skill.execute(
-                            new_scene, body_names, new_start_q, constraints, candidates=new_candidates
+                        new_plan_result = _record(
+                            type(skill.grasp_generator).__name__ + " (closer look)", new_candidates,
+                            skill.execute(
+                                new_scene, body_names, new_start_q, constraints, candidates=new_candidates
+                            ),
                         )
                         # Only adopt the closer-look attempt if it actually did
                         # better, so diagnostics reflect whichever attempt is reported.
@@ -333,8 +410,11 @@ class LiberoPickAdapter(_ServoMixin):
                 # attempt (not composited with GraspNet's OR-set) since its cheap candidate would otherwise always outscore a real one.
                 heuristic_candidates = PrivilegedTopDownGraspGenerator(self.config.grasp).generate(scene, body_names)
                 if heuristic_candidates:
-                    heuristic_plan_result = skill.execute(
-                        scene, body_names, start_q, constraints, candidates=heuristic_candidates
+                    heuristic_plan_result = _record(
+                        "PrivilegedTopDownGraspGenerator (fallback)", heuristic_candidates,
+                        skill.execute(
+                            scene, body_names, start_q, constraints, candidates=heuristic_candidates
+                        ),
                     )
                     # Adopt this attempt's diagnostics either way -- if the
                     # heuristic also fails, its rejection reasons are what's worth seeing.
@@ -344,10 +424,22 @@ class LiberoPickAdapter(_ServoMixin):
                     # Absolute last resort: retry the same candidates with a
                     # widened contact tolerance for the target object -- TERMINAL_APPROACH already permits only gripper<->target contact.
                     relaxed_skill = self._build_pick_skill(scene, finger_overlap_tolerance_m=0.02)
-                    relaxed_plan_result = relaxed_skill.execute(
-                        scene, body_names, start_q, constraints, candidates=heuristic_candidates
+                    relaxed_plan_result = _record(
+                        "PrivilegedTopDownGraspGenerator (fallback, relaxed)", heuristic_candidates,
+                        relaxed_skill.execute(
+                            scene, body_names, start_q, constraints, candidates=heuristic_candidates
+                        ),
                     )
                     candidates, plan_result = heuristic_candidates, relaxed_plan_result
+
+        # Attached to whichever attempt ended up reported, so a failed pick always
+        # says which generators were tried and how each one failed.
+        plan_result.diagnostics["attempts"] = attempts
+        if len(attempts) > 1:
+            print("[pick] attempts: " + " | ".join(
+                f"{a['generator']}={len(a['rejection_reasons']) or a['n_candidates']} "
+                f"{'ok' if a['success'] else str(a['failure_reason']).split('.')[-1]}"
+                for a in attempts))
 
         self._save_grasp_pose_image(scene, candidates, plan_result, outdir)
         if not plan_result.success:
@@ -536,6 +628,13 @@ class LiberoPickAdapter(_ServoMixin):
         # ee_site, not the wrist ft_frame -- every consumer of this transform
         # (required_hand_pose_for_object_pose) solves IK/servos against ee_site, so using a different site here introduced a fixed ~9.7cm release-height offset.
         attached_state = attached_mgr.attach(attach_scene, object_body_name, self.ee_site, step=steps)
+        # Which way was up before the grasp: the reference for G(Upright(...)).
+        # Taken from the pre-grasp scene, since the lifts above may already
+        # have tipped the object a little.
+        _, rest_quat = scene.body_pose(object_body_name)
+        attached_state.up_axis_object_frame = (
+            quat_to_rotmat_wxyz(rest_quat).T @ np.array([0.0, 0.0, 1.0])
+        )
         plan_result.diagnostics["attached_object"] = {
             "object_name": attached_state.object_name,
             "collision_radius_m": attached_state.collision_radius_m,

@@ -118,7 +118,9 @@ class RolloutRecorder:
             self.out_dir / "trajectory.npz",
             eef_pos=np.asarray(self._ee, dtype=np.float32),
             object_pos=np.asarray(self._obj, dtype=np.float32),
-            object_quat=np.asarray(self._quat, dtype=np.float32),
+            # body_xquat is MuJoCo's wxyz; the bare object_quat key is read as
+            # robosuite's xyzw, which turns a plain yaw into a phantom tilt.
+            object_quat_wxyz=np.asarray(self._quat, dtype=np.float32),
             object_names=np.asarray(self._names, dtype=object),
             grasped=np.asarray(self._grasped, dtype=np.float32),
             over_goal=np.asarray(self._over_goal, dtype=np.float32),

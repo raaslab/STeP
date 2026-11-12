@@ -50,6 +50,12 @@ class CollisionConfig:
     # Tolerated finger (not palm) interpenetration with the grasp target
     # during TERMINAL_APPROACH, mirroring real gripper compliance. 0.0 disables it.
     finger_overlap_tolerance_m: float = 0.006
+    # The same compliance allowance, for the PALM, against the grasp target only.
+    # Zero by default: on LIBERO the objects are small enough that the hand never
+    # needs to touch them. RoboCasa's produce is not -- its own human demos
+    # penetrate the object 1.1 to 6.9 mm at the palm and lift it successfully, so
+    # rejecting that outright threw away real grasps.
+    palm_overlap_tolerance_m: float = 0.0
     # During TERMINAL_APPROACH, let the fingers (never the palm or arm) touch
     # the grasp target. For perceived targets: a top-surface reconstruction can't
     # show overhangs, so a bowl's flared wall is solid underneath and blocks
@@ -58,6 +64,31 @@ class CollisionConfig:
     permit_gripper_target_contact: bool = False
     # STL G(Safe(obj)) keep-out zones, enforced at plan/control time. Empty by default (no constraints).
     keepout_zones: list["KeepoutZone"] = field(default_factory=list)
+    # STL G(Upright(obj, deg)): the most the carried object may tip from how it
+    # stood before it was picked up. None = no limit (the default).
+    max_tilt_deg: float | None = None
+    # VLM-MPC-Cost baseline only: the active subtask's cost terms. Empty under
+    # STeP, which drives the controller from the STL formula instead.
+    mpc_cost_terms: list["MPCCostTerm"] = field(default_factory=list)
+    # VLM-MPC-Cost baseline: how the VLM's weights are mapped onto the
+    # controller's own scale.
+    #
+    # The VLM writes weights over Cartesian predicate distances (metres), and
+    # they were summed raw into an objective whose native terms are joint-space
+    # (radians, tracking 1.0 / terminal 4.0) and hand-tuned over many runs. The
+    # VLM is picking numbers on a scale it has never seen, so how hard its
+    # avoid-term fights its own reach-term was partly an accident of magnitude
+    # rather than anything the baseline's formalism implies -- measured, when
+    # max(avoid)/max(reach) >= 0.5 the baseline's task success is 27%, and below
+    # 0.5 it is 50%.
+    #
+    # Normalising divides by the largest reach weight, so the VLM's RELATIVE
+    # priorities -- the thing actually under test -- are preserved exactly, and
+    # only the overall magnitude is set by the gain below. Sweeping that one
+    # number gives the baseline the same tuning budget the method's own weights
+    # had, which is what a fair comparison needs.
+    mpc_cost_normalize: bool = True
+    mpc_cost_weight_gain: float = 1.0
 
 
 @dataclass
@@ -77,12 +108,47 @@ class KeepoutZone:
     # Bodies exempt from this zone -- normally the obstacle's own body (so it
     # doesn't forbid the scene object that defines it from existing).
     exempt_bodies: tuple[str, ...] = ()
+    # What must stay out. None is the end effector (the original behaviour).
+    # An object name means that object while it is carried, placed by the grasp
+    # transform -- G(Safe(obj, other, d)) is about the object, not the hand.
+    subject: str | None = None
+    # Part of radius_m that is planning buffer rather than the rule itself. The
+    # tracker lets the hand lag the plan by up to ~2 cm, so the plan keeps
+    # clear by that much more; a goal is judged against the rule alone.
+    buffer_m: float = 0.0
 
     def clearance(self, xy: Any) -> float:
         """Signed distance to the zone boundary: >0 outside, <0 inside."""
         p = np.asarray(xy, dtype=np.float64).reshape(-1)[:2]
         c = np.asarray(self.center_xy, dtype=np.float64).reshape(-1)[:2]
         return float(np.linalg.norm(p - c)) - float(self.radius_m)
+
+
+@dataclass
+class MPCCostTerm:
+    """One weighted term of a VLM-authored MPC cost function.
+
+    The VLM-MPC-Cost baseline replaces STeP's STL specification with a cost
+    function System 2 writes directly over the predicate set. Each predicate it
+    names becomes one of these, resolved to a world position by the executor
+    before it reaches the controller.
+
+    Deliberately has no interval, no ordering, and no temporal operator of any
+    kind -- that absence *is* the baseline. A weighted sum of distance terms can
+    say "be near this" and "stay off that", but it cannot say "after" or
+    "within [a,b]", which is what the comparison against STL is meant to expose.
+
+    ``kind`` is either ``reach`` (quadratic pull toward ``center``) or ``avoid``
+    (softplus push out of a radius around it). ``xy_only`` mirrors the keep-out
+    cylinder: unbounded in z, so it cannot be satisfied by lifting over.
+    """
+
+    predicate: str = ""
+    kind: str = "reach"  # "reach" | "avoid"
+    center: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    radius_m: float = 0.0
+    weight: float = 1.0
+    xy_only: bool = False
 
 
 @dataclass
@@ -198,10 +264,18 @@ class MotionConfig:
         from ..skills.transport.transport_skill import TransportConfig
         from ..skills.turn_knob.turn_knob_skill import KnobConfig
 
+        # Read the motion block from whichever platform the scene declares.
+        # Hardcoding "libero" meant a RoboCasa scene silently received every
+        # default -- including a validity_resolution tuned for a tabletop, which
+        # rejects paths in a kitchen because a microwave door is thin enough to
+        # slip between collision samples. Falls back to the libero block so a
+        # scene that declares no backend behaves exactly as before.
+        platform = (scene_context or {}).get("platform", {}) or {}
+        backend = str(platform.get("backend") or "libero")
         raw = (
-            ((scene_context or {}).get("platform", {}) or {})
-            .get("libero", {}) or {}
-        ).get("motion", {}) or {}
+            ((platform.get(backend) or {}).get("motion", {}) or {})
+            or ((platform.get("libero") or {}).get("motion", {}) or {})
+        )
         collision = CollisionConfig(**raw.get("collision", {}))
         # G(Safe(obj)) reaches the motion layer only here: the scene's SDF
         # zones become constraints the planner and MPC both enforce.
@@ -234,7 +308,10 @@ def _keepout_zones_from_scene(scene_context: dict[str, Any] | None) -> list[Keep
         return []
     # RQ2 ablation switch: disabling this stops only the motion layer from
     # planning around the zones, isolating "STL reaches control" from "STL is monitored".
-    experiment = ((scene_context.get("platform") or {}).get("libero_experiment") or {})
+    # stl_experiment is the backend-neutral spelling; libero_experiment is kept
+    # so existing LIBERO scene contexts keep working untouched.
+    _plat = scene_context.get("platform") or {}
+    experiment = (_plat.get("libero_experiment") or _plat.get("stl_experiment") or {})
     if not bool(experiment.get("enforce_keepout", True)):
         return []
     geometry = scene_context.get("geometry") or {}

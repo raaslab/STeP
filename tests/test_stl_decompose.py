@@ -136,6 +136,25 @@ def test_split_top_level_and_separates_constraints_from_goals():
     assert goals == [goal]
 
 
+def test_constraint_predicates_nested_in_a_goal_do_not_change_its_skill():
+    # Shapes System 2 produced on the v2 benchmark: a constraint inside the goal.
+    transport = {"type": "and", "children": [
+        _transport_goal("bowl", "plate"),
+        {"type": "always", "interval": None, "child": _predicate("Safe", ["bowl", "milk", 0.08])},
+        {"type": "always", "interval": None, "child": _predicate("Upright", ["bowl", 5])},
+    ]}
+    assert infer_skill_from_predicates(transport) == "transport"
+    place = {"type": "eventually", "interval": [0, 120], "child": {"type": "and", "children": [
+        _predicate("Placed", ["bowl", "plate"]), _predicate("Released", ["bowl"]), _predicate("InRegion", ["bowl", "plate"]),
+    ]}}
+    assert infer_skill_from_predicates(place) == "place"
+    try:
+        infer_skill_from_predicates(_predicate("Safe", ["bowl", "milk", 0.08]))
+        assert False, "a goal with only constraints names no skill"
+    except DecompositionError:
+        pass
+
+
 def test_infer_skill_unknown_predicate_set_raises():
     weird = {"type": "predicate", "name": "Frobnicated", "args": ["x"]}
     try:

@@ -84,6 +84,20 @@ class PickSkill:
         # a neighbor) can't eat the whole budget and starve out untried ones.
         budget_sec = self.config.grasp.candidate_scoring_budget_sec
         deadline = time.time() + budget_sec if budget_sec and budget_sec > 0 else None
+        # Score physically-graspable candidates first. Width is the one filter
+        # needing no IK, no collision check and no plan, so a candidate the hand
+        # can never straddle should not consume the budget ahead of one it can.
+        # Measured on a RoboCasa lemon: GraspNet returned 32 candidates with
+        # widths to 13.6 cm against an 8 cm gripper, and the two feasible ones
+        # were scored last, after the expensive rejections. Ordering only --
+        # nothing is dropped, so a run where every candidate is too wide reports
+        # exactly what it did before.
+        _max_open = self.grasp_generator.gripper_max_opening_m
+        candidates = sorted(
+            candidates,
+            key=lambda c: (c.gripper_width is not None and c.gripper_width > _max_open,
+                           c.gripper_width if c.gripper_width is not None else 0.0),
+        )
         scored: list[CandidateScore] = []
         scoring_timed_out = False
         for i, cand in enumerate(candidates):

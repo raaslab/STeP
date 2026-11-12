@@ -225,6 +225,14 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         self._object_names: list[str] | None = None
         self._object_log: list[list[list[float]]] = []
         self._object_quat_log: list[list[list[float]]] = []
+        # Articulated joints (stove knobs, drawers, doors), by name: the signal a
+        # wait or a stage rule is written over -- "after the stove is on".
+        self._joint_names: list[str] | None = None
+        self._joint_qpos_addr: list[int] = []
+        self._joint_log: list[list[float]] = []
+        # The benchmark's own policy-agnostic log (benchmarks/libero_constrained/
+        # logger.py): None until the first step, False if this env cannot have one.
+        self._bench_log: Any = None
         self._recall_replans_used: int = 0
         if self.system2_recall_enabled and (self.skills_book is None or self.task_spec_schema is None):
             print(
@@ -283,6 +291,80 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         walk(formula, False)
         return min(starts) if starts else None
 
+    @staticmethod
+    def _subtask_interval_end(sub: dict[str, Any]) -> int | None:
+        """Latest step this subtask's own achievement goal may be satisfied at.
+
+        The mirror of ``_subtask_interval_start``, and for the same reason:
+        together they give the window System 2 drew for this subtask, and the
+        distance between one subtask's end and the next one's start is the delay
+        the specification is asking for.
+        """
+        formula = sub.get("formula")
+        if not isinstance(formula, dict):
+            return None
+        ends: list[int] = []
+
+        def walk(node, under_always: bool) -> None:
+            if not isinstance(node, dict):
+                return
+            kind = node.get("type")
+            always = under_always or kind == "always"
+            interval = node.get("interval")
+            if (
+                kind in {"eventually", "until"}
+                and not always
+                and isinstance(interval, (list, tuple))
+                and len(interval) == 2
+            ):
+                try:
+                    ends.append(int(interval[1]))
+                except (TypeError, ValueError):
+                    pass
+            for key in ("child", "left", "right"):
+                walk(node.get(key), always)
+            for child in node.get("children", []) or []:
+                walk(child, always)
+
+        walk(formula, False)
+        return max(ends) if ends else None
+
+    @staticmethod
+    def _timing_gap_to_honour(
+        start_step: int | None, prev_interval_end: int | None, task_steps_so_far: int
+    ) -> tuple[int, str]:
+        """How long to hold before this subtask, and why. 0 means start now.
+
+        Two clocks disagree here, and only one of them carries the constraint.
+
+        System 2 writes a *nominal* timeline: pick ends at step 90, transport
+        runs 90->270, place opens at 430. The 160 steps between 270 and 430 are
+        the 8-second hold the instruction asked for -- that gap is the
+        specification. The nominal timeline is not a prediction of the clock,
+        though: a real pick in LIBERO takes around 350 steps, not 90. So by the
+        time place is dispatched, absolute step 430 is long past, and asking
+        "has the timeline reached 430 yet?" answers yes and holds for nothing.
+        Every declared delay evaporated that way -- measured across the temporal
+        family, the robot held 0 steps where the formula asked for 80.
+
+        So the delay is honoured as a *gap*: the distance the formula put between
+        the previous subtask's window and this one's, held from the moment the
+        previous subtask actually ended. The absolute shortfall is still
+        respected where it is the larger of the two, which is the case a plan
+        that runs ahead of its own schedule produces.
+        """
+        behind = int(start_step - task_steps_so_far) if start_step is not None else 0
+        declared = (
+            int(start_step - prev_interval_end)
+            if start_step is not None and prev_interval_end is not None
+            else 0
+        )
+        if declared >= max(behind, 1):
+            return declared, f"the formula puts a {declared}-step gap after the previous subtask"
+        if behind > 0:
+            return behind, "the timeline has not reached this subtask's window yet"
+        return 0, ""
+
     def _hold_position(self, env: BaseManipulationEnv, steps: int):
         """Hold still for a number of control steps.
 
@@ -326,6 +408,84 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         # Holding cannot fail on its own terms: if the steps were taken, it held.
         return taken >= steps, taken, last_status
 
+    def _cost_terms_for_subtask(self, env: BaseManipulationEnv, sub: dict[str, Any] | None, zones=()):
+        """Resolve a VLM-authored cost function into world-space MPC terms.
+
+        The VLM-MPC-Cost baseline emits ``cost_terms`` of the form
+        ``{predicate, args, weight}``. Each names a predicate but carries no
+        geometry, so this grounds it: object and region names become positions,
+        and ``Safe`` becomes the keep-out circle's centre and radius.
+
+        Predicates that are not a function of end-effector position (Released,
+        Opened, Closed, TurnedOn) are dropped rather than approximated -- they
+        are discrete gripper/joint checks with no smooth distance the controller
+        could descend, and inventing one would give the baseline a capability the
+        cost-function format does not actually have.
+        """
+        from .motion.config import MPCCostTerm
+
+        terms: list = []
+        if not isinstance(sub, dict):
+            return terms
+        REACH = {"PreGrasp", "Grasped", "OverGoal", "Placed"}
+        for raw in sub.get("cost_terms") or []:
+            if not isinstance(raw, dict):
+                continue
+            name = str(raw.get("predicate") or "")
+            args = raw.get("args") or []
+            weight = float(raw.get("weight", 1.0) or 0.0)
+            if weight <= 0.0:
+                continue
+            if name == "Safe":
+                for zone in zones or []:
+                    terms.append(MPCCostTerm(
+                        predicate=name, kind="avoid", weight=weight, xy_only=True,
+                        center=(zone.center_xy[0], zone.center_xy[1], 0.0),
+                        radius_m=float(zone.radius_m),
+                    ))
+                continue
+            if name not in REACH:
+                continue
+            target = None
+            for a in args:
+                if isinstance(a, str):
+                    target = self._world_xyz_for_name(env, a)
+                    if target is not None:
+                        break
+            if target is None:
+                continue
+            terms.append(MPCCostTerm(
+                predicate=name, kind="reach", weight=weight,
+                center=(float(target[0]), float(target[1]), float(target[2])),
+            ))
+        return terms
+
+    def _world_xyz_for_name(self, env: BaseManipulationEnv, name: str):
+        """Best-effort world position for an object or region the VLM named."""
+        import numpy as _np
+
+        canon = self.resolver.canonical(name) or name
+        # `_object_pos_by_name` is the env's own lookup (normalizes the name,
+        # then falls back to fuzzy matching against discovered scene objects).
+        # The earlier guess at `object_position`/`body_position` matched nothing,
+        # which silently dropped every reach term and left the controller with
+        # repulsion and no attraction -- the arm then had nothing pulling it to
+        # the object at all.
+        for candidate in (canon, name):
+            fn = getattr(env, "_object_pos_by_name", None)
+            if callable(fn):
+                try:
+                    p = fn(candidate)
+                    if p is not None:
+                        return _np.asarray(p, dtype=float).reshape(-1)[:3]
+                except Exception:
+                    pass
+        point = self._point_target_from_goal_region(name)
+        if point is not None:
+            (gx, gy), gz, _ = point
+            return _np.asarray([gx, gy, gz if gz is not None else 0.9], dtype=float)
+        return None
+
     def _motion_config(self, env: BaseManipulationEnv):
         """Motion config for this skill invocation, with the task's STL keep-out
         zones attached.
@@ -342,7 +502,12 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         from .geometry_sdf import CircleSDF
 
         cfg = MotionConfig.from_scene_context(self.scene_context)
-        experiment = (self.scene_context.get("platform", {}) or {}).get("libero_experiment", {}) or {}
+        platform_blk = self.scene_context.get("platform", {}) or {}
+        # "stl_experiment" is the backend-neutral name; "libero_experiment" is
+        # kept as a fallback so every existing LIBERO scene context, and every
+        # result already produced from one, still reads identically.
+        experiment = (platform_blk.get("stl_experiment")
+                      or platform_blk.get("libero_experiment") or {})
         if not bool(experiment.get("enforce_keepout", True)):
             return cfg
 
@@ -363,6 +528,12 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                     exempt_bodies=tuple(n for n in (getattr(c, "entity", None), getattr(c, "name", None)) if n),
                 )
             )
+        # G(Safe(obj, other, d)) and G(Upright(obj, deg)) from the plan itself.
+        plan_zones = self._plan_keepout_zones(env)
+        zones.extend(plan_zones)
+        tilt_limit = self._plan_tilt_limit(env)
+        if tilt_limit is not None:
+            cfg.collision.max_tilt_deg = tilt_limit
         if zones:
             cfg.collision.keepout_zones = zones
             if not getattr(self, "_keepout_logged", False):
@@ -371,7 +542,121 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                     "[keepout] enforcing "
                     + ", ".join(f"{z.name} r={z.radius_m:.3f}m" for z in zones)
                 )
+        # VLM-MPC-Cost baseline. Empty for STeP, whose controller is driven by
+        # the STL formula instead; when present these replace that entirely.
+        terms = self._cost_terms_for_subtask(env, getattr(self, "_active_subtask", None), zones)
+        if terms:
+            cfg.collision.mpc_cost_terms = terms
+            print(
+                "[mpc-cost] "
+                + ", ".join(f"{t.predicate}({t.kind}) w={t.weight:g}" for t in terms)
+            )
         return cfg
+
+    # How much more than the rule a plan keeps clear of a Safe zone. The
+    # tracker can trail the planned path by up to 2 cm
+    # (transport_max_reference_lead_m), and the carried object can sit off its
+    # grasp-transform pose by a little more: measured on libero_spatial/1, a
+    # plan held at 8+2 cm came within 7.9 cm. Placing is judged on the rule alone.
+    _SAFE_PLAN_BUFFER_M = 0.03
+    _EE_NAMES = {"ee", "eef", "gripper", "end_effector", "hand"}
+
+    def _plan_keepout_zones(self, env: BaseManipulationEnv) -> list:
+        """Keep-out zones for every G(Safe(subject, other, d)) in the active
+        subtask's formula, centred on where `other` is now.
+
+        Before this, Safe in a plan only reached the motion layer if the runner
+        separately declared the same zone; a plan naming a real object to keep
+        clear of was read by nothing. A one-argument Safe(other) adds no zone:
+        contact with real objects is already refused by the collision check.
+        The hand's own zones apply only while carrying -- during the pick it
+        has to reach the object, which may sit nearer than d.
+        """
+        from .motion.config import KeepoutZone
+        from ..system_two.stl_plan import find_all_predicate_args
+
+        sub = getattr(self, "_active_subtask", None) or {}
+        formula = sub.get("formula")
+        if not formula:
+            return []
+        carrying = sub.get("skill") in {"transport", "place"}
+        zones, seen = [], set()
+        for args in find_all_predicate_args(formula, "Safe"):
+            if len(args) != 3:
+                continue
+            subject, other, margin = args
+            try:
+                margin = float(margin)
+            except (TypeError, ValueError):
+                continue
+            subj = str(subject)
+            subj_c = None if subj.lower() in self._EE_NAMES else (self.resolver.canonical(subj) or subj)
+            if subj_c is None and not carrying:
+                continue
+            other_c = self.resolver.canonical(str(other)) or str(other)
+            if (subj_c, other_c, margin) in seen:
+                continue
+            seen.add((subj_c, other_c, margin))
+            xyz = self._world_xyz_for_name(env, other_c)
+            if xyz is None:
+                print(f"[keepout] Safe({subj}, {other}, {margin}): cannot locate {other}; not enforced")
+                continue
+            zones.append(KeepoutZone(
+                name=f"safe:{subj_c or 'ee'}:{other_c}",
+                center_xy=(float(xyz[0]), float(xyz[1])),
+                radius_m=margin + self._SAFE_PLAN_BUFFER_M,
+                exempt_bodies=(other_c,),
+                subject=subj_c,
+                buffer_m=self._SAFE_PLAN_BUFFER_M,
+            ))
+        if zones:
+            print("[keepout] from plan: " + ", ".join(
+                f"{z.name} d={z.radius_m - z.buffer_m:.3f}m" for z in zones))
+        return zones
+
+    def _plan_tilt_limit(self, env: BaseManipulationEnv) -> float | None:
+        """The tightest G(Upright(obj, deg)) in the active subtask, or None.
+
+        If the object is already tipped further than that when the motion starts
+        -- a friction grasp can let it pivot during the lift, before any plan
+        runs -- the limit is loosened to just past where it is now. Otherwise
+        the start itself would be invalid and nothing could be planned; with it,
+        plans may only bring the object back toward level, never further over.
+        """
+        from ..system_two.stl_plan import find_all_predicate_args
+
+        sub = getattr(self, "_active_subtask", None) or {}
+        formula = sub.get("formula")
+        if not formula:
+            return None
+        limits = []
+        for args in find_all_predicate_args(formula, "Upright"):
+            if len(args) >= 2:
+                try:
+                    limits.append(float(args[1]))
+                except (TypeError, ValueError):
+                    continue
+            elif len(args) == 1:
+                limits.append(10.0)
+        if not limits:
+            return None
+        limit = min(limits)
+        attached = getattr(self, "_motion_attached_state", None)
+        up_local = getattr(attached, "up_axis_object_frame", None) if attached is not None else None
+        if up_local is not None:
+            try:
+                from .motion.scene_query import SceneQuery, quat_to_rotmat_wxyz
+
+                scene = SceneQuery.from_robosuite_sim(env.env.sim)
+                _, quat = scene.body_pose(attached.object_name)
+                up_world = quat_to_rotmat_wxyz(quat) @ np.asarray(up_local, dtype=float)
+                now = float(np.degrees(np.arccos(np.clip(up_world[2], -1.0, 1.0))))
+                if now + 1.0 > limit:
+                    print(f"[upright] already tipped {now:.1f} deg (limit {limit:g}); holding it to {now + 1.0:.1f}")
+                    limit = now + 1.0
+            except Exception:
+                pass
+        return limit
 
     def _sample_constraint_margins(self, env: BaseManipulationEnv) -> None:
         """Accumulate one timestep of keep-out clearance for the constrained
@@ -427,6 +712,40 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                 self._object_quat_log.append(qrow)
         except Exception:
             pass
+
+        # Articulated joints: every slide or hinge outside the robot, so a rule
+        # can be evaluated from the log alone.
+        try:
+            sim = getattr(env, "sim", None) or getattr(getattr(env, "env", None), "sim", None)
+            if sim is not None:
+                if self._joint_names is None:
+                    m = sim.model
+                    names, addrs = [], []
+                    for j in range(m.njnt):
+                        name = m.joint_id2name(j) or ""
+                        # 2 = slide, 3 = hinge; free joints are the objects themselves
+                        if int(m.jnt_type[j]) in (2, 3) and not name.startswith(("robot", "gripper", "mount")):
+                            names.append(name)
+                            addrs.append(int(m.jnt_qposadr[j]))
+                    self._joint_names, self._joint_qpos_addr = names, addrs
+                self._joint_log.append([float(sim.data.qpos[a]) for a in self._joint_qpos_addr])
+        except Exception:
+            pass
+
+        # The benchmark log, the file LIBERO-Constrained scores from. Optional:
+        # outside the benchmark checkout, or on a non-LIBERO env, it is skipped.
+        if self._bench_log is None:
+            try:
+                from benchmarks.libero_constrained.logger import BenchmarkLogger
+
+                self._bench_log = BenchmarkLogger(env)
+            except Exception:
+                self._bench_log = False
+        if self._bench_log:
+            try:
+                self._bench_log.step()
+            except Exception:
+                pass
 
         # env.rollout_log only grows via step_nominal(), which ompl_mpc adapters
         # never call, so this hook fills the trajectory log on both backends.
@@ -832,11 +1151,17 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
         above the goal" doesn't need collision-aware planning as urgently as
         the final insertion into a container does, and this keeps the
         integration's scope bounded)."""
-        if str(self.scene_context.get("platform", {}).get("backend")) != "libero":
-            return "legacy"
-        return str(
-            self.scene_context.get("platform", {}).get("libero", {}).get("motion_backend", "legacy")
-        )
+        # Read the motion backend from whichever platform block the scene
+        # declares, rather than from a hardcoded "libero" key. The pipeline in
+        # step/system_one/motion/ is not LIBERO-specific -- it addresses MuJoCo
+        # through SceneQuery and robosuite's standard Panda names, both of which
+        # a RoboCasa kitchen satisfies unchanged. Gating it on the backend
+        # *name* silently demoted every non-LIBERO scene to the legacy stage
+        # machine, which is not the method the paper describes.
+        platform = self.scene_context.get("platform", {}) or {}
+        backend = str(platform.get("backend") or "libero")
+        block = platform.get(backend) or {}
+        return str(block.get("motion_backend", "legacy"))
 
     def _run_pick_with_motion_pipeline(
         self,
@@ -2046,6 +2371,10 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
 
         records: list[SkillExecutionRecord] = []
         dwell_counts: dict[str, int] = {}
+        # Nominal end of the previous subtask's window, so the gap the formula
+        # leaves before the next one can be measured. See _timing_gap_to_honour.
+        prev_interval_end: int | None = None
+        held_total = 0
         active_subtasks = list(subtasks)
         self._original_subtasks_for_reflection = list(subtasks)
         aborted = False
@@ -2135,7 +2464,10 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                 self._apply_subtask_constraints_to_env(env, sub)
                 self._configure_pass_through_for_subtask(env, sub)
 
-                task_steps_so_far = sum(int(getattr(r, "steps", 0) or 0) for r in records)
+                # Time held to honour a declared delay is time on the clock like
+                # any other, so it counts here; a record's own `steps` is the
+                # skill's, which is what the per-skill budget is measured against.
+                task_steps_so_far = sum(int(getattr(r, "steps", 0) or 0) for r in records) + held_total
                 if hasattr(env, "configure_timing_windows"):
                     env.configure_timing_windows(
                         self._timing_windows_for_subtask(sub),
@@ -2145,18 +2477,30 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
 
                 dwell_counts.clear()
 
-                # Hold here so a "wait N seconds" gap before this subtask is actually honored.
+                # Hold here so a "wait N seconds" gap before this subtask is
+                # actually honored: System 2 encodes the delay as a gap between
+                # one subtask's STL window and the next, and System 1 used to run
+                # them back to back, so the delay evaporated between plan and robot.
+                #
+                # _active_subtask is for the VLM-MPC-Cost baseline: it lets
+                # _motion_config reach this subtask's cost terms without threading
+                # `sub` through every skill dispatch.
+                self._active_subtask = sub
                 start_step = self._subtask_interval_start(sub)
                 timing_hold_steps = 0
-                if start_step is not None and task_steps_so_far < start_step:
-                    gap = int(start_step - task_steps_so_far)
+                gap, why = self._timing_gap_to_honour(
+                    start_step, prev_interval_end, task_steps_so_far
+                )
+                if gap > 0:
                     hz = self._control_hz_for_timing(env, runtime) or 20.0
                     print(
                         f"[timing] subtask {idx} opens at step {start_step}; holding "
-                        f"{gap} steps ({gap / hz:.1f}s) to reach it"
+                        f"{gap} steps ({gap / hz:.1f}s) -- {why}"
                     )
                     _, timing_hold_steps, _ = self._hold_position(env, gap)
                     task_steps_so_far += timing_hold_steps
+                    held_total += timing_hold_steps
+                prev_interval_end = self._subtask_interval_end(sub)
 
                 if skill == "pick":
                     if hasattr(env, "set_grasp_offset_override"):
@@ -2380,7 +2724,16 @@ class System1Executor(RecallControllerMixin, VideoOverlayMixin, STLMonitorMixin)
                         object_quat=np.array(self._object_quat_log, dtype=np.float32)
                         if self._object_quat_log
                         else np.zeros((0, 0, 4), dtype=np.float32),
+                        joint_names=np.array(self._joint_names or [], dtype=object),
+                        joint_qpos=np.array(self._joint_log, dtype=np.float32)
+                        if self._joint_log and self._joint_names
+                        else np.zeros((0, 0), dtype=np.float32),
                     )
+                if self._bench_log:
+                    try:
+                        self._bench_log.save(outdir / "benchmark_log.npz")
+                    except Exception as exc:
+                        print(f"[executor] benchmark log not saved: {exc}")
                 try:
                     np.savez_compressed(
                         outdir / "execution_rollout.npz",

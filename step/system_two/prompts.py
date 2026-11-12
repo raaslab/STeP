@@ -27,6 +27,7 @@ def build_developer_prompt(scene_context: dict[str, Any] | None = None) -> str:
         "3. Formula JSON supports: true, predicate, not, and, implies, always, eventually, until.\n"
         "4. Use controller-step intervals, not seconds. LIBERO defaults to 20 Hz.\n"
         "5. Preserve the formula predicates expected by System 1: PreGrasp, Grasped, OverGoal, Placed, Released, Safe, Upright, CarryHigh, DescendOnlyNearGoal, InRegion, PouredInto, Opened, Closed, TurnedOn.\n"
+        "5a. Safe(object, other, distance_m) keeps object -- or \"ee\" for the gripper -- at least distance_m from other, centre to centre in the plane. Upright(object, max_tilt_deg) keeps the carried object within max_tilt_deg of how it stood before the pick. When the instruction asks for either, write it as a top-level always constraint with the instruction's own numbers, never inside a pick/transport/place goal. Write the distance form only when the instruction states a distance; \"without touching\" or \"avoid\" with no number is Safe(other) alone -- never invent a distance.\n"
         "6. Put all execution-relevant target data in both params and formula args. Semantic targets may be entity names. Explicit point targets use {\"type\":\"point\",\"xy\":[x,y],\"z\":z,\"radius\":r}.\n"
         "7. For a normal pick, use F[0,40](PreGrasp(object, grasp_mode)) and F[0,90](Grasped(object)).\n"
         "7a. For bowls, mugs, ramekins, pans, cups, plates, saucers, or other rim-grasp objects, include params.grasp_target=\"rim\" and params.grasp_offset_xyz as a 3-number world-frame offset from the object pose to the rim grasp point. Use [0.0, 0.045, 0.05] as the default LIBERO bowl rim offset unless scene geometry clearly suggests another value.\n"
@@ -198,6 +199,13 @@ def build_global_developer_prompt(scene_context: dict[str, Any] | None = None) -
         "3. Preserve the formula predicates expected by System 1: PreGrasp, Grasped, "
         "OverGoal, Placed, Released, Safe, Upright, CarryHigh, DescendOnlyNearGoal, "
         "InRegion, PouredInto, Opened, Closed, TurnedOn.\n"
+        "3a. Safe(object, other, distance_m) keeps object -- or \"ee\" for the gripper -- "
+        "at least distance_m from other, centre to centre in the plane. Upright(object, "
+        "max_tilt_deg) keeps the carried object within max_tilt_deg of how it stood before "
+        "the pick. When the instruction asks for either, write it as a GLOBAL CONSTRAINT "
+        "(see 5a) with the instruction's own numbers, never inside an achievement goal. "
+        "Write the distance form only when the instruction states a distance; \"without "
+        "touching\" or \"avoid\" with no number is Safe(other) alone -- never invent a distance.\n"
         "4. Put all execution-relevant target data as predicate args. Semantic "
         "targets may be entity names. Explicit point targets use "
         "{\"type\":\"point\",\"xy\":[x,y],\"z\":z,\"radius\":r}.\n"
@@ -386,4 +394,44 @@ def build_no_stl_developer_prompt(scene_context: dict[str, Any] | None = None) -
         "order to follow or a time to wait, do NOT translate it into the formula. "
         "Plan the skills you would anyway; the requirement is not part of the "
         "output.\n"
+    )
+
+
+def build_mpc_cost_developer_prompt(scene_context: dict[str, Any] | None = None) -> str:
+    """Developer prompt for the VLM-MPC-Cost baseline.
+
+    System 2 writes a direct MPC cost function over the predicate set instead of
+    compiling the task into STL. The controller then minimizes that weighted sum
+    rather than maximizing STL robustness, and the history log records costs
+    instead of robustness traces.
+
+    The point of the baseline is what a cost function cannot say. A weighted sum
+    of predicate terms expresses "be near this" and "stay off that", but it has
+    no interval, no ordering operator, and no notion of "after" -- so a timing or
+    sequencing requirement in the instruction has nowhere to go except into the
+    order the subtasks happen to be listed in, and into the weights.
+    """
+    base = build_developer_prompt(scene_context)
+    return (
+        base
+        + "\n\nVLM-MPC-COST BASELINE -- NO TEMPORAL LOGIC. This overrides every "
+        "instruction above about formulas, intervals, always/eventually/until, "
+        "and robustness:\n"
+        "C1. Do NOT emit a `formula` field. Emit `cost_terms` instead: a list of "
+        "{predicate, args, weight} objects that are SUMMED into the controller's "
+        "running cost for that subtask. The controller minimizes this sum.\n"
+        "C2. Use the same predicate names and argument shapes as before, but as "
+        "cost terms only. A larger weight means the controller cares more about "
+        "that term. Terms naming a region to stay out of (Safe) push the arm "
+        "away; terms naming a target (PreGrasp, Grasped, OverGoal, Placed) pull "
+        "it toward that target.\n"
+        "C3. There are NO intervals and NO temporal operators available. You "
+        "cannot express a deadline, a wait, a dwell, or an ordering constraint as "
+        "a cost term. Do not try to encode one by inventing a predicate. If the "
+        "instruction asks for timing or ordering, express what you can through "
+        "the subtask order and the weights, and accept that the rest is not "
+        "representable in this output format.\n"
+        "C4. Also emit `failure_threshold` per subtask: the cost value above "
+        "which System 1 should give up on that subtask and recall to you. Pick a "
+        "number on the same scale as the cost terms you wrote.\n"
     )
